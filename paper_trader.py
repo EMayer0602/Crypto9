@@ -1209,6 +1209,18 @@ def process_snapshot(
     trade_notifier: Optional[TradeNotifier] = None,
 ) -> List[TradeResult]:
     trades: List[TradeResult] = []
+
+    # Debug: Track why BTC/ETH never reach evaluate_entry
+    if context.symbol in ("BTC/EUR", "ETH/EUR"):
+        debug_key = f"_snapshot_{context.symbol}_{context.direction}"
+        count = getattr(process_snapshot, debug_key, 0) + 1
+        setattr(process_snapshot, debug_key, count)
+        if count == 1:
+            print(f"[DEBUG] process_snapshot called for {context.symbol} {context.direction}")
+        if count == 100:
+            existing = find_position(state, context.key)
+            print(f"[DEBUG] {context.symbol} {context.direction} after 100 calls: existing={existing is not None}, positions={len(state.get('positions', []))}")
+
     if not direction_allowed(config, context.direction):
         return trades
     if df_slice is None or len(df_slice) < 2:
