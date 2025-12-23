@@ -62,7 +62,7 @@ def timeframe_to_minutes(tf_str: str) -> int:
 
 EXCHANGE_ID = "binance"
 TIMEFRAME = "1h"
-LOOKBACK = 720
+LOOKBACK = 8760  # 365 days × 24h for full year data
 SYMBOLS = [
 	"BTC/EUR",
 	"ETH/EUR",
@@ -91,7 +91,7 @@ MIN_HOLD_DAY_VALUES = [0, 1, 2]
 
 USE_HIGHER_TIMEFRAME_FILTER = True
 HIGHER_TIMEFRAME = "12h"
-HTF_LOOKBACK = 500
+HTF_LOOKBACK = 1000  # Enough for full year at 12h timeframe
 HTF_LENGTH = 20
 HTF_FACTOR = 3.0
 HTF_PSAR_STEP = 0.02
@@ -204,7 +204,7 @@ _exchange = None
 _data_exchange = None
 DATA_CACHE = {}
 DATA_CACHE_TIMESTAMPS = {}
-CACHE_TTL_SECONDS = 300  # 5 minutes TTL for cached data
+CACHE_TTL_SECONDS = 60  # 1 minute TTL - ensures fresh data each run
 
 
 INDICATOR_CACHE = {}
