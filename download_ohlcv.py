@@ -1,11 +1,16 @@
-"""Download historical OHLCV data for all symbols.
+"""Download historical OHLCV data for all symbols and timeframes.
 
 Usage:
     python download_ohlcv.py --start 2025-01-01
 """
 import argparse
-import sys
 import Supertrend_5Min as st
+
+# All timeframes needed for simulation
+# Binance supports: 1h, 2h, 4h, 6h, 8h, 12h, 1d
+# Other timeframes (3h, 9h, 15h, etc.) are synthesized from 1h at runtime
+TIMEFRAMES_TO_DOWNLOAD = ["1h", "4h", "6h", "8h", "12h", "1d"]
+
 
 def main():
     parser = argparse.ArgumentParser(description="Download historical OHLCV data")
@@ -22,36 +27,35 @@ def main():
 
     print(f"Downloading OHLCV data from {args.start} to {args.end or 'now'}")
     print(f"Symbols: {symbols}")
-    print(f"Timeframe: {st.TIMEFRAME}")
+    print(f"Timeframes: {TIMEFRAMES_TO_DOWNLOAD}")
     print()
+
+    total_downloaded = 0
 
     for symbol in symbols:
         print(f"\n{'='*60}")
         print(f"Processing {symbol}")
         print(f"{'='*60}")
 
-        try:
-            # Download main timeframe
-            df = st.download_historical_ohlcv(symbol, st.TIMEFRAME, args.start, args.end)
-            if not df.empty:
-                st.save_ohlcv_to_cache(symbol, st.TIMEFRAME, df)
-                print(f"[OK] {symbol} {st.TIMEFRAME}: {len(df)} bars from {df.index[0]} to {df.index[-1]}")
-            else:
-                print(f"[WARN] {symbol} {st.TIMEFRAME}: No data")
-
-            # Also download higher timeframe if different
-            if st.HIGHER_TIMEFRAME != st.TIMEFRAME:
-                df_htf = st.download_historical_ohlcv(symbol, st.HIGHER_TIMEFRAME, args.start, args.end)
-                if not df_htf.empty:
-                    st.save_ohlcv_to_cache(symbol, st.HIGHER_TIMEFRAME, df_htf)
-                    print(f"[OK] {symbol} {st.HIGHER_TIMEFRAME}: {len(df_htf)} bars")
-
-        except Exception as e:
-            print(f"[ERROR] {symbol}: {e}")
+        for timeframe in TIMEFRAMES_TO_DOWNLOAD:
+            try:
+                df = st.download_historical_ohlcv(symbol, timeframe, args.start, args.end)
+                if not df.empty:
+                    st.save_ohlcv_to_cache(symbol, timeframe, df)
+                    print(f"[OK] {symbol} {timeframe}: {len(df)} bars ({df.index[0].strftime('%Y-%m-%d')} to {df.index[-1].strftime('%Y-%m-%d')})")
+                    total_downloaded += len(df)
+                else:
+                    print(f"[WARN] {symbol} {timeframe}: No data")
+            except Exception as e:
+                print(f"[ERROR] {symbol} {timeframe}: {e}")
 
     print("\n" + "="*60)
-    print("Download complete!")
+    print(f"Download complete! Total: {total_downloaded} bars")
     print(f"Data saved to: {st.OHLCV_CACHE_DIR}/")
+    print()
+    print("Note: Timeframes like 3h, 9h, 15h, 18h, 21h etc. will be")
+    print("synthesized from 1h data automatically during simulation.")
+
 
 if __name__ == "__main__":
     main()
