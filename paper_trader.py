@@ -2361,8 +2361,9 @@ def run_simulation(
     symbol_filter = normalize_symbol_list(raw_symbols)
     best_df = filter_best_rows_by_symbol(best_df, symbol_filter)
     best_df = filter_best_rows_by_direction(best_df, DEFAULT_ALLOWED_DIRECTIONS)
-    best_df = filter_best_rows_by_direction(best_df, DEFAULT_ALLOWED_DIRECTIONS)
-    best_df = select_best_indicator_per_symbol(best_df)
+    # Use ALL indicator combinations, not just the "best" one per symbol
+    # best_df = select_best_indicator_per_symbol(best_df)
+    print(f"[Simulation] Loaded {len(best_df)} strategy rows (all indicators)")
     if best_df.empty:
         print("[Simulation] best_params_overall.csv enthält keine Daten.")
         return [], clone_state(use_saved_state)
