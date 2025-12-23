@@ -2281,45 +2281,54 @@ def _generate_returns_summary(df: pd.DataFrame, start_capital: float, output_dir
     if df.empty or "exit_time" not in df.columns:
         return
 
-    df = df.copy()
-    df["month"] = df["exit_time"].dt.to_period("M")
+    try:
+        df = df.copy()
+        # Ensure exit_time is datetime
+        df["exit_time"] = pd.to_datetime(df["exit_time"], errors="coerce", utc=True)
+        df = df.dropna(subset=["exit_time"])
+        if df.empty:
+            print("[Equity] No valid dates for monthly returns.")
+            return
+        df["month"] = df["exit_time"].dt.to_period("M")
 
-    monthly = df.groupby("month").agg({
-        "pnl": ["sum", "count", lambda x: (x > 0).sum(), lambda x: (x < 0).sum()]
-    }).reset_index()
-    monthly.columns = ["month", "pnl", "trades", "winners", "losers"]
-    monthly["win_rate"] = (monthly["winners"] / monthly["trades"] * 100).round(1)
-    monthly["month_str"] = monthly["month"].astype(str)
+        monthly = df.groupby("month").agg({
+            "pnl": ["sum", "count", lambda x: (x > 0).sum(), lambda x: (x < 0).sum()]
+        }).reset_index()
+        monthly.columns = ["month", "pnl", "trades", "winners", "losers"]
+        monthly["win_rate"] = (monthly["winners"] / monthly["trades"] * 100).round(1)
+        monthly["month_str"] = monthly["month"].astype(str)
 
-    # Create bar chart for monthly returns
-    colors = ["green" if x >= 0 else "red" for x in monthly["pnl"]]
+        # Create bar chart for monthly returns
+        colors = ["green" if x >= 0 else "red" for x in monthly["pnl"]]
 
-    fig = go.Figure()
-    fig.add_trace(go.Bar(
-        x=monthly["month_str"],
-        y=monthly["pnl"],
-        marker_color=colors,
-        text=[f"{p:,.0f}<br>{t} trades<br>{wr:.0f}% WR" for p, t, wr in zip(monthly["pnl"], monthly["trades"], monthly["win_rate"])],
-        textposition="outside",
-        name="Monthly PnL"
-    ))
+        fig = go.Figure()
+        fig.add_trace(go.Bar(
+            x=monthly["month_str"],
+            y=monthly["pnl"],
+            marker_color=colors,
+            text=[f"{p:,.0f}<br>{t} trades<br>{wr:.0f}% WR" for p, t, wr in zip(monthly["pnl"], monthly["trades"], monthly["win_rate"])],
+            textposition="outside",
+            name="Monthly PnL"
+        ))
 
-    total_pnl = monthly["pnl"].sum()
-    avg_monthly = monthly["pnl"].mean()
-    best_month = monthly.loc[monthly["pnl"].idxmax()]
-    worst_month = monthly.loc[monthly["pnl"].idxmin()]
+        total_pnl = monthly["pnl"].sum()
+        avg_monthly = monthly["pnl"].mean()
+        best_month = monthly.loc[monthly["pnl"].idxmax()]
+        worst_month = monthly.loc[monthly["pnl"].idxmin()]
 
-    fig.update_layout(
-        title=f"Monthly Returns | Total: {total_pnl:,.0f} USDT | Avg: {avg_monthly:,.0f}/month | Best: {best_month['month_str']} ({best_month['pnl']:,.0f}) | Worst: {worst_month['month_str']} ({worst_month['pnl']:,.0f})",
-        xaxis_title="Month",
-        yaxis_title="PnL (USDT)",
-        template="plotly_white",
-        height=500
-    )
+        fig.update_layout(
+            title=f"Monthly Returns | Total: {total_pnl:,.0f} USDT | Avg: {avg_monthly:,.0f}/month | Best: {best_month['month_str']} ({best_month['pnl']:,.0f}) | Worst: {worst_month['month_str']} ({worst_month['pnl']:,.0f})",
+            xaxis_title="Month",
+            yaxis_title="PnL (USDT)",
+            template="plotly_white",
+            height=500
+        )
 
-    out_path = os.path.join(output_dir, "monthly_returns.html")
-    fig.write_html(out_path, include_plotlyjs="cdn")
-    print(f"[Equity] Saved monthly returns to {out_path}")
+        out_path = os.path.join(output_dir, "monthly_returns.html")
+        fig.write_html(out_path, include_plotlyjs="cdn")
+        print(f"[Equity] Saved monthly returns to {out_path}")
+    except Exception as exc:
+        print(f"[Equity] Monthly returns generation failed: {exc}")
 
 
 def compute_net_open_equity(open_positions_df: pd.DataFrame) -> float:
