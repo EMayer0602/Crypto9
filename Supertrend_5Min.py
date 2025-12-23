@@ -194,7 +194,7 @@ INDICATOR_PRESETS = {
 	},
 }
 
-ACTIVE_INDICATORS = ["jma", "kama", "supertrend"]
+ACTIVE_INDICATORS = ["jma", "kama", "supertrend", "htf_crossover"]
 
 INDICATOR_TYPE = ""
 INDICATOR_DISPLAY_NAME = ""
