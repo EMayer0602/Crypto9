@@ -2757,7 +2757,7 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
             end_ts = resolve_timestamp(args.end, pd.Timestamp.now(tz=st.BERLIN_TZ))
             default_start = end_ts - pd.Timedelta(days=1)
             start_ts = resolve_timestamp(args.start, default_start)
-            print(f"[Simulation] Period: {start_ts.strftime('%Y-%m-%d %H:%M')} → {end_ts.strftime('%Y-%m-%d %H:%M')}")
+            print(f"[Simulation] Period: {start_ts.strftime('%Y-%m-%d %H:%M')} to {end_ts.strftime('%Y-%m-%d %H:%M')}")
             trades, final_state = run_simulation(
                 start_ts,
                 end_ts,
