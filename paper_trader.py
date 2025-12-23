@@ -30,10 +30,43 @@ except ImportError:  # Twilio is optional; SMS alerts require pip install twilio
     TwilioClient = None
 
 import Supertrend_5Min as st
-from optimal_hold_times_defaults import get_optimal_hold_bars
 
-# Time-based exit configuration
-USE_TIME_BASED_EXIT = True  # Enable time-based exit after optimal hold bars
+# Import optimal hold times configuration
+try:
+    from optimal_hold_times_defaults import get_optimal_hold_bars
+except ImportError:
+    # Fallback if file not found
+    def get_optimal_hold_bars(symbol: str, direction: str) -> int:
+        return 12 if direction.lower() == "long" else 15
+
+# Import EMA slope filter configuration
+try:
+    from optimal_ema_slope_defaults import (
+        USE_EMA_SLOPE_FILTER,
+        get_ema_slope_params,
+        should_filter_entry_by_ema_slope
+    )
+    # Import optional advanced filter flags
+    try:
+        from optimal_ema_slope_defaults import USE_PRICE_ABOVE_EMA_FILTER
+    except ImportError:
+        USE_PRICE_ABOVE_EMA_FILTER = False
+    try:
+        from optimal_ema_slope_defaults import USE_DUAL_EMA_FILTER, SECONDARY_EMA_PERIOD, SECONDARY_SLOPE_THRESHOLD
+    except ImportError:
+        USE_DUAL_EMA_FILTER = False
+        SECONDARY_EMA_PERIOD = 50
+        SECONDARY_SLOPE_THRESHOLD = 0.0
+except ImportError:
+    USE_EMA_SLOPE_FILTER = False
+    USE_PRICE_ABOVE_EMA_FILTER = False
+    USE_DUAL_EMA_FILTER = False
+    SECONDARY_EMA_PERIOD = 50
+    SECONDARY_SLOPE_THRESHOLD = 0.0
+    def get_ema_slope_params(symbol: str, direction: str):
+        return None, None
+    def should_filter_entry_by_ema_slope(symbol: str, direction: str, slope: float) -> bool:
+        return False
 
 CONFIG_FILE = "paper_trading_config.csv"
 STATE_FILE = "paper_trading_state.json"
@@ -51,15 +84,16 @@ STAKE_DIVISOR = 7 # stake = current total_capital / STAKE_DIVISOR
 DEFAULT_DIRECTION_CAPITAL = 2_800.0
 BASE_BAR_MINUTES = st.timeframe_to_minutes(st.TIMEFRAME)
 DEFAULT_SYMBOL_ALLOWLIST = [sym.strip() for sym in st.SYMBOLS if sym and sym.strip()]
-DEFAULT_FIXED_STAKE = None  # Use dynamic sizing unless explicitly overridden
-DEFAULT_ALLOWED_DIRECTIONS = ["long", "short"]
-DEFAULT_USE_TESTNET = True
+DEFAULT_FIXED_STAKE = 2000.0  # Fixed stake per trade
+DEFAULT_ALLOWED_DIRECTIONS = ["long", "short"]  # Enable both long and short trades
+DEFAULT_USE_TESTNET = False  # Testnet should be opt-in with --testnet flag
+USE_TIME_BASED_EXIT = True  # Enable time-based exits based on optimal hold times
 SIGNAL_DEBUG = False
 DEFAULT_SIGNAL_INTERVAL_MIN = 15
 DEFAULT_SPIKE_INTERVAL_MIN = 5
 DEFAULT_ATR_SPIKE_MULT = 2.5
 DEFAULT_POLL_SECONDS = 30
-TESTNET_DEFAULT_STAKE = 1000.0
+TESTNET_DEFAULT_STAKE = 2000.0
 
 
 def set_max_open_positions(value: int) -> None:
@@ -453,10 +487,30 @@ def select_best_indicator_per_symbol(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def determine_position_size(symbol: str, state: Dict, fixed_stake: Optional[float]) -> float:
+    """
+    Determine position size for a trade.
+
+    Args:
+        symbol: Trading symbol
+        state: Current state dict with total_capital
+        fixed_stake: Fixed stake amount (if provided), None for dynamic sizing
+
+    Returns:
+        Position size in USDT
+
+    Notes:
+        - If fixed_stake is None or 0: Uses dynamic sizing = total_capital / STAKE_DIVISOR (7)
+        - If fixed_stake is set: Uses that fixed amount
+        - Dynamic sizing provides compounding effect as capital grows
+    """
+    # Use fixed stake if provided and > 0
     if fixed_stake is not None and fixed_stake > 0:
         return fixed_stake
+
+    # Dynamic sizing based on current capital
     total_capital = float(state.get("total_capital", START_TOTAL_CAPITAL))
-    return max(total_capital / STAKE_DIVISOR, 0.0)
+    dynamic_stake = total_capital / STAKE_DIVISOR
+    return max(dynamic_stake, 0.0)
 
 
 def record_symbol_trade(state: Dict, symbol: str) -> None:
@@ -612,34 +666,63 @@ def _load_trade_log_dataframe(log_path: str) -> pd.DataFrame:
 
     # Remove duplicate columns
     df = df.loc[:, ~df.columns.duplicated()].copy()
-    
+
     print(f"[DEBUG] CSV columns: {list(df.columns)}")
-    if not df.empty:
-        print(f"[DEBUG] First row Symbol='{df.iloc[0].get('Symbol', 'MISSING')}', Indicator='{df.iloc[0].get('Indicator', 'MISSING')}'")
-    
-    # Create new lowercase columns WITHOUT removing originals yet
-    df["symbol"] = df["Symbol"] if "Symbol" in df.columns else ""
-    df["direction"] = df["Direction"].astype(str).str.strip().str.capitalize() if "Direction" in df.columns else ""
-    df["indicator"] = df["Indicator"] if "Indicator" in df.columns else ""
-    df["htf"] = df["HTF"] if "HTF" in df.columns else ""
-    df["param_desc"] = df["ParamDesc"] if "ParamDesc" in df.columns else ""
-    df["entry_time"] = df["EntryTime"] if "EntryTime" in df.columns else ""
-    df["entry_price"] = pd.to_numeric(df["EntryPrice"], errors="coerce") if "EntryPrice" in df.columns else 0.0
-    df["exit_time"] = df["ExitTime"] if "ExitTime" in df.columns else ""
-    df["exit_price"] = pd.to_numeric(df["ExitPrice"], errors="coerce") if "ExitPrice" in df.columns else 0.0
-    df["stake"] = pd.to_numeric(df["Stake"], errors="coerce") if "Stake" in df.columns else 0.0
-    df["fees"] = pd.to_numeric(df["Fees"], errors="coerce") if "Fees" in df.columns else 0.0
-    df["pnl"] = pd.to_numeric(df["PnL"], errors="coerce") if "PnL" in df.columns else 0.0
-    df["equity_after"] = pd.to_numeric(df["EquityAfter"], errors="coerce") if "EquityAfter" in df.columns else 0.0
-    df["reason"] = df["Reason"] if "Reason" in df.columns else ""
-    
+
+    # Helper to check if column has actual data
+    def has_data(col_name):
+        if col_name not in df.columns:
+            return False
+        col = df[col_name]
+        # Check if all values are NaN or empty strings
+        return not (col.isna().all() or (col.astype(str).str.strip() == "").all())
+
+    # Ensure all required lowercase columns exist and have data
+    # Priority: keep existing lowercase data, fallback to Uppercase, else empty
+    if not has_data("symbol"):
+        df["symbol"] = df["Symbol"] if "Symbol" in df.columns else ""
+    if not has_data("direction"):
+        df["direction"] = df["Direction"].astype(str).str.strip().str.capitalize() if "Direction" in df.columns else ""
+    if not has_data("indicator"):
+        df["indicator"] = df["Indicator"] if "Indicator" in df.columns else ""
+    if not has_data("htf"):
+        df["htf"] = df["HTF"] if "HTF" in df.columns else ""
+    if not has_data("param_desc"):
+        df["param_desc"] = df["ParamDesc"] if "ParamDesc" in df.columns else ""
+    if not has_data("entry_time"):
+        df["entry_time"] = df["EntryTime"] if "EntryTime" in df.columns else ""
+    if not has_data("entry_price"):
+        df["entry_price"] = pd.to_numeric(df["EntryPrice"], errors="coerce") if "EntryPrice" in df.columns else 0.0
+    if not has_data("exit_time"):
+        df["exit_time"] = df["ExitTime"] if "ExitTime" in df.columns else ""
+    if not has_data("exit_price"):
+        df["exit_price"] = pd.to_numeric(df["ExitPrice"], errors="coerce") if "ExitPrice" in df.columns else 0.0
+    if not has_data("stake"):
+        df["stake"] = pd.to_numeric(df["Stake"], errors="coerce") if "Stake" in df.columns else 0.0
+    if not has_data("fees"):
+        df["fees"] = pd.to_numeric(df["Fees"], errors="coerce") if "Fees" in df.columns else 0.0
+    if not has_data("pnl"):
+        df["pnl"] = pd.to_numeric(df["PnL"], errors="coerce") if "PnL" in df.columns else 0.0
+    if not has_data("equity_after"):
+        df["equity_after"] = pd.to_numeric(df["EquityAfter"], errors="coerce") if "EquityAfter" in df.columns else 0.0
+    if not has_data("reason"):
+        df["reason"] = df["Reason"] if "Reason" in df.columns else ""
+
+    # Drop the original Uppercase columns to avoid duplicates in saved CSV
+    uppercase_cols = ["Symbol", "Direction", "Indicator", "HTF", "ParamDesc",
+                     "EntryTime", "EntryPrice", "ExitTime", "ExitPrice",
+                     "Stake", "Fees", "PnL", "EquityAfter", "Reason"]
+    for col in uppercase_cols:
+        if col in df.columns:
+            df = df.drop(columns=[col])
+
     # Debug output
     print(f"[Live] Loaded {len(df)} trades from log.")
     if not df.empty and "symbol" in df.columns:
         print(f"[DEBUG] After mapping - First symbol='{df.iloc[0]['symbol']}', indicator='{df.iloc[0]['indicator']}'")
         unique_symbols = df["symbol"].dropna().unique()
         print(f"[Live] Symbols in log: {', '.join(str(s) for s in unique_symbols)}")
-    
+
     return df
 
 
@@ -697,8 +780,8 @@ def build_strategy_context(row: pd.Series) -> StrategyContext:
     )
 
 
-def build_dataframe_for_context(context: StrategyContext) -> pd.DataFrame:
-    return build_indicator_dataframe(context.symbol, context.indicator, context.htf, context.param_a, context.param_b)
+def build_dataframe_for_context(context: StrategyContext, use_all_data: bool = False) -> pd.DataFrame:
+    return build_indicator_dataframe(context.symbol, context.indicator, context.htf, context.param_a, context.param_b, use_all_data=use_all_data)
 
 
 def resolve_timestamp(value: Optional[str], default: Optional[pd.Timestamp] = None) -> pd.Timestamp:
@@ -752,7 +835,7 @@ def load_best_rows(active_indicators: Optional[List[str]] = None) -> pd.DataFram
         raise FileNotFoundError(
             f"Overall summary file {BEST_PARAMS_CSV} not found. Run a parameter sweep first."
         )
-    df = pd.read_csv(BEST_PARAMS_CSV)  # American format: comma separator, period decimal
+    df = pd.read_csv(BEST_PARAMS_CSV, sep=";", decimal=",")
     if df.empty:
         return df
     if active_indicators:
@@ -840,14 +923,34 @@ def load_replay_trades_csv(path: str) -> pd.DataFrame:
     return df
 
 
-def build_indicator_dataframe(symbol: str, indicator_key: str, htf_value: str, param_a: float, param_b: float) -> pd.DataFrame:
+def build_indicator_dataframe(symbol: str, indicator_key: str, htf_value: str, param_a: float, param_b: float, use_all_data: bool = False) -> pd.DataFrame:
     st.apply_indicator_type(indicator_key)
     st.apply_higher_timeframe(htf_value)
-    df_raw = st.prepare_symbol_dataframe(symbol)
+    df_raw = st.prepare_symbol_dataframe(symbol, use_all_cached_data=use_all_data)
     df_ind = st.compute_indicator(df_raw.copy(), param_a, param_b)
     for col in ("htf_trend", "htf_indicator", "momentum"):
         if col in df_raw.columns:
             df_ind[col] = df_raw[col]
+
+    # Add EMA slope filter columns for long trade filtering
+    if USE_EMA_SLOPE_FILTER:
+        # Primary EMA-20 for all symbols
+        ema_period = 20
+        df_ind[f'ema_{ema_period}'] = df_ind['close'].ewm(span=ema_period, adjust=False).mean()
+        # Calculate slope as percentage change (lookback=1 bar)
+        ema = df_ind[f'ema_{ema_period}']
+        df_ind[f'ema_{ema_period}_slope'] = ((ema - ema.shift(1)) / ema.shift(1)) * 100
+
+        # Add EMA-50 for dual EMA confirmation (Option 3)
+        if USE_DUAL_EMA_FILTER:
+            secondary_period = SECONDARY_EMA_PERIOD
+            df_ind[f'ema_{secondary_period}'] = df_ind['close'].ewm(span=secondary_period, adjust=False).mean()
+            ema_secondary = df_ind[f'ema_{secondary_period}']
+            df_ind[f'ema_{secondary_period}_slope'] = ((ema_secondary - ema_secondary.shift(1)) / ema_secondary.shift(1)) * 100
+
+        # Store symbol for later reference
+        df_ind['symbol'] = symbol
+
     return df_ind.dropna(subset=["trend_flag"])
 
 
@@ -872,12 +975,33 @@ def remove_position(state: Dict, key: str) -> None:
     state["positions"] = [pos for pos in state["positions"] if pos["key"] != key]
 
 
-def bars_in_position(entry_iso: str, latest_ts: pd.Timestamp) -> int:
+def bars_in_position(entry_iso: str, latest_ts: pd.Timestamp, htf_timeframe: Optional[str] = None) -> int:
+    """
+    Calculate number of bars held in position.
+
+    Args:
+        entry_iso: ISO timestamp of entry
+        latest_ts: Current timestamp
+        htf_timeframe: Higher timeframe (e.g. '6h', '24h'). If None, uses BASE_BAR_MINUTES.
+
+    Returns:
+        Number of bars held in the position's timeframe
+    """
     entry_ts = pd.Timestamp(entry_iso)
     delta_minutes = max(0.0, (latest_ts - entry_ts).total_seconds() / 60.0)
-    if BASE_BAR_MINUTES <= 0:
+
+    # Determine bar size in minutes
+    if htf_timeframe:
+        try:
+            bar_minutes = st.timeframe_to_minutes(htf_timeframe)
+        except:
+            bar_minutes = BASE_BAR_MINUTES
+    else:
+        bar_minutes = BASE_BAR_MINUTES
+
+    if bar_minutes <= 0:
         return 0
-    return int(delta_minutes // BASE_BAR_MINUTES)
+    return int(delta_minutes // bar_minutes)
 
 
 def filters_allow_entry(direction: str, df: pd.DataFrame) -> tuple[bool, str]:
@@ -913,6 +1037,34 @@ def filters_allow_entry(direction: str, df: pd.DataFrame) -> tuple[bool, str]:
                 allows = close_curr < prev_low
         if not allows:
             return False, f"Breakout filter blocked (range={candle_range:.4f})"
+
+    # EMA Slope filter for LONG trades only
+    if USE_EMA_SLOPE_FILTER and direction == "long":
+        ema_slope = curr.get("ema_20_slope")
+        if pd.isna(ema_slope):
+            return False, "EMA slope unavailable"
+        # Block entry if EMA is falling (slope < 0%)
+        # Using slope >= 0% threshold: allows neutral or rising trends only
+        if ema_slope < 0.0:
+            return False, f"EMA-20 slope negative ({ema_slope:.3f}%) - downtrend blocked"
+
+        # OPTION 1: Price must be above EMA-20
+        if USE_PRICE_ABOVE_EMA_FILTER:
+            current_price = float(curr["close"])
+            ema_20_value = curr.get("ema_20")
+            if pd.isna(ema_20_value):
+                return False, "EMA-20 value unavailable"
+            if current_price < ema_20_value:
+                return False, f"Price below EMA-20 ({current_price:.2f} < {ema_20_value:.2f})"
+
+        # OPTION 3: Dual EMA confirmation - EMA-50 must also be rising
+        if USE_DUAL_EMA_FILTER:
+            ema_50_slope = curr.get(f"ema_{SECONDARY_EMA_PERIOD}_slope")
+            if pd.isna(ema_50_slope):
+                return False, f"EMA-{SECONDARY_EMA_PERIOD} slope unavailable"
+            if ema_50_slope < SECONDARY_SLOPE_THRESHOLD:
+                return False, f"EMA-{SECONDARY_EMA_PERIOD} slope too low ({ema_50_slope:.3f}% < {SECONDARY_SLOPE_THRESHOLD}%)"
+
     return True, ""
 
 
@@ -962,14 +1114,7 @@ def find_last_signal_bar(df: pd.DataFrame, direction: str, lookback_hours: float
     return ts, price, ts >= cutoff
 
 
-def evaluate_exit(
-    position: Dict,
-    df: pd.DataFrame,
-    atr_mult: Optional[float],
-    min_hold_bars: int,
-    symbol: str = "",
-    indicator: str = "",
-) -> Optional[Dict]:
+def evaluate_exit(position: Dict, df: pd.DataFrame, atr_mult: Optional[float], min_hold_bars: int) -> Optional[Dict]:
     if len(df) < 2:
         return None
     curr = df.iloc[-1]
@@ -980,13 +1125,12 @@ def evaluate_exit(
     entry_atr = float(position.get("entry_atr", 0.0) or 0.0)
     stake = float(position.get("stake", 0.0) or 0.0)
     entry_time = position.get("entry_time")
+    htf = position.get("htf", None)  # Get HTF from position for correct bars calculation
     latest_ts = df.index[-1]
-    bars_held = bars_in_position(entry_time, latest_ts) if entry_time else 0
+    bars_held = bars_in_position(entry_time, latest_ts, htf) if entry_time else 0
 
     exit_price = None
     reason = None
-
-    # 1. ATR stop loss check (highest priority)
     if atr_mult is not None and entry_atr > 0:
         stop_price = entry_price - atr_mult * entry_atr if long_mode else entry_price + atr_mult * entry_atr
         hit_stop = (long_mode and float(curr["low"]) <= stop_price) or (
@@ -996,20 +1140,40 @@ def evaluate_exit(
             exit_price = stop_price
             reason = f"ATR stop x{atr_mult:.2f}"
 
-    # 2. Time-based exit after optimal hold bars
-    if exit_price is None and USE_TIME_BASED_EXIT and symbol and indicator:
-        optimal_bars = get_optimal_hold_bars(symbol, indicator, direction)
-        if bars_held >= optimal_bars:
-            exit_price = float(curr["close"])
-            reason = f"Time-based exit ({bars_held} bars)"
+    # Time-based exit: Exit after optimal hold time based on peak profit analysis
+    # Analysis showed peak profit occurs at ~65% of trade duration on average
+    # Long trades especially need tighter exits (gave back 22,733% on average)
 
-    # 3. Trend flip exit (only if min_hold_bars met)
+    # Get symbol-specific optimal hold time from configuration
+    symbol = position.get("symbol", "")
+    direction_str = "long" if long_mode else "short"
+    optimal_hold_bars = get_optimal_hold_bars(symbol, direction_str) if USE_TIME_BASED_EXIT else 0
+
+    if USE_TIME_BASED_EXIT and exit_price is None:
+        # Check if we've reached optimal hold time AND have some profit
+        if bars_held >= optimal_hold_bars:
+            current_price = float(curr["close"])
+            unrealized_pnl_pct = ((current_price - entry_price) / entry_price) if long_mode else ((entry_price - current_price) / entry_price)
+
+            # Exit if we have profit (or close to breakeven within 1%)
+            if unrealized_pnl_pct >= -0.01:  # -1% or better
+                exit_price = current_price
+                reason = f"Time-based exit ({bars_held} bars, optimal={optimal_hold_bars})"
+
+    # Trend flip exit - but only AFTER optimal hold time if time-based exits enabled
+    # This prevents premature exits before the optimal time is reached
     trend_curr = int(curr["trend_flag"])
     trend_prev = int(prev["trend_flag"])
     flip_long = long_mode and trend_prev == 1 and trend_curr == -1
     flip_short = (not long_mode) and trend_prev == -1 and trend_curr == 1
     trend_flipped = flip_long or flip_short
-    if exit_price is None and trend_flipped and bars_held >= max(0, min_hold_bars):
+
+    # Determine minimum bars before allowing trend flip exit
+    # If time-based exits enabled: wait for optimal hold time OR traditional min_hold_bars (whichever is higher)
+    # If time-based exits disabled: use traditional min_hold_bars
+    min_bars_for_trend_flip = max(optimal_hold_bars, min_hold_bars) if USE_TIME_BASED_EXIT else max(0, min_hold_bars)
+
+    if exit_price is None and trend_flipped and bars_held >= min_bars_for_trend_flip:
         exit_price = float(curr["close"])
         reason = "Trend flip"
 
@@ -1054,10 +1218,7 @@ def process_snapshot(
     existing = find_position(state, context.key)
     if existing:
         prior_total = state["total_capital"]
-        exit_info = evaluate_exit(
-            existing, df_slice, context.atr_mult, context.min_hold_bars,
-            symbol=context.symbol, indicator=context.indicator
-        )
+        exit_info = evaluate_exit(existing, df_slice, context.atr_mult, context.min_hold_bars)
         if exit_info:
             size_units = float(existing.get("size_units", 0.0))
             stake_val = float(existing.get("stake"))
@@ -1371,6 +1532,7 @@ def build_summary_payload(
     start_ts: pd.Timestamp,
     end_ts: pd.Timestamp,
 ) -> Dict[str, Any]:
+    # Overall statistics
     total_trades = len(trades_df)
     winners = len(trades_df[trades_df["pnl"] > 0]) if not trades_df.empty else 0
     losers = len(trades_df[trades_df["pnl"] < 0]) if not trades_df.empty else 0
@@ -1379,8 +1541,58 @@ def build_summary_payload(
     win_rate = (winners / total_trades * 100.0) if total_trades else 0.0
     open_count = len(open_positions_df)
     open_equity = compute_net_open_equity(open_positions_df)
-    base_capital = float(final_state.get("total_capital", 0.0))
-    marked_capital = base_capital + open_equity
+
+    # Calculate lifetime capital: START_EQUITY + all historical closed PnL + unrealized open equity
+    # This gives accurate total capital across all historical trades
+    lifetime_capital = st.START_EQUITY + pnl_sum + open_equity
+
+    # Separate statistics for Long and Short
+    def calc_direction_stats(df, direction_name):
+        if "direction" not in df.columns or df.empty:
+            return {}
+        dir_df = df[df["direction"].str.lower() == direction_name.lower()]
+        if dir_df.empty:
+            return {
+                f"{direction_name}_trades": 0,
+                f"{direction_name}_pnl": 0.0,
+                f"{direction_name}_avg_pnl": 0.0,
+                f"{direction_name}_win_rate": 0.0,
+                f"{direction_name}_winners": 0,
+                f"{direction_name}_losers": 0,
+            }
+        count = len(dir_df)
+        wins = len(dir_df[dir_df["pnl"] > 0])
+        losses = len(dir_df[dir_df["pnl"] < 0])
+        pnl = float(dir_df["pnl"].sum())
+        avg = float(dir_df["pnl"].mean())
+        wr = (wins / count * 100.0) if count else 0.0
+        return {
+            f"{direction_name}_trades": int(count),
+            f"{direction_name}_pnl": round(pnl, 6),
+            f"{direction_name}_avg_pnl": round(avg, 6),
+            f"{direction_name}_win_rate": round(wr, 4),
+            f"{direction_name}_winners": int(wins),
+            f"{direction_name}_losers": int(losses),
+        }
+
+    long_stats = calc_direction_stats(trades_df, "long")
+    short_stats = calc_direction_stats(trades_df, "short")
+
+    # Open position stats by direction
+    def calc_open_direction_stats(df, direction_name):
+        if "direction" not in df.columns or df.empty:
+            return {f"{direction_name}_open": 0, f"{direction_name}_open_equity": 0.0}
+        dir_df = df[df["direction"].str.lower() == direction_name.lower()]
+        count = len(dir_df)
+        equity = compute_net_open_equity(dir_df)
+        return {
+            f"{direction_name}_open": int(count),
+            f"{direction_name}_open_equity": round(equity, 6),
+        }
+
+    long_open_stats = calc_open_direction_stats(open_positions_df, "long")
+    short_open_stats = calc_open_direction_stats(open_positions_df, "short")
+
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "start": start_ts.isoformat(),
@@ -1393,7 +1605,11 @@ def build_summary_payload(
         "winners": int(winners),
         "losers": int(losers),
         "open_equity": round(open_equity, 6),
-        "final_capital": round(marked_capital, 6),
+        "final_capital": round(lifetime_capital, 6),
+        **long_stats,
+        **short_stats,
+        **long_open_stats,
+        **short_open_stats,
     }
 
 
@@ -1406,32 +1622,170 @@ def generate_summary_html(
     html_parts = [
         "<html><head><meta charset='utf-8'>",
         "<title>Paper Trading Simulation Summary</title>",
-        "<style>body{font-family:Arial,sans-serif;}table{border-collapse:collapse;margin-top:12px;}th,td{border:1px solid #ccc;padding:4px 8px;text-align:right;}th{text-align:center;background:#f0f0f0;}h1,h2{margin-bottom:0;}</style>",
+        "<style>body{font-family:Arial,sans-serif;margin:20px;}table{border-collapse:collapse;margin-top:12px;width:auto;}th,td{border:1px solid #ccc;padding:6px 10px;text-align:right;}th{text-align:center;background:#f0f0f0;font-weight:bold;}td:first-child{text-align:left;}h1{margin-bottom:10px;}h2{margin-top:30px;margin-bottom:10px;}.stats-container{display:flex;gap:20px;flex-wrap:wrap;}</style>",
         "</head><body>",
         f"<h1>Simulation Summary {summary['start']} → {summary['end']}</h1>",
+
+        # Overall Summary
+        "<h2>Overall Statistics</h2>",
         "<table>",
         "<tr><th>Metric</th><th>Value</th></tr>",
-        f"<tr><td style='text-align:left'>Closed trades</td><td>{summary['closed_trades']}</td></tr>",
-        f"<tr><td style='text-align:left'>Open positions</td><td>{summary['open_positions']}</td></tr>",
-        f"<tr><td style='text-align:left'>Closed PnL (USDT)</td><td>{summary['closed_pnl']:.2f}</td></tr>",
-        f"<tr><td style='text-align:left'>Avg trade PnL (USDT)</td><td>{summary['avg_trade_pnl']:.2f}</td></tr>",
-        f"<tr><td style='text-align:left'>Win rate (%)</td><td>{summary['win_rate_pct']:.2f}</td></tr>",
-        f"<tr><td style='text-align:left'>Winners</td><td>{summary['winners']}</td></tr>",
-        f"<tr><td style='text-align:left'>Losers</td><td>{summary['losers']}</td></tr>",
-        f"<tr><td style='text-align:left'>Open equity (net)</td><td>{summary['open_equity']:.2f}</td></tr>",
-        f"<tr><td style='text-align:left'>Final capital (USDT)</td><td>{summary['final_capital']:.2f}</td></tr>",
+        f"<tr><td>Closed trades</td><td>{summary['closed_trades']}</td></tr>",
+        f"<tr><td>Open positions</td><td>{summary['open_positions']}</td></tr>",
+        f"<tr><td>Closed PnL (USDT)</td><td>{summary['closed_pnl']:.2f}</td></tr>",
+        f"<tr><td>Avg trade PnL (USDT)</td><td>{summary['avg_trade_pnl']:.2f}</td></tr>",
+        f"<tr><td>Win rate (%)</td><td>{summary['win_rate_pct']:.2f}</td></tr>",
+        f"<tr><td>Winners</td><td>{summary['winners']}</td></tr>",
+        f"<tr><td>Losers</td><td>{summary['losers']}</td></tr>",
+        f"<tr><td>Open equity (net)</td><td>{summary['open_equity']:.2f}</td></tr>",
+        f"<tr><td>Final capital (USDT)</td><td>{summary['final_capital']:.2f}</td></tr>",
         "</table>",
+
+        # Long/Short Statistics side by side
+        "<h2>Statistics by Direction</h2>",
+        "<div class='stats-container'>",
+        "<table>",
+        "<tr><th colspan='2'>Long Statistics</th></tr>",
+        f"<tr><td>Closed trades</td><td>{summary.get('long_trades', 0)}</td></tr>",
+        f"<tr><td>PnL (USDT)</td><td>{summary.get('long_pnl', 0):.2f}</td></tr>",
+        f"<tr><td>Avg PnL (USDT)</td><td>{summary.get('long_avg_pnl', 0):.2f}</td></tr>",
+        f"<tr><td>Win rate (%)</td><td>{summary.get('long_win_rate', 0):.2f}</td></tr>",
+        f"<tr><td>Winners</td><td>{summary.get('long_winners', 0)}</td></tr>",
+        f"<tr><td>Losers</td><td>{summary.get('long_losers', 0)}</td></tr>",
+        f"<tr><td>Open positions</td><td>{summary.get('long_open', 0)}</td></tr>",
+        f"<tr><td>Open equity (USDT)</td><td>{summary.get('long_open_equity', 0):.2f}</td></tr>",
+        "</table>",
+        "<table>",
+        "<tr><th colspan='2'>Short Statistics</th></tr>",
+        f"<tr><td>Closed trades</td><td>{summary.get('short_trades', 0)}</td></tr>",
+        f"<tr><td>PnL (USDT)</td><td>{summary.get('short_pnl', 0):.2f}</td></tr>",
+        f"<tr><td>Avg PnL (USDT)</td><td>{summary.get('short_avg_pnl', 0):.2f}</td></tr>",
+        f"<tr><td>Win rate (%)</td><td>{summary.get('short_win_rate', 0):.2f}</td></tr>",
+        f"<tr><td>Winners</td><td>{summary.get('short_winners', 0)}</td></tr>",
+        f"<tr><td>Losers</td><td>{summary.get('short_losers', 0)}</td></tr>",
+        f"<tr><td>Open positions</td><td>{summary.get('short_open', 0)}</td></tr>",
+        f"<tr><td>Open equity (USDT)</td><td>{summary.get('short_open_equity', 0):.2f}</td></tr>",
+        "</table>",
+        "</div>",
     ]
+
     if not trades_df.empty:
-        html_parts.append("<h2>Complete Closed Trades (with Entry and Exit)</h2>")
         full_cols = [c for c in [
             "symbol","direction","indicator","htf","entry_time","entry_price","exit_time","exit_price","stake","pnl","reason"
         ] if c in trades_df.columns]
-        html_parts.append(trades_df[full_cols].to_html(index=False, float_format="{:.8f}".format))
+
+        # Prepare display DataFrame - ensure numeric columns are actually numeric
+        trades_display = trades_df[full_cols].copy()
+
+        # Remove rows where essential columns are NaN (filter out empty rows)
+        if "symbol" in trades_display.columns:
+            trades_display = trades_display[trades_display["symbol"].notna()]
+
+        for col in ["entry_price", "exit_price", "stake", "pnl"]:
+            if col in trades_display.columns:
+                trades_display[col] = pd.to_numeric(trades_display[col], errors="coerce")
+
+        # Use formatters parameter to format specific columns during HTML generation
+        # Note: Must use default parameter to avoid closure bug with lambda in loop
+        def make_formatter(precision):
+            return lambda x: f"{x:.{precision}f}" if pd.notna(x) else ""
+
+        formatters = {}
+        for col in ["entry_price", "exit_price", "stake", "pnl"]:
+            if col in trades_display.columns:
+                formatters[col] = make_formatter(8)
+
+        # Separate Long and Short trades
+        if "direction" in trades_display.columns:
+            long_trades = trades_display[trades_display["direction"].str.lower() == "long"].copy()
+            short_trades = trades_display[trades_display["direction"].str.lower() == "short"].copy()
+
+            # Display Long Trades
+            if not long_trades.empty:
+                long_pnl = long_trades["pnl"].sum() if "pnl" in long_trades.columns else 0
+                html_parts.append(f"<h2>Long Trades ({len(long_trades)} trades, PnL: {long_pnl:.2f} USDT)</h2>")
+                html_parts.append(long_trades.to_html(index=False, escape=False, formatters=formatters))
+
+            # Display Short Trades
+            if not short_trades.empty:
+                short_pnl = short_trades["pnl"].sum() if "pnl" in short_trades.columns else 0
+                html_parts.append(f"<h2>Short Trades ({len(short_trades)} trades, PnL: {short_pnl:.2f} USDT)</h2>")
+                html_parts.append(short_trades.to_html(index=False, escape=False, formatters=formatters))
+        else:
+            # Fallback if no direction column
+            html_parts.append("<h2>Complete Closed Trades (with Entry and Exit)</h2>")
+            html_parts.append(trades_display.to_html(index=False, escape=False, formatters=formatters))
+
     if not open_positions_df.empty:
-        html_parts.append("<h2>Open positions</h2>")
-        html_parts.append(open_positions_df.to_html(index=False, float_format="{:.8f}".format))
+        # Prepare display DataFrame - ensure numeric columns are actually numeric
+        open_display = open_positions_df.copy()
+
+        # Remove rows where essential columns are NaN (filter out empty rows)
+        if "symbol" in open_display.columns:
+            open_display = open_display[open_display["symbol"].notna()]
+
+        # Convert all numeric columns to proper types
+        for col in ["entry_price", "stake", "last_price", "unrealized_pnl", "unrealized_pct"]:
+            if col in open_display.columns:
+                open_display[col] = pd.to_numeric(open_display[col], errors="coerce")
+
+        for col in ["param_a", "param_b", "atr_mult"]:
+            if col in open_display.columns:
+                open_display[col] = pd.to_numeric(open_display[col], errors="coerce")
+
+        for col in ["min_hold_bars", "bars_held"]:
+            if col in open_display.columns:
+                open_display[col] = pd.to_numeric(open_display[col], errors="coerce")
+
+        # Use formatters parameter to format specific columns during HTML generation
+        # Note: Must use factory function to avoid closure bug with lambda in loop
+        def make_float_formatter(precision):
+            return lambda x: f"{x:.{precision}f}" if pd.notna(x) else ""
+
+        def make_int_formatter():
+            return lambda x: f"{int(x)}" if pd.notna(x) else "0"
+
+        formatters = {}
+
+        # 8 decimal places for prices and amounts
+        for col in ["entry_price", "stake", "last_price", "unrealized_pnl", "unrealized_pct"]:
+            if col in open_display.columns:
+                formatters[col] = make_float_formatter(8)
+
+        # 2 decimal places for float params
+        for col in ["param_a", "param_b", "atr_mult"]:
+            if col in open_display.columns:
+                formatters[col] = make_float_formatter(2)
+
+        # Integers for counts
+        for col in ["min_hold_bars", "bars_held"]:
+            if col in open_display.columns:
+                formatters[col] = make_int_formatter()
+
+        # Separate Long and Short open positions
+        if "direction" in open_display.columns:
+            long_open = open_display[open_display["direction"].str.lower() == "long"].copy()
+            short_open = open_display[open_display["direction"].str.lower() == "short"].copy()
+
+            # Display Long Open Positions
+            if not long_open.empty:
+                long_equity = compute_net_open_equity(long_open)
+                html_parts.append(f"<h2>Long Open Positions ({len(long_open)} positions, Equity: {long_equity:.2f} USDT)</h2>")
+                html_parts.append(long_open.to_html(index=False, escape=False, formatters=formatters))
+
+            # Display Short Open Positions
+            if not short_open.empty:
+                short_equity = compute_net_open_equity(short_open)
+                html_parts.append(f"<h2>Short Open Positions ({len(short_open)} positions, Equity: {short_equity:.2f} USDT)</h2>")
+                html_parts.append(short_open.to_html(index=False, escape=False, formatters=formatters))
+        else:
+            # Fallback if no direction column
+            html_parts.append("<h2>Open positions</h2>")
+            html_parts.append(open_display.to_html(index=False, escape=False, formatters=formatters))
+
     html_parts.append("</body></html>")
+
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as fh:
         fh.write("".join(html_parts))
     print(f"[Simulation] Summary HTML saved to {path}")
@@ -1747,7 +2101,6 @@ def write_live_reports(final_state: Dict, closed_trades: List[TradeResult]) -> N
     else:
         print(f"[Live] Snapshot includes {len(current_trades_df)} new trade(s). Total history: {len(all_trades_df)} trades.")
     return float(summary.get("final_capital", final_state.get("total_capital", 0.0)))
-    return float(summary.get("final_capital", final_state.get("total_capital", 0.0)))
 
 
 def _now_str() -> str:
@@ -2002,23 +2355,76 @@ def run_simulation(
     symbol_filter = normalize_symbol_list(raw_symbols)
     best_df = filter_best_rows_by_symbol(best_df, symbol_filter)
     best_df = filter_best_rows_by_direction(best_df, DEFAULT_ALLOWED_DIRECTIONS)
-    # NOTE: Removed select_best_indicator_per_symbol to use ALL indicator combinations
-    # best_df = select_best_indicator_per_symbol(best_df)
-    print(f"[Simulation] Loaded {len(best_df)} strategy rows from best_params_overall.csv")
+    best_df = filter_best_rows_by_direction(best_df, DEFAULT_ALLOWED_DIRECTIONS)
+    best_df = select_best_indicator_per_symbol(best_df)
     if best_df.empty:
         print("[Simulation] best_params_overall.csv enthält keine Daten.")
         return [], clone_state(use_saved_state)
     sim_state = clone_state(use_saved_state)
     prune_state_for_indicators(sim_state, allowed_indicators)
+
+    # Pre-download historical data if needed
+    print(f"[Simulation] Checking historical data availability...")
+    unique_symbols = best_df['symbol'].unique() if 'symbol' in best_df.columns else []
+    unique_timeframes = best_df['htf'].unique() if 'htf' in best_df.columns else []
+
+    # Add buffer for indicator warmup (30 days before start for safety)
+    download_start = start_ts - pd.Timedelta(days=30)
+
+    # Always update to latest available data (now)
+    now = pd.Timestamp.now(tz=st.BERLIN_TZ)
+    download_end = max(end_ts, now)
+
+    for symbol in unique_symbols:
+        for timeframe in unique_timeframes:
+            try:
+                # Check persistent cache directly (not limit-constrained)
+                cached_df = st.load_ohlcv_from_cache(symbol, timeframe)
+
+                needs_download = False
+                if cached_df.empty:
+                    print(f"[Simulation] No cached data for {symbol} {timeframe} - downloading...")
+                    needs_download = True
+                else:
+                    earliest = cached_df.index.min()
+                    latest = cached_df.index.max()
+
+                    # Check if we need historical data
+                    if earliest > download_start:
+                        print(f"[Simulation] {symbol} {timeframe}: Cache starts {earliest.strftime('%Y-%m-%d')}, need {download_start.strftime('%Y-%m-%d')} - downloading...")
+                        needs_download = True
+
+                    # Check if cache is outdated (older than 2 hours)
+                    elif latest < now - pd.Timedelta(hours=2):
+                        print(f"[Simulation] {symbol} {timeframe}: Cache outdated (last: {latest.strftime('%Y-%m-%d %H:%M')}), updating to now...")
+                        needs_download = True
+                    else:
+                        print(f"[Simulation] {symbol} {timeframe}: {len(cached_df)} bars, {earliest.strftime('%Y-%m-%d')} to {latest.strftime('%Y-%m-%d %H:%M')} ✓")
+
+                if needs_download:
+                    st.download_historical_ohlcv(symbol, timeframe, download_start, download_end)
+
+                    # Clear memory cache to force reload from persistent cache
+                    for key in list(st.DATA_CACHE.keys()):
+                        if key[0] == symbol and key[1] == timeframe:
+                            del st.DATA_CACHE[key]
+
+            except Exception as exc:
+                print(f"[Simulation] Warning: Could not check/download {symbol} {timeframe}: {exc}")
+
+    print(f"[Simulation] Historical data check complete")
+
     buffer = pd.Timedelta(minutes=BASE_BAR_MINUTES * 5)
     all_trades: List[TradeResult] = []
-    stake_value = fixed_stake if fixed_stake is not None else DEFAULT_FIXED_STAKE
+    # Pass stake through: None = dynamic sizing, value = fixed stake
+    stake_value = fixed_stake
     for _, row in best_df.iterrows():
         context = build_strategy_context(row)
         config = cfg_lookup.get(context.symbol)
         if not config or not direction_allowed(config, context.direction):
             continue
-        df_full = build_dataframe_for_context(context)
+        # Use ALL cached historical data for simulations (not just LOOKBACK limit)
+        df_full = build_dataframe_for_context(context, use_all_data=True)
         if df_full.empty:
             continue
         mask = (df_full.index >= (start_ts - buffer)) & (df_full.index <= end_ts)
@@ -2043,6 +2449,12 @@ def run_simulation(
             )
             if trades:
                 all_trades.extend(trades)
+    # Show first and last trade dates to identify data gaps
+    if all_trades:
+        first_trade = min(all_trades, key=lambda t: t.entry_time)
+        last_trade = max(all_trades, key=lambda t: t.entry_time)
+        print(f"[Simulation] First trade: {first_trade.entry_time} ({first_trade.symbol} {first_trade.direction})")
+        print(f"[Simulation] Last trade: {last_trade.entry_time} ({last_trade.symbol} {last_trade.direction})")
     return all_trades, sim_state
 
 
@@ -2072,15 +2484,14 @@ def main(
     best_df = load_best_rows(active_indicators=allowed_indicators)
     symbol_filter = normalize_symbol_list(raw_symbols)
     best_df = filter_best_rows_by_symbol(best_df, symbol_filter)
-    # NOTE: Removed select_best_indicator_per_symbol to use ALL indicator combinations
-    # best_df = select_best_indicator_per_symbol(best_df)
-    print(f"[Main] Loaded {len(best_df)} strategy rows")
+    best_df = select_best_indicator_per_symbol(best_df)
     if best_df.empty:
         print("[Skip] best_params_overall.csv enthält keine Daten.")
         return
     state = load_state()
     prune_state_for_indicators(state, allowed_indicators)
-    stake_value = fixed_stake if fixed_stake is not None else DEFAULT_FIXED_STAKE
+    # Pass stake through: None = dynamic sizing, value = fixed stake
+    stake_value = fixed_stake
     closed_trades: List[TradeResult] = []
     for _, row in best_df.iterrows():
         trades = process_strategy_row(
@@ -2127,7 +2538,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         "--stake",
         type=float,
         default=None,
-        help="Fixed stake size per trade (default: dynamic sizing with total_capital/14)",
+        help="Fixed stake size per trade (default: dynamic sizing with total_capital/7)",
     )
     parser.add_argument("--testnet", action="store_true", help="Use Binance testnet credentials and endpoints")
     parser.add_argument("--debug-signals", action="store_true", help="Verbose logging for entry filter decisions")
@@ -2182,7 +2593,15 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
     allowed_symbols = parse_symbol_argument(args.symbols)
     allowed_indicators = parse_indicator_argument(args.indicators)
     force_symbol, force_direction = parse_force_entry_argument(args.force_entry)
-    stake_value = args.stake if args.stake is not None else DEFAULT_FIXED_STAKE
+
+    # Handle stake sizing: dynamic by default, fixed if --stake provided
+    if args.stake is not None:
+        stake_value = args.stake
+        print(f"[Config] Using fixed stake: {stake_value} USDT")
+    else:
+        stake_value = None  # None triggers dynamic sizing (total_capital/7)
+        print("[Config] Using dynamic position sizing: stake = total_capital / 7")
+
     use_testnet = bool(args.testnet or DEFAULT_USE_TESTNET)
     set_signal_debug(args.debug_signals)
     api_key, api_secret = get_api_credentials(use_testnet=use_testnet)
@@ -2307,6 +2726,7 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
             end_ts = resolve_timestamp(args.end, pd.Timestamp.now(tz=st.BERLIN_TZ))
             default_start = end_ts - pd.Timedelta(days=1)
             start_ts = resolve_timestamp(args.start, default_start)
+            print(f"[Simulation] Period: {start_ts.strftime('%Y-%m-%d %H:%M')} → {end_ts.strftime('%Y-%m-%d %H:%M')}")
             trades, final_state = run_simulation(
                 start_ts,
                 end_ts,
@@ -2322,6 +2742,7 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
             )
             trades_df = trades_to_dataframe(trades)
             open_positions = final_state.get("positions", [])
+            print(f"[Simulation] Generated {len(trades)} trades during simulation")
         log_path = args.sim_log or SIMULATION_LOG_FILE
         log_json_path = args.sim_json or SIMULATION_LOG_JSON
         write_closed_trades_report(trades_df, log_path, log_json_path)

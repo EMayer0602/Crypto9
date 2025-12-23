@@ -1,144 +1,71 @@
-"""Optimal hold times defaults for time-based exit strategy.
-
-This module provides default optimal hold bars based on backtesting results.
-The time-based exit closes positions after a maximum number of bars to
-capture profits before reversal.
 """
-from typing import Dict, Optional, Tuple
+Optimal hold times based on peak profit analysis - REDUCED FOR LONGS.
 
-# Default optimal hold bars by (symbol, indicator, direction, htf)
-# Format: {(symbol, indicator, direction): optimal_bars}
-# These are derived from backtesting and represent the sweet spot for exits
+Analysis results:
+- Long trades: Avg optimal 5 bars (saves 59.82 USDT/trade, total 1,196 USDT)
+- Short trades: Avg optimal 3 bars (saves 43.63 USDT/trade, total 4,145 USDT)
+- Total potential savings: 5,340 USDT
 
-# Default fallback values
-DEFAULT_OPTIMAL_HOLD_BARS = {
-    "supertrend": 36,  # ~1.5 days on 1h
-    "htf_crossover": 36,
-    "jma": 48,  # Slower indicator, longer holds
-    "kama": 40,
-}
+Key insight: Peaks occur MUCH earlier than expected (2-10 bars vs 12-15)!
 
-# Specific optimal hold bars from backtesting
-OPTIMAL_HOLD_TIMES: Dict[Tuple[str, str, str], int] = {
+ADJUSTMENT: Long hold times reduced by 40-50% after poor performance.
+Long trades showed -128 USDT loss vs Short +1,461 USDT profit.
+Longs need to exit faster to capture peaks before reversals.
+"""
+
+# Optimal hold times from real data analysis (115 trades)
+# Format: (symbol, direction) -> bars
+OPTIMAL_HOLD_BARS = {
+    # Real data from find_optimal_hold_times.py analysis
+
     # BTC/EUR
-    ("BTC/EUR", "supertrend", "long"): 24,
-    ("BTC/EUR", "supertrend", "short"): 36,
-    ("BTC/EUR", "htf_crossover", "long"): 24,
-    ("BTC/EUR", "htf_crossover", "short"): 36,
-    ("BTC/EUR", "jma", "long"): 48,
-    ("BTC/EUR", "jma", "short"): 36,
-    ("BTC/EUR", "kama", "long"): 24,
-    ("BTC/EUR", "kama", "short"): 36,
+    ("BTC/EUR", "short"): 5,   # Peak at 73%, saves 22.94 USDT/trade
 
-    # ETH/EUR
-    ("ETH/EUR", "supertrend", "long"): 24,
-    ("ETH/EUR", "supertrend", "short"): 36,
-    ("ETH/EUR", "htf_crossover", "long"): 24,
-    ("ETH/EUR", "htf_crossover", "short"): 36,
-    ("ETH/EUR", "jma", "long"): 48,
-    ("ETH/EUR", "jma", "short"): 48,
-    ("ETH/EUR", "kama", "long"): 24,
-    ("ETH/EUR", "kama", "short"): 40,
-
-    # XRP/EUR
-    ("XRP/EUR", "supertrend", "long"): 36,
-    ("XRP/EUR", "supertrend", "short"): 24,
-    ("XRP/EUR", "htf_crossover", "long"): 36,
-    ("XRP/EUR", "htf_crossover", "short"): 24,
-    ("XRP/EUR", "jma", "long"): 48,
-    ("XRP/EUR", "jma", "short"): 48,
-    ("XRP/EUR", "kama", "long"): 24,
-    ("XRP/EUR", "kama", "short"): 48,
+    # ETH/EUR - REDUCED LONG from 10 to 5
+    ("ETH/EUR", "long"): 5,    # REDUCED: Was 10, cut 50% for faster exits
+    ("ETH/EUR", "short"): 2,   # Peak at 51%, saves 27.75 USDT/trade
 
     # LINK/EUR
-    ("LINK/EUR", "supertrend", "long"): 24,
-    ("LINK/EUR", "supertrend", "short"): 36,
-    ("LINK/EUR", "htf_crossover", "long"): 24,
-    ("LINK/EUR", "htf_crossover", "short"): 36,
-    ("LINK/EUR", "jma", "long"): 24,
-    ("LINK/EUR", "jma", "short"): 48,
-    ("LINK/EUR", "kama", "long"): 24,
-    ("LINK/EUR", "kama", "short"): 36,
+    ("LINK/EUR", "long"): 3,   # Peak at 53%, saves 35.94 USDT/trade (OK)
+    ("LINK/EUR", "short"): 2,  # Peak at 53%, saves 24.93 USDT/trade
 
-    # LUNC/USDT
-    ("LUNC/USDT", "supertrend", "long"): 36,
-    ("LUNC/USDT", "supertrend", "short"): 24,
-    ("LUNC/USDT", "htf_crossover", "long"): 36,
-    ("LUNC/USDT", "htf_crossover", "short"): 24,
-    ("LUNC/USDT", "jma", "long"): 60,
-    ("LUNC/USDT", "jma", "short"): 48,
-    ("LUNC/USDT", "kama", "long"): 24,
-    ("LUNC/USDT", "kama", "short"): 40,
+    # LUNC/USDT - REDUCED LONG from 7 to 4
+    ("LUNC/USDT", "long"): 4,  # REDUCED: Was 7, cut 43% for faster exits
+    ("LUNC/USDT", "short"): 2, # Peak at 41%, saves 70.75 USDT/trade
 
     # SOL/EUR
-    ("SOL/EUR", "supertrend", "long"): 24,
-    ("SOL/EUR", "supertrend", "short"): 48,
-    ("SOL/EUR", "htf_crossover", "long"): 24,
-    ("SOL/EUR", "htf_crossover", "short"): 48,
-    ("SOL/EUR", "jma", "long"): 48,
-    ("SOL/EUR", "jma", "short"): 48,
-    ("SOL/EUR", "kama", "long"): 24,
-    ("SOL/EUR", "kama", "short"): 36,
+    ("SOL/EUR", "long"): 3,    # Peak at 51%, saves 39.67 USDT/trade (OK)
+    ("SOL/EUR", "short"): 2,   # Peak at 37%, saves 44.10 USDT/trade
 
-    # SUI/EUR
-    ("SUI/EUR", "supertrend", "long"): 24,
-    ("SUI/EUR", "supertrend", "short"): 48,
-    ("SUI/EUR", "htf_crossover", "long"): 24,
-    ("SUI/EUR", "htf_crossover", "short"): 48,
-    ("SUI/EUR", "jma", "long"): 24,
-    ("SUI/EUR", "jma", "short"): 48,
-    ("SUI/EUR", "kama", "long"): 36,
-    ("SUI/EUR", "kama", "short"): 48,
+    # SUI/EUR - REDUCED LONG from 9 to 5
+    ("SUI/EUR", "long"): 5,    # REDUCED: Was 9, cut 44% for faster exits
+    ("SUI/EUR", "short"): 2,   # Peak at 61%, saves 26.04 USDT/trade
 
     # TNSR/USDC
-    ("TNSR/USDC", "supertrend", "long"): 36,
-    ("TNSR/USDC", "supertrend", "short"): 36,
-    ("TNSR/USDC", "htf_crossover", "long"): 36,
-    ("TNSR/USDC", "htf_crossover", "short"): 36,
-    ("TNSR/USDC", "jma", "long"): 36,
-    ("TNSR/USDC", "jma", "short"): 48,
-    ("TNSR/USDC", "kama", "long"): 48,
-    ("TNSR/USDC", "kama", "short"): 48,
+    ("TNSR/USDC", "long"): 2,  # Peak at 46%, saves 98.40 USDT/trade (OK - already aggressive)
+    ("TNSR/USDC", "short"): 2, # Peak at 36%, saves 51.72 USDT/trade
+
+    # XRP/EUR
+    ("XRP/EUR", "short"): 2,   # Peak at 53%, saves 27.10 USDT/trade
 
     # ZEC/USDC
-    ("ZEC/USDC", "supertrend", "long"): 36,
-    ("ZEC/USDC", "supertrend", "short"): 36,
-    ("ZEC/USDC", "htf_crossover", "long"): 36,
-    ("ZEC/USDC", "htf_crossover", "short"): 36,
-    ("ZEC/USDC", "jma", "long"): 36,
-    ("ZEC/USDC", "jma", "short"): 48,
-    ("ZEC/USDC", "kama", "long"): 36,
-    ("ZEC/USDC", "kama", "short"): 36,
+    ("ZEC/USDC", "long"): 2,   # Peak at 29%, saves 53.83 USDT/trade (OK - already aggressive)
+    ("ZEC/USDC", "short"): 4,  # Peak at 31%, saves 97.30 USDT/trade
 }
 
-
-def get_optimal_hold_bars(
-    symbol: str,
-    indicator: str,
-    direction: str,
-    htf: Optional[str] = None,
-) -> int:
-    """Get optimal hold bars for a given strategy configuration.
-
-    Args:
-        symbol: Trading pair (e.g., 'BTC/EUR')
-        indicator: Indicator name (e.g., 'jma', 'supertrend')
-        direction: Trade direction ('long' or 'short')
-        htf: Higher timeframe (optional, for future use)
-
-    Returns:
-        Optimal number of bars to hold before time-based exit
+def get_optimal_hold_bars(symbol: str, direction: str) -> int:
     """
-    key = (symbol.upper(), indicator.lower(), direction.lower())
+    Get optimal hold time for symbol/direction based on real data.
 
-    # Try exact match first
-    if key in OPTIMAL_HOLD_TIMES:
-        return OPTIMAL_HOLD_TIMES[key]
+    Returns conservative defaults if symbol/direction not found:
+    - Long: 5 bars (from analysis average)
+    - Short: 3 bars (from analysis average)
+    """
+    direction = direction.lower()
+    key = (symbol, direction)
 
-    # Fallback to indicator default
-    indicator_lower = indicator.lower()
-    if indicator_lower in DEFAULT_OPTIMAL_HOLD_BARS:
-        return DEFAULT_OPTIMAL_HOLD_BARS[indicator_lower]
+    if key in OPTIMAL_HOLD_BARS:
+        return OPTIMAL_HOLD_BARS[key]
 
-    # Ultimate fallback
-    return 36
+    # Fallback to analysis averages
+    return 5 if direction == "long" else 3

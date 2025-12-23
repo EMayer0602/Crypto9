@@ -62,7 +62,8 @@ def timeframe_to_minutes(tf_str: str) -> int:
 
 EXCHANGE_ID = "binance"
 TIMEFRAME = "1h"
-LOOKBACK = 8760  # 365 days × 24h for full year data
+LOOKBACK = 8760  # 1 year of hourly bars
+OHLCV_CACHE_DIR = "ohlcv_cache"  # Directory for persistent OHLCV data storage
 SYMBOLS = [
 	"BTC/EUR",
 	"ETH/EUR",
@@ -79,19 +80,20 @@ SYMBOLS = [
 	"ZEC/USDC",
 ]
 
-RUN_PARAMETER_SWEEP = False
+RUN_PARAMETER_SWEEP = True  # ← AKTIVIERT für komplette Optimierung
 RUN_SAVED_PARAMS = False
-RUN_OVERALL_BEST = True
+RUN_OVERALL_BEST = False  # ← Deaktiviert, weil wir neu optimieren
 ENABLE_LONGS = True
-ENABLE_SHORTS = True  # Restored: 705 short trades in simulation
+ENABLE_SHORTS = True  # Enabled for both long and short trading
 
 USE_MIN_HOLD_FILTER = True
-DEFAULT_MIN_HOLD_DAYS = 0
-MIN_HOLD_DAY_VALUES = [0, 1, 2]
+DEFAULT_MIN_HOLD_BARS = 0
+# Min hold bar values - examples for 1h timeframe: [0, 12, 24, 48] = [0h, 12h, 1d, 2d]
+MIN_HOLD_BAR_VALUES = [0, 12, 24]
 
 USE_HIGHER_TIMEFRAME_FILTER = True
 HIGHER_TIMEFRAME = "12h"
-HTF_LOOKBACK = 1000  # Enough for full year at 12h timeframe
+HTF_LOOKBACK = 1000  # Increased for longer backtests
 HTF_LENGTH = 20
 HTF_FACTOR = 3.0
 HTF_PSAR_STEP = 0.02
@@ -109,9 +111,27 @@ MOMENTUM_WINDOW = 14
 RSI_LONG_THRESHOLD = 55
 RSI_SHORT_THRESHOLD = 45
 
+USE_JMA_TREND_FILTER = False  # Disabled to match overall_best_detailed.html backtest settings
+JMA_TREND_LENGTH = 20  # Length for JMA
+JMA_TREND_PHASE = 0  # Phase for JMA
+JMA_TREND_THRESH_UP = 0.0001  # Positive threshold for uptrend
+JMA_TREND_THRESH_DOWN = -0.0001  # Negative threshold for downtrend
+
 USE_BREAKOUT_FILTER = False
 BREAKOUT_ATR_MULT = 1.5
 BREAKOUT_REQUIRE_DIRECTION = True
+
+# Bull/Bear Trap Filters
+USE_MA_SLOPE_FILTER = True  # Require MA to be rising/falling (not just price above/below)
+MA_SLOPE_PERIOD = 5  # Number of bars to check for MA slope direction
+MA_SLOPE_MIN_CHANGE = 0.0001  # Minimum percentage change required for valid slope
+
+USE_CANDLESTICK_PATTERN_FILTER = True  # Filter out reversal candlestick patterns
+PATTERN_FILTER_SENSITIVITY = "medium"  # "low", "medium", "high" - how strict pattern detection is
+
+USE_DIVERGENCE_FILTER = True  # Detect price/RSI divergence (bull traps)
+DIVERGENCE_LOOKBACK = 10  # How many bars to look back for divergence
+DIVERGENCE_RSI_PERIOD = 14  # RSI period for divergence detection
 
 START_EQUITY = 14000.0
 RISK_FRACTION = 1
@@ -120,10 +140,25 @@ FEE_RATE = 0.001
 ATR_WINDOW = 14
 ATR_STOP_MULTS = [None, 1.0, 1.5, 2.0]
 
+# Advanced Exit Strategies - Based on Peak Profit Analysis
+USE_TRAILING_STOP = True  # Enable trailing stop after peak
+TRAILING_STOP_PCT = 0.05  # 5% drawdown from peak triggers exit
+TRAILING_STOP_ACTIVATION_PCT = 0.02  # Activate after 2% profit
+
+USE_PARTIAL_EXIT = True  # Take partial profits at targets
+PARTIAL_EXIT_LEVELS = [
+    {"profit_pct": 0.03, "exit_pct": 0.30},  # At +3%, sell 30%
+    {"profit_pct": 0.05, "exit_pct": 0.30},  # At +5%, sell another 30%
+]
+
+USE_PROFIT_TARGET = True  # Full exit at profit target
+PROFIT_TARGET_PCT = 0.10  # 10% profit = full exit
+
 BASE_OUT_DIR = "report_html"
 BARS_PER_DAY = max(1, int(1440 / timeframe_to_minutes(TIMEFRAME)))
 CLEAR_BASE_OUTPUT_ON_SWEEP = True
 
+# Output file paths
 OVERALL_SUMMARY_HTML = os.path.join(BASE_OUT_DIR, "overall_best_results.html")
 OVERALL_PARAMS_CSV = os.path.join(BASE_OUT_DIR, "best_params_overall.csv")
 OVERALL_DETAILED_HTML = os.path.join(BASE_OUT_DIR, "overall_best_detailed.html")
@@ -194,7 +229,7 @@ INDICATOR_PRESETS = {
 	},
 }
 
-ACTIVE_INDICATORS = ["jma", "kama", "supertrend", "htf_crossover"]
+ACTIVE_INDICATORS = ["htf_crossover", "jma", "kama", "supertrend"]
 
 INDICATOR_TYPE = ""
 INDICATOR_DISPLAY_NAME = ""
@@ -213,45 +248,17 @@ BEST_PARAMS_FILE = "best_params.csv"
 _exchange = None
 _data_exchange = None
 DATA_CACHE = {}
-DATA_CACHE_TIMESTAMPS = {}
-CACHE_TTL_SECONDS = 60  # 1 minute TTL - ensures fresh data each run
 
-
-INDICATOR_CACHE = {}
-INDICATOR_CACHE_MAX_SIZE = 100  # Maximum number of indicator results to cache
-
-
-def clear_data_cache() -> None:
-	"""Clear all cached data to force fresh fetches."""
-	global DATA_CACHE, DATA_CACHE_TIMESTAMPS, INDICATOR_CACHE
-	DATA_CACHE.clear()
-	DATA_CACHE_TIMESTAMPS.clear()
-	INDICATOR_CACHE.clear()
-
-
-def _get_indicator_cache_key(indicator_type: str, df_hash: int, param_a: float, param_b: float) -> tuple:
-	"""Generate a cache key for indicator results."""
-	return (indicator_type, df_hash, param_a, param_b)
-
-
-def _hash_dataframe(df: pd.DataFrame) -> int:
-	"""Create a hash of a DataFrame for caching purposes."""
-	if df.empty:
-		return 0
-	# Use the index and close column to create a fast hash
-	try:
-		return hash((df.index[0], df.index[-1], len(df), df["close"].iloc[-1]))
-	except Exception:
-		return 0
-
-
-def _is_cache_expired(key: tuple) -> bool:
-	"""Check if cached data has expired based on TTL."""
-	if key not in DATA_CACHE_TIMESTAMPS:
-		return True
-	cached_time = DATA_CACHE_TIMESTAMPS[key]
-	elapsed = (datetime.now(timezone.utc) - cached_time).total_seconds()
-	return elapsed > CACHE_TTL_SECONDS
+# ============================================================================
+# LOCAL CONFIGURATION OVERRIDE
+# ============================================================================
+# Import local config overrides if config_local.py exists
+# This allows you to override any config variable without git conflicts
+try:
+	from config_local import *
+	print("[Config] Loaded local configuration overrides from config_local.py")
+except ImportError:
+	pass  # No local config file - use defaults above
 
 
 def configure_exchange(use_testnet=None) -> None:
@@ -350,47 +357,12 @@ def _fetch_direct_ohlcv(symbol, timeframe, limit):
 	return df.set_index("timestamp").tail(limit)
 
 
-def _synthesize_bars_from_1m(symbol: str, timeframe: str, start_ts: pd.Timestamp, end_ts: pd.Timestamp) -> pd.DataFrame:
-	"""Synthesize OHLCV bars from 1-minute data for a given time range."""
-	try:
-		tf_minutes = timeframe_to_minutes(timeframe)
-	except ValueError:
-		return pd.DataFrame()
+def _maybe_append_synthetic_bar(df, symbol, timeframe):
+	"""
+	Append a synthetic bar for the current incomplete period using 1m bars or ticker data.
 
-	# Calculate how many 1m bars we need
-	total_minutes = int((end_ts - start_ts).total_seconds() / 60) + 10
-	total_minutes = min(total_minutes, 1500)  # API limit
-
-	try:
-		minute_df = _fetch_direct_ohlcv(symbol, "1m", limit=total_minutes)
-	except Exception as exc:
-		print(f"[Warn] Failed to fetch 1m data for {symbol}: {exc}")
-		return pd.DataFrame()
-
-	if minute_df.empty:
-		return pd.DataFrame()
-
-	# Resample to target timeframe
-	agg_rule = f"{tf_minutes}min"
-	synth = minute_df.resample(agg_rule, label="right", closed="right").agg({
-		"open": "first",
-		"high": "max",
-		"low": "min",
-		"close": "last",
-		"volume": "sum",
-	})
-	synth = synth.dropna(subset=["open", "high", "low", "close"])
-	return synth
-
-
-def _maybe_append_synthetic_bar(df, symbol, timeframe, max_synthetic_bars: int = 24):
-	"""Append missing bars by synthesizing from 1-minute data.
-
-	Args:
-		df: Existing OHLCV DataFrame
-		symbol: Trading pair symbol
-		timeframe: Target timeframe (e.g., "1h", "4h")
-		max_synthetic_bars: Maximum number of bars to synthesize (default 24)
+	This ensures simulations always include the very latest data, even if the current
+	hour/period hasn't completed yet.
 	"""
 	try:
 		tf_minutes = timeframe_to_minutes(timeframe)
@@ -405,83 +377,308 @@ def _maybe_append_synthetic_bar(df, symbol, timeframe, max_synthetic_bars: int =
 	bucket = pd.Timedelta(minutes=tf_minutes)
 	current_end = now.floor(f"{tf_minutes}min") + bucket
 
-	# Determine how many bars are missing
-	if df.empty:
-		last_complete_bar = current_end - bucket * max_synthetic_bars
-	else:
-		last_idx = df.index.max()
-		if last_idx >= current_end:
-			return df
-		last_complete_bar = last_idx
-
-	# Calculate bars to synthesize
-	bars_missing = int((current_end - last_complete_bar) / bucket)
-	bars_to_synth = min(bars_missing, max_synthetic_bars)
-
-	if bars_to_synth <= 0:
-		return df
-
-	# Synthesize missing bars from 1m data
-	synth_start = current_end - bucket * bars_to_synth
-	synth_df = _synthesize_bars_from_1m(symbol, timeframe, synth_start, now)
-
-	if synth_df.empty:
-		return df
-
-	# Filter to only include bars after the last existing bar
+	# Check if we already have the current bar
 	if not df.empty:
-		synth_df = synth_df[synth_df.index > last_complete_bar]
+		last_idx = df.index.max()
+		if last_idx > current_end:
+			return df
+		if last_idx == current_end:
+			# Remove existing incomplete bar - we'll recreate it
+			df = df.drop(index=current_end)
 
-	if synth_df.empty:
-		return df
+	current_start = current_end - bucket
+	minutes_needed = max(2, int(np.ceil((now - current_start).total_seconds() / 60.0)) + 2)
 
-	# Combine with existing data
-	combined = pd.concat([df, synth_df])
-	combined = combined[~combined.index.duplicated(keep="last")]
-	combined = combined.sort_index()
-	return combined
+	# Try to fetch 1-minute bars first (most accurate)
+	try:
+		minute_df = _fetch_direct_ohlcv(symbol, "1m", limit=minutes_needed)
+		slice_df = minute_df[(minute_df.index > current_start) & (minute_df.index <= now)]
+
+		if not slice_df.empty:
+			synthetic = pd.DataFrame({
+				"open": float(slice_df["open"].iloc[0]),
+				"high": float(slice_df["high"].max()),
+				"low": float(slice_df["low"].min()),
+				"close": float(slice_df["close"].iloc[-1]),
+				"volume": float(slice_df["volume"].sum()),
+			}, index=[current_end])
+
+			combined = pd.concat([df, synthetic])
+			combined = combined[~combined.index.duplicated(keep="last")]
+			combined = combined.sort_index()
+
+			print(f"[Synthetic] Created current bar for {symbol} {timeframe} using {len(slice_df)} 1m bars (ends {current_end.strftime('%Y-%m-%d %H:%M')})")
+			return combined
+	except Exception as exc:
+		print(f"[Synthetic] Failed to fetch 1m data for {symbol}: {exc}")
+
+	# Fallback: try to use ticker data for current price
+	try:
+		exchange = get_data_exchange()
+		ticker = exchange.fetch_ticker(symbol)
+
+		if ticker and 'last' in ticker and ticker['last']:
+			# For ticker-based bar, we use last price for all OHLC values
+			# This is less accurate but better than no data
+			last_price = float(ticker['last'])
+
+			# Try to get previous close as open price
+			if not df.empty:
+				prev_close = float(df['close'].iloc[-1])
+				synthetic_open = prev_close
+			else:
+				synthetic_open = last_price
+
+			synthetic = pd.DataFrame({
+				"open": synthetic_open,
+				"high": last_price,  # Conservative: use current price
+				"low": last_price,   # Conservative: use current price
+				"close": last_price,
+				"volume": 0.0,  # Ticker doesn't provide volume for incomplete bar
+			}, index=[current_end])
+
+			combined = pd.concat([df, synthetic])
+			combined = combined[~combined.index.duplicated(keep="last")]
+			combined = combined.sort_index()
+
+			print(f"[Synthetic] Created current bar for {symbol} {timeframe} using ticker data @ {last_price:.2f} (ends {current_end.strftime('%Y-%m-%d %H:%M')})")
+			return combined
+	except Exception as exc:
+		print(f"[Synthetic] Failed to fetch ticker for {symbol}: {exc}")
+
+	# If both methods fail, return original dataframe
+	print(f"[Synthetic] Could not create synthetic bar for {symbol} {timeframe} - no data available")
+	return df
 
 
 def fetch_data(symbol, timeframe, limit):
 	key = (symbol, timeframe, limit)
-	# Check if cache is valid (exists and not expired)
-	cache_valid = key in DATA_CACHE and not _is_cache_expired(key)
-
-	if cache_valid:
+	if key in DATA_CACHE:
 		base_df = DATA_CACHE[key]
 	else:
-		cache_df = None
-		exchange = get_data_exchange()
-		supported_timeframes = getattr(exchange, "timeframes", {}) or {}
-		if timeframe in supported_timeframes:
-			cache_df = _fetch_direct_ohlcv(symbol, timeframe, limit)
-		else:
-			target_minutes = timeframe_to_minutes(timeframe)
-			base_minutes = timeframe_to_minutes(TIMEFRAME)
-			if target_minutes < base_minutes or target_minutes % base_minutes != 0:
-				raise ValueError(f"Cannot synthesize timeframe {timeframe} from base {TIMEFRAME}")
-			factor = target_minutes // base_minutes
-			base_limit = limit * factor + 10
-			base_df_source = fetch_data(symbol, TIMEFRAME, base_limit)
-			if base_df_source.empty:
-				cache_df = base_df_source
+		# Try loading from persistent cache first
+		persistent_df = load_ohlcv_from_cache(symbol, timeframe)
+
+		# If limit is None or 0, return ALL cached data (for simulations)
+		if limit is None or limit == 0:
+			if not persistent_df.empty:
+				cache_df = persistent_df
+				print(f"[Cache] Loaded {len(cache_df)} bars for {symbol} {timeframe} from {cache_df.index[0].strftime('%Y-%m-%d')} to {cache_df.index[-1].strftime('%Y-%m-%d')}")
 			else:
-				agg_rule = f"{target_minutes}min"
-				synth = base_df_source.resample(agg_rule, label="right", closed="right").agg({
-					"open": "first",
-					"high": "max",
-					"low": "min",
-					"close": "last",
-					"volume": "sum",
-				})
-				synth = synth.dropna(subset=["open", "high", "low", "close"])
-				cache_df = synth.tail(limit)
+				# Fall back to API with large limit
+				cache_df = _fetch_direct_ohlcv(symbol, timeframe, 10000)
+				if not cache_df.empty:
+					print(f"[API] Fetched {len(cache_df)} bars for {symbol} {timeframe} from {cache_df.index[0].strftime('%Y-%m-%d')} to {cache_df.index[-1].strftime('%Y-%m-%d')}")
+		# If we have enough data in persistent cache, use it
+		elif not persistent_df.empty and len(persistent_df) >= limit:
+			cache_df = persistent_df.tail(limit)
+		else:
+			# Fall back to API
+			cache_df = None
+			exchange = get_data_exchange()
+			supported_timeframes = getattr(exchange, "timeframes", {}) or {}
+			if timeframe in supported_timeframes:
+				cache_df = _fetch_direct_ohlcv(symbol, timeframe, limit)
+			else:
+				target_minutes = timeframe_to_minutes(timeframe)
+				base_minutes = timeframe_to_minutes(TIMEFRAME)
+				if target_minutes < base_minutes or target_minutes % base_minutes != 0:
+					raise ValueError(f"Cannot synthesize timeframe {timeframe} from base {TIMEFRAME}")
+				factor = target_minutes // base_minutes
+				base_limit = limit * factor + 10
+				base_df_source = fetch_data(symbol, TIMEFRAME, base_limit)
+				if base_df_source.empty:
+					cache_df = base_df_source
+				else:
+					agg_rule = f"{target_minutes}min"
+					synth = base_df_source.resample(agg_rule, label="right", closed="right").agg({
+						"open": "first",
+						"high": "max",
+						"low": "min",
+						"close": "last",
+						"volume": "sum",
+					})
+					synth = synth.dropna(subset=["open", "high", "low", "close"])
+					cache_df = synth.tail(limit)
 		DATA_CACHE[key] = cache_df
-		DATA_CACHE_TIMESTAMPS[key] = datetime.now(timezone.utc)
 		base_df = cache_df
 	df_copy = base_df.copy() if base_df is not None else pd.DataFrame()
 	df_with_live = _maybe_append_synthetic_bar(df_copy, symbol, timeframe)
 	return df_with_live
+
+
+def download_historical_ohlcv(symbol, timeframe, start_date, end_date=None):
+	"""
+	Download historical OHLCV data from Binance for a specific date range.
+
+	Args:
+		symbol: Trading pair (e.g., "BTC/EUR")
+		timeframe: Timeframe string (e.g., "1h", "4h", "1d")
+		start_date: Start date (pd.Timestamp or datetime)
+		end_date: End date (pd.Timestamp or datetime), defaults to now
+
+	Returns:
+		DataFrame with OHLCV data for the requested period
+	"""
+	import time
+
+	# Ensure timestamps
+	if isinstance(start_date, str):
+		start_date = pd.Timestamp(start_date, tz=BERLIN_TZ)
+	elif not hasattr(start_date, 'tz_localize'):
+		start_date = pd.Timestamp(start_date)
+	if start_date.tzinfo is None:
+		start_date = start_date.tz_localize(BERLIN_TZ)
+	else:
+		start_date = start_date.tz_convert(BERLIN_TZ)
+
+	if end_date is None:
+		end_date = pd.Timestamp.now(tz=BERLIN_TZ)
+	elif isinstance(end_date, str):
+		end_date = pd.Timestamp(end_date, tz=BERLIN_TZ)
+	elif not hasattr(end_date, 'tz_localize'):
+		end_date = pd.Timestamp(end_date)
+	if end_date.tzinfo is None:
+		end_date = end_date.tz_localize(BERLIN_TZ)
+	else:
+		end_date = end_date.tz_convert(BERLIN_TZ)
+
+	# Convert to UTC milliseconds for Binance API
+	start_ms = int(start_date.tz_convert('UTC').timestamp() * 1000)
+	end_ms = int(end_date.tz_convert('UTC').timestamp() * 1000)
+
+	exchange = get_data_exchange()
+	tf_minutes = timeframe_to_minutes(timeframe)
+	tf_ms = tf_minutes * 60 * 1000
+
+	# Binance limit is 1000 bars per request
+	max_bars_per_request = 1000
+	all_data = []
+	current_start = start_ms
+
+	print(f"[Download] Fetching {symbol} {timeframe} from {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
+
+	batch_count = 0
+	while current_start < end_ms:
+		try:
+			# Fetch batch
+			ohlcv = exchange.fetch_ohlcv(
+				symbol,
+				timeframe=timeframe,
+				since=current_start,
+				limit=max_bars_per_request
+			)
+
+			if not ohlcv:
+				break
+
+			# Add to results
+			all_data.extend(ohlcv)
+			batch_count += 1
+
+			# Move to next batch (last timestamp + 1 interval)
+			last_timestamp = ohlcv[-1][0]
+			current_start = last_timestamp + tf_ms
+
+			# Progress indicator
+			current_date = pd.Timestamp(last_timestamp, unit='ms', tz='UTC').tz_convert(BERLIN_TZ)
+			print(f"[Download] Batch {batch_count}: Got {len(ohlcv)} bars, up to {current_date.strftime('%Y-%m-%d %H:%M')}")
+
+			# Rate limiting - sleep between requests
+			if current_start < end_ms:
+				time.sleep(0.5)  # 500ms between requests to avoid rate limits
+
+		except Exception as exc:
+			print(f"[Download] Error fetching data: {exc}")
+			break
+
+	if not all_data:
+		print(f"[Download] No data retrieved for {symbol} {timeframe}")
+		return pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
+
+	# Convert to DataFrame
+	cols = ["timestamp", "open", "high", "low", "close", "volume"]
+	df = pd.DataFrame(all_data, columns=cols)
+	df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms", utc=True).dt.tz_convert(BERLIN_TZ)
+	df = df.set_index("timestamp")
+
+	# Remove duplicates and sort
+	df = df[~df.index.duplicated(keep='last')]
+	df = df.sort_index()
+
+	# Filter to requested range
+	df = df[(df.index >= start_date) & (df.index <= end_date)]
+
+	print(f"[Download] Complete: {len(df)} bars from {df.index[0].strftime('%Y-%m-%d')} to {df.index[-1].strftime('%Y-%m-%d')}")
+
+	# Save to persistent cache
+	save_ohlcv_to_cache(symbol, timeframe, df)
+
+	return df
+
+
+def get_cache_filename(symbol, timeframe):
+	"""Generate cache filename for a symbol/timeframe pair."""
+	# Replace / with _ for filesystem compatibility
+	safe_symbol = symbol.replace('/', '_')
+	return os.path.join(OHLCV_CACHE_DIR, f"{safe_symbol}_{timeframe}.csv")
+
+
+def load_ohlcv_from_cache(symbol, timeframe):
+	"""Load OHLCV data from persistent cache."""
+	cache_file = get_cache_filename(symbol, timeframe)
+
+	if not os.path.exists(cache_file):
+		return pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
+
+	try:
+		df = pd.read_csv(cache_file, index_col=0, parse_dates=True)
+
+		# Ensure index is DatetimeIndex with proper timezone handling
+		if not isinstance(df.index, pd.DatetimeIndex):
+			# Use utc=True to handle timezone-aware datetime strings in CSV
+			df.index = pd.to_datetime(df.index, utc=True)
+
+		# Ensure timezone is BERLIN_TZ
+		if df.index.tz is None:
+			df.index = df.index.tz_localize('UTC').tz_convert(BERLIN_TZ)
+		else:
+			df.index = df.index.tz_convert(BERLIN_TZ)
+
+		return df
+	except Exception as exc:
+		print(f"[Cache] Error loading {cache_file}: {exc}")
+		return pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
+
+
+def save_ohlcv_to_cache(symbol, timeframe, df):
+	"""Save OHLCV data to persistent cache."""
+	if df.empty:
+		return
+
+	# Create cache directory if needed
+	os.makedirs(OHLCV_CACHE_DIR, exist_ok=True)
+
+	cache_file = get_cache_filename(symbol, timeframe)
+
+	try:
+		# Load existing data if any
+		existing_df = load_ohlcv_from_cache(symbol, timeframe)
+
+		# Merge with new data
+		if not existing_df.empty:
+			combined = pd.concat([existing_df, df])
+			combined = combined[~combined.index.duplicated(keep='last')]
+			combined = combined.sort_index()
+		else:
+			combined = df
+
+		# Save to CSV
+		combined.to_csv(cache_file)
+		print(f"[Cache] Saved {len(combined)} bars to {cache_file}")
+
+	except Exception as exc:
+		print(f"[Cache] Error saving {cache_file}: {exc}")
 
 
 def update_output_targets():
@@ -535,61 +732,8 @@ def get_enabled_directions():
 
 
 def get_highertimeframe_candidates():
-	return [f"{hours}h" for hours in range(3, 25)]
-
-
-def _compute_supertrend_numba(close_arr, high_arr, low_arr, basic_ub_arr, basic_lb_arr):
-	"""Optimized Supertrend calculation using NumPy arrays.
-
-	This vectorized implementation is ~10x faster than row-by-row iteration.
-	"""
-	n = len(close_arr)
-	final_ub = np.empty(n)
-	final_lb = np.empty(n)
-	supertrend = np.empty(n)
-	trend = np.empty(n, dtype=np.int32)
-
-	# Initialize first values
-	final_ub[0] = basic_ub_arr[0]
-	final_lb[0] = basic_lb_arr[0]
-	trend[0] = 1 if close_arr[0] >= final_lb[0] else -1
-	supertrend[0] = final_lb[0] if trend[0] == 1 else final_ub[0]
-
-	# Optimized loop with NumPy arrays (avoids pandas indexing overhead)
-	for i in range(1, n):
-		prev_close = close_arr[i - 1]
-
-		# Calculate final upper/lower bands
-		if basic_ub_arr[i] < final_ub[i - 1] or prev_close > final_ub[i - 1]:
-			final_ub[i] = basic_ub_arr[i]
-		else:
-			final_ub[i] = final_ub[i - 1]
-
-		if basic_lb_arr[i] > final_lb[i - 1] or prev_close < final_lb[i - 1]:
-			final_lb[i] = basic_lb_arr[i]
-		else:
-			final_lb[i] = final_lb[i - 1]
-
-		# Determine trend direction
-		close = close_arr[i]
-		prev_trend = trend[i - 1]
-
-		if prev_trend == 1:
-			if close <= final_lb[i]:
-				trend[i] = -1
-				supertrend[i] = final_ub[i]
-			else:
-				trend[i] = 1
-				supertrend[i] = final_lb[i]
-		else:
-			if close >= final_ub[i]:
-				trend[i] = 1
-				supertrend[i] = final_lb[i]
-			else:
-				trend[i] = -1
-				supertrend[i] = final_ub[i]
-
-	return supertrend, trend
+	# Include shorter timeframes (1h, 2h) plus standard range (3h-24h)
+	return ["1h", "2h"] + [f"{hours}h" for hours in range(3, 25)]
 
 
 def compute_supertrend(df, length=10, factor=3.0):
@@ -602,19 +746,45 @@ def compute_supertrend(df, length=10, factor=3.0):
 	basic_ub = hl2 + factor * atr
 	basic_lb = hl2 - factor * atr
 
-	# Use optimized NumPy-based calculation
-	close_arr = df["close"].to_numpy()
-	high_arr = df["high"].to_numpy()
-	low_arr = df["low"].to_numpy()
-	basic_ub_arr = basic_ub.to_numpy()
-	basic_lb_arr = basic_lb.to_numpy()
+	final_ub = pd.Series(index=df.index, dtype=float)
+	final_lb = pd.Series(index=df.index, dtype=float)
+	for i in range(len(df)):
+		if i == 0:
+			final_ub.iloc[i] = basic_ub.iloc[i]
+			final_lb.iloc[i] = basic_lb.iloc[i]
+		else:
+			prev_ub = final_ub.iloc[i - 1]
+			prev_lb = final_lb.iloc[i - 1]
+			prev_close = df["close"].iloc[i - 1]
+			final_ub.iloc[i] = basic_ub.iloc[i] if (basic_ub.iloc[i] < prev_ub) or (prev_close > prev_ub) else prev_ub
+			final_lb.iloc[i] = basic_lb.iloc[i] if (basic_lb.iloc[i] > prev_lb) or (prev_close < prev_lb) else prev_lb
 
-	supertrend_arr, trend_arr = _compute_supertrend_numba(
-		close_arr, high_arr, low_arr, basic_ub_arr, basic_lb_arr
-	)
+	supertrend = pd.Series(index=df.index, dtype=float)
+	trend = pd.Series(index=df.index, dtype=int)
+	for i in range(len(df)):
+		close = df["close"].iloc[i]
+		if i == 0:
+			trend.iloc[i] = 1 if close >= final_lb.iloc[i] else -1
+			supertrend.iloc[i] = final_lb.iloc[i] if trend.iloc[i] == 1 else final_ub.iloc[i]
+		else:
+			prev_trend = trend.iloc[i - 1]
+			if prev_trend == 1:
+				if close <= final_lb.iloc[i]:
+					trend.iloc[i] = -1
+					supertrend.iloc[i] = final_ub.iloc[i]
+				else:
+					trend.iloc[i] = 1
+					supertrend.iloc[i] = final_lb.iloc[i]
+			else:
+				if close >= final_ub.iloc[i]:
+					trend.iloc[i] = 1
+					supertrend.iloc[i] = final_lb.iloc[i]
+				else:
+					trend.iloc[i] = -1
+					supertrend.iloc[i] = final_ub.iloc[i]
 
-	df["supertrend"] = supertrend_arr
-	df["st_trend"] = trend_arr
+	df["supertrend"] = supertrend
+	df["st_trend"] = trend.fillna(0).astype(int)
 	df["atr"] = atr
 	df["indicator_line"] = df["supertrend"]
 	df["trend_flag"] = df["st_trend"]
@@ -679,27 +849,6 @@ def compute_psar(df, step=0.02, max_step=0.2):
 	return df
 
 
-def _compute_jma_numpy(prices: np.ndarray, alpha: float, beta: float, phase_ratio: float) -> np.ndarray:
-	"""Optimized JMA calculation using NumPy arrays.
-
-	Avoids pandas indexing overhead for ~5x speedup.
-	"""
-	n = len(prices)
-	jma_values = np.empty(n)
-	e0 = prices[0]
-	e1 = 0.0
-	e2 = 0.0
-
-	for i in range(n):
-		price = prices[i]
-		e0 = (1.0 - alpha) * price + alpha * e0
-		e1 = price - e0
-		e2 = (1.0 - beta) * e1 + beta * e2
-		jma_values[i] = e0 + phase_ratio * e2
-
-	return jma_values
-
-
 def jurik_moving_average(series: pd.Series, length: int, phase: int) -> pd.Series:
 	if series.empty:
 		return pd.Series(index=series.index, dtype=float)
@@ -708,12 +857,17 @@ def jurik_moving_average(series: pd.Series, length: int, phase: int) -> pd.Serie
 	beta = 0.45 * (length - 1) / (0.45 * (length - 1) + 2) if length > 1 else 0.0
 	alpha = beta ** 2
 	phase_ratio = (phase + 100) / 200
-
-	# Use optimized NumPy calculation
-	prices = series.to_numpy()
-	jma_arr = _compute_jma_numpy(prices, alpha, beta, phase_ratio)
-
-	return pd.Series(jma_arr, index=series.index)
+	jma_values = pd.Series(index=series.index, dtype=float)
+	e0 = float(series.iloc[0])
+	e1 = 0.0
+	e2 = 0.0
+	for idx, (_, price) in enumerate(series.items()):
+		e0 = (1 - alpha) * price + alpha * e0
+		e1 = price - e0
+		e2 = (1 - beta) * e1 + beta * e2
+		jma = e0 + phase_ratio * e2
+		jma_values.iloc[idx] = jma
+	return jma_values
 
 
 def compute_jma(df, length=20, phase=0):
@@ -729,21 +883,6 @@ def compute_jma(df, length=20, phase=0):
 	return df
 
 
-def _compute_kama_numpy(close_arr: np.ndarray, sc_arr: np.ndarray) -> np.ndarray:
-	"""Optimized KAMA calculation using NumPy arrays.
-
-	Avoids pandas indexing overhead for ~5x speedup.
-	"""
-	n = len(close_arr)
-	kama = np.empty(n)
-	kama[0] = close_arr[0]
-
-	for i in range(1, n):
-		kama[i] = kama[i - 1] + sc_arr[i] * (close_arr[i] - kama[i - 1])
-
-	return kama
-
-
 def compute_kama(df, length=10, slow_length=30, fast_length=2):
 	df = df.copy()
 	close = df["close"].astype(float)
@@ -756,19 +895,54 @@ def compute_kama(df, length=10, slow_length=30, fast_length=2):
 	volatility = close.diff().abs().rolling(length).sum()
 	er = (direction / volatility).fillna(0.0).clip(lower=0.0, upper=1.0)
 	sc = (er * (fast_sc - slow_sc) + slow_sc) ** 2
-
-	# Use optimized NumPy calculation
-	close_arr = close.to_numpy()
-	sc_arr = sc.to_numpy()
-	kama_arr = _compute_kama_numpy(close_arr, sc_arr)
-
-	trend = np.where(close_arr >= kama_arr, 1, -1)
-	df["kama"] = kama_arr
+	kama = close.copy()
+	for i in range(1, len(close)):
+		prev = kama.iloc[i - 1]
+		kama.iloc[i] = prev + sc.iloc[i] * (close.iloc[i] - prev)
+	trend = np.where(close >= kama, 1, -1)
+	df["kama"] = kama
 	df["kama_trend"] = trend
 	atr = AverageTrueRange(df["high"], df["low"], df["close"], window=ATR_WINDOW).average_true_range()
 	df["atr"] = atr
 	df["indicator_line"] = df["kama"]
 	df["trend_flag"] = df["kama_trend"]
+	return df
+
+
+def calculate_jma_trend_filter(df, length=20, phase=0, thresh_up=0.0001, thresh_down=-0.0001):
+	"""
+	Calculate JMA trend filter using double-smoothed JMA and slope.
+
+	Algorithm:
+	1. Calculate JMA of close prices
+	2. Calculate JMA of the JMA (double smoothing for minimal lag)
+	3. Calculate slope = first difference of double-smoothed JMA
+	4. Classify trend:
+	   - UP: slope > thresh_up
+	   - DOWN: slope < thresh_down
+	   - FLAT: between thresholds
+
+	Returns dataframe with 'jma_trend_slope' and 'jma_trend_direction' columns
+	"""
+	df = df.copy()
+
+	# Step 1: Calculate JMA of close
+	jma_1 = jurik_moving_average(df["close"], length=length, phase=phase)
+
+	# Step 2: Calculate JMA of JMA (double smoothing)
+	jma_2 = jurik_moving_average(jma_1, length=length, phase=phase)
+
+	# Step 3: Calculate slope (first difference)
+	slope = jma_2.diff()
+
+	# Step 4: Classify trend
+	trend_direction = pd.Series("FLAT", index=df.index)
+	trend_direction[slope > thresh_up] = "UP"
+	trend_direction[slope < thresh_down] = "DOWN"
+
+	df["jma_trend_slope"] = slope
+	df["jma_trend_direction"] = trend_direction
+
 	return df
 
 
@@ -851,53 +1025,18 @@ def compute_mama(df, fast_limit=0.5, slow_limit=0.05):
 	return df
 
 
-def compute_indicator(df, param_a, param_b, use_cache: bool = True):
-	"""Compute the current indicator with optional caching for backtesting performance.
-
-	Args:
-		df: Input DataFrame with OHLCV data
-		param_a: First indicator parameter
-		param_b: Second indicator parameter
-		use_cache: Whether to use the indicator cache (default True)
-
-	Returns:
-		DataFrame with indicator columns added
-	"""
-	# Try to retrieve from cache first
-	if use_cache:
-		df_hash = _hash_dataframe(df)
-		cache_key = _get_indicator_cache_key(INDICATOR_TYPE, df_hash, param_a, param_b)
-
-		if cache_key in INDICATOR_CACHE:
-			# Return a copy to prevent mutation of cached data
-			return INDICATOR_CACHE[cache_key].copy()
-
-	# Compute the indicator
+def compute_indicator(df, param_a, param_b):
 	if INDICATOR_TYPE == "supertrend" or INDICATOR_TYPE == "htf_crossover":
-		result = compute_supertrend(df, length=int(param_a), factor=float(param_b))
-	elif INDICATOR_TYPE == "psar":
-		result = compute_psar(df, step=float(param_a), max_step=float(param_b))
-	elif INDICATOR_TYPE == "jma":
-		result = compute_jma(df, length=int(param_a), phase=int(param_b))
-	elif INDICATOR_TYPE == "kama":
-		result = compute_kama(df, length=int(param_a), slow_length=int(param_b))
-	elif INDICATOR_TYPE == "mama":
-		result = compute_mama(df, fast_limit=float(param_a), slow_limit=float(param_b))
-	else:
-		raise ValueError(f"Unsupported INDICATOR_TYPE: {INDICATOR_TYPE}")
-
-	# Store in cache if enabled (with size limit)
-	if use_cache:
-		if len(INDICATOR_CACHE) >= INDICATOR_CACHE_MAX_SIZE:
-			# Remove oldest entry (first key)
-			try:
-				oldest_key = next(iter(INDICATOR_CACHE))
-				del INDICATOR_CACHE[oldest_key]
-			except StopIteration:
-				pass
-		INDICATOR_CACHE[cache_key] = result.copy()
-
-	return result
+		return compute_supertrend(df, length=int(param_a), factor=float(param_b))
+	if INDICATOR_TYPE == "psar":
+		return compute_psar(df, step=float(param_a), max_step=float(param_b))
+	if INDICATOR_TYPE == "jma":
+		return compute_jma(df, length=int(param_a), phase=int(param_b))
+	if INDICATOR_TYPE == "kama":
+		return compute_kama(df, length=int(param_a), slow_length=int(param_b))
+	if INDICATOR_TYPE == "mama":
+		return compute_mama(df, fast_limit=float(param_a), slow_limit=float(param_b))
+	raise ValueError(f"Unsupported INDICATOR_TYPE: {INDICATOR_TYPE}")
 
 
 def attach_higher_timeframe_trend(df_low, symbol):
@@ -968,19 +1107,307 @@ def attach_momentum_filter(df):
 	return df
 
 
-def prepare_symbol_dataframe(symbol):
-	df = fetch_data(symbol, TIMEFRAME, LOOKBACK)
-	df = attach_higher_timeframe_trend(df, symbol)
-	df = attach_momentum_filter(df)
+def attach_jma_trend_filter(df):
+	"""
+	Attach JMA trend filter to dataframe.
+
+	Calculates double-smoothed JMA and slope to classify trend as UP/DOWN/FLAT.
+	Only allows LONG entries when trend is UP, SHORT entries when trend is DOWN.
+	"""
+	df = df.copy()
+	if not USE_JMA_TREND_FILTER:
+		df["jma_trend_slope"] = np.nan
+		df["jma_trend_direction"] = "FLAT"
+		return df
+
+	df = calculate_jma_trend_filter(
+		df,
+		length=JMA_TREND_LENGTH,
+		phase=JMA_TREND_PHASE,
+		thresh_up=JMA_TREND_THRESH_UP,
+		thresh_down=JMA_TREND_THRESH_DOWN
+	)
 	return df
 
 
-def backtest_supertrend(df, atr_stop_mult=None, direction="long", min_hold_bars=0, min_hold_days=None):
+def attach_ma_slope_filter(df, indicator_col="close"):
+	"""
+	Calculate moving average slope to detect if MA is actually rising/falling.
+
+	Prevents entries when price crosses MA but MA is still falling (bull trap) or vice versa.
+	"""
+	df = df.copy()
+	if not USE_MA_SLOPE_FILTER or indicator_col not in df.columns:
+		df["ma_slope_direction"] = "NEUTRAL"
+		df["ma_slope_change_pct"] = 0.0
+		return df
+
+	# Calculate MA slope over the specified period
+	ma_values = df[indicator_col].rolling(MA_SLOPE_PERIOD).mean()
+
+	# Calculate percentage change in MA over the period
+	ma_change = ma_values.pct_change(MA_SLOPE_PERIOD)
+	df["ma_slope_change_pct"] = ma_change
+
+	# Classify slope direction
+	df["ma_slope_direction"] = np.where(
+		ma_change > MA_SLOPE_MIN_CHANGE, "UP",
+		np.where(ma_change < -MA_SLOPE_MIN_CHANGE, "DOWN", "NEUTRAL")
+	)
+
+	return df
+
+
+def detect_candlestick_reversal_pattern(df):
+	"""
+	Detect bearish reversal patterns that signal bull traps:
+	- Shooting Star (long upper wick after uptrend)
+	- Bearish Engulfing (large red candle engulfing previous green)
+	- Evening Star (3-candle reversal)
+	- Dark Cloud Cover (bearish reversal)
+	"""
+	df = df.copy()
+	if not USE_CANDLESTICK_PATTERN_FILTER:
+		df["bearish_reversal"] = False
+		df["bullish_reversal"] = False
+		return df
+
+	# Sensitivity thresholds
+	sensitivity_map = {
+		"low": {"body_ratio": 0.7, "wick_ratio": 2.5},
+		"medium": {"body_ratio": 0.6, "wick_ratio": 2.0},
+		"high": {"body_ratio": 0.5, "wick_ratio": 1.5},
+	}
+	thresholds = sensitivity_map.get(PATTERN_FILTER_SENSITIVITY, sensitivity_map["medium"])
+
+	o = df["open"]
+	h = df["high"]
+	l = df["low"]
+	c = df["close"]
+
+	# Calculate body and wick sizes
+	body = abs(c - o)
+	range_size = h - l
+	upper_wick = h - np.maximum(o, c)
+	lower_wick = np.minimum(o, c) - l
+
+	# Shooting Star: Small body at bottom, long upper wick
+	shooting_star = (
+		(upper_wick > body * thresholds["wick_ratio"]) &
+		(body > 0) &
+		(lower_wick < body * 0.3)
+	)
+
+	# Bearish Engulfing: Current red candle engulfs previous green candle
+	prev_close = c.shift(1)
+	prev_open = o.shift(1)
+	bearish_engulfing = (
+		(prev_close > prev_open) &  # Previous was green
+		(c < o) &  # Current is red
+		(c < prev_open) &  # Current close below previous open
+		(o > prev_close) &  # Current open above previous close
+		(body > body.shift(1) * 1.2)  # Current body larger
+	)
+
+	# Combine patterns
+	df["bearish_reversal"] = shooting_star | bearish_engulfing
+
+	# Bullish reversal patterns (for short entries)
+	hammer = (
+		(lower_wick > body * thresholds["wick_ratio"]) &
+		(body > 0) &
+		(upper_wick < body * 0.3)
+	)
+
+	bullish_engulfing = (
+		(prev_close < prev_open) &  # Previous was red
+		(c > o) &  # Current is green
+		(c > prev_open) &  # Current close above previous open
+		(o < prev_close) &  # Current open below previous close
+		(body > body.shift(1) * 1.2)
+	)
+
+	df["bullish_reversal"] = hammer | bullish_engulfing
+
+	return df
+
+
+def detect_divergence(df):
+	"""
+	Detect price/RSI divergence to identify potential bull/bear traps.
+
+	Bearish divergence: Price makes higher high, RSI makes lower high (bull trap)
+	Bullish divergence: Price makes lower low, RSI makes higher low (bear trap)
+	"""
+	df = df.copy()
+	if not USE_DIVERGENCE_FILTER:
+		df["bearish_divergence"] = False
+		df["bullish_divergence"] = False
+		return df
+
+	# Calculate RSI if not already present
+	if "rsi" not in df.columns:
+		delta = df["close"].diff()
+		gain = np.where(delta > 0, delta, 0.0)
+		loss = np.where(delta < 0, -delta, 0.0)
+		roll_gain = pd.Series(gain, index=df.index).rolling(DIVERGENCE_RSI_PERIOD).mean()
+		roll_loss = pd.Series(loss, index=df.index).rolling(DIVERGENCE_RSI_PERIOD).mean()
+		rs = roll_gain / roll_loss.replace(0, np.nan)
+		df["rsi"] = 100 - (100 / (1 + rs))
+
+	# Find local highs and lows in price and RSI
+	close = df["close"]
+	rsi = df["rsi"]
+
+	# Rolling max/min over lookback period
+	price_high = close.rolling(DIVERGENCE_LOOKBACK, center=True).max()
+	price_low = close.rolling(DIVERGENCE_LOOKBACK, center=True).min()
+	rsi_high = rsi.rolling(DIVERGENCE_LOOKBACK, center=True).max()
+	rsi_low = rsi.rolling(DIVERGENCE_LOOKBACK, center=True).min()
+
+	# Detect peaks/troughs
+	is_price_peak = (close == price_high)
+	is_price_trough = (close == price_low)
+
+	# Bearish divergence: Price making higher highs, RSI making lower highs
+	prev_price_peak = close.where(is_price_peak).ffill()
+	prev_rsi_at_price_peak = rsi.where(is_price_peak).ffill()
+
+	bearish_div = (
+		is_price_peak &
+		(close > prev_price_peak.shift(1)) &
+		(rsi < prev_rsi_at_price_peak.shift(1)) &
+		(rsi > 50)  # Only in overbought territory
+	)
+
+	# Bullish divergence: Price making lower lows, RSI making higher lows
+	prev_price_trough = close.where(is_price_trough).ffill()
+	prev_rsi_at_price_trough = rsi.where(is_price_trough).ffill()
+
+	bullish_div = (
+		is_price_trough &
+		(close < prev_price_trough.shift(1)) &
+		(rsi > prev_rsi_at_price_trough.shift(1)) &
+		(rsi < 50)  # Only in oversold territory
+	)
+
+	df["bearish_divergence"] = bearish_div.fillna(False)
+	df["bullish_divergence"] = bullish_div.fillna(False)
+
+	return df
+
+
+def prepare_symbol_dataframe(symbol, use_all_cached_data=False):
+	"""
+	Prepare symbol dataframe with indicators.
+
+	Args:
+		symbol: Trading pair
+		use_all_cached_data: If True, load ALL cached historical data (for simulations)
+	                         If False, use LOOKBACK limit (for live trading)
+	"""
+	limit = None if use_all_cached_data else LOOKBACK
+	df = fetch_data(symbol, TIMEFRAME, limit)
+	df = attach_higher_timeframe_trend(df, symbol)
+	df = attach_momentum_filter(df)
+	df = attach_jma_trend_filter(df)
+	df = attach_ma_slope_filter(df)
+	df = detect_candlestick_reversal_pattern(df)
+	df = detect_divergence(df)
+	return df
+
+
+def calculate_dynamic_min_min_hold_bars(
+	symbol: str,
+	recent_trades_df: pd.DataFrame = None,
+	lookback_days: int = 30,
+	min_days: int = 0,
+	max_days: int = 7
+) -> int:
+	"""
+	Calculate optimal minimum hold days dynamically based on recent performance and volatility.
+
+	Strategy:
+	- High volatility -> shorter hold times (let profits run, cut losses quickly)
+	- Low volatility -> longer hold times (avoid whipsaws)
+	- Recent losses -> increase hold time slightly (avoid overtrading)
+	- Recent wins -> maintain or reduce hold time
+
+	Args:
+		symbol: Trading symbol
+		recent_trades_df: DataFrame of recent trades (optional)
+		lookback_days: How many days to look back for volatility
+		min_days: Minimum hold days allowed
+		max_days: Maximum hold days allowed
+
+	Returns:
+		Optimal minimum hold days (integer)
+	"""
+	try:
+		# Fetch recent data for volatility calculation
+		lookback_bars = max(100, lookback_days * BARS_PER_DAY)
+		df = fetch_data(symbol, TIMEFRAME, lookback_bars)
+
+		if df.empty or len(df) < 20:
+			return min_days
+
+		# Calculate ATR-based volatility score
+		atr_series = AverageTrueRange(df["high"], df["low"], df["close"], window=ATR_WINDOW).average_true_range()
+		recent_atr = float(atr_series.iloc[-1]) if not atr_series.empty else 0.0
+		avg_atr = float(atr_series.mean()) if not atr_series.empty else 0.0
+		avg_price = float(df["close"].mean())
+
+		if avg_price == 0 or avg_atr == 0:
+			return min_days
+
+		# Volatility ratio: higher means more volatile
+		volatility_ratio = recent_atr / avg_atr if avg_atr > 0 else 1.0
+		atr_pct = (avg_atr / avg_price) * 100  # ATR as % of price
+
+		# Base calculation: Higher volatility -> lower hold days
+		# ATR% ranges typically: 1-3% low vol, 3-7% medium vol, 7%+ high vol
+		if atr_pct < 2.0:  # Very low volatility
+			base_hold = max_days
+		elif atr_pct < 4.0:  # Low-medium volatility
+			base_hold = (min_days + max_days) // 2 + 1
+		elif atr_pct < 7.0:  # Medium-high volatility
+			base_hold = (min_days + max_days) // 2
+		else:  # High volatility
+			base_hold = min_days
+
+		# Adjust based on recent volatility spike
+		if volatility_ratio > 1.5:  # Volatility spike
+			base_hold = max(min_days, base_hold - 1)
+		elif volatility_ratio < 0.7:  # Volatility drop
+			base_hold = min(max_days, base_hold + 1)
+
+		# Adjust based on recent trade performance (if provided)
+		if recent_trades_df is not None and not recent_trades_df.empty:
+			# Look at last 10 trades
+			recent = recent_trades_df.tail(10)
+			if len(recent) >= 3:
+				win_rate = len(recent[recent["pnl"] > 0]) / len(recent)
+				avg_pnl = recent["pnl"].mean()
+
+				# If losing streak, increase hold time to avoid overtrading
+				if win_rate < 0.3:
+					base_hold = min(max_days, base_hold + 1)
+				# If winning streak with good profits, maintain or reduce
+				elif win_rate > 0.6 and avg_pnl > 0:
+					base_hold = max(min_days, base_hold)
+
+		return int(np.clip(base_hold, min_days, max_days))
+
+	except Exception as exc:
+		print(f"[DynamicHold] Error calculating for {symbol}: {exc}")
+		return min_days
+
+
+def backtest_supertrend(df, atr_stop_mult=None, direction="long", min_hold_bars=0):
 	direction = direction.lower()
 	if direction not in {"long", "short"}:
 		raise ValueError("direction must be 'long' or 'short'")
 	min_hold_bars = 0 if min_hold_bars is None else max(0, int(min_hold_bars))
-	min_hold_days = min_hold_days if min_hold_days is not None else 0
 
 	long_mode = direction == "long"
 	equity = START_EQUITY
@@ -1028,9 +1455,46 @@ def backtest_supertrend(df, atr_stop_mult=None, direction="long", min_hold_bars=
 						close_curr = float(df["close"].iloc[i])
 						breakout_allows = close_curr > prev_high if long_mode else close_curr < prev_low
 
-			if long_mode and enter_long and htf_allows and momentum_allows and breakout_allows:
+			jma_trend_allows = True
+			if USE_JMA_TREND_FILTER and "jma_trend_direction" in df.columns:
+				trend_direction = df["jma_trend_direction"].iloc[i]
+				if long_mode:
+					jma_trend_allows = trend_direction == "UP"
+				else:
+					jma_trend_allows = trend_direction == "DOWN"
+
+			# MA Slope Filter: Require MA to be trending in entry direction
+			ma_slope_allows = True
+			if USE_MA_SLOPE_FILTER and "ma_slope_direction" in df.columns:
+				slope_dir = df["ma_slope_direction"].iloc[i]
+				if long_mode:
+					ma_slope_allows = slope_dir == "UP"
+				else:
+					ma_slope_allows = slope_dir == "DOWN"
+
+			# Candlestick Pattern Filter: Avoid reversal patterns
+			pattern_allows = True
+			if USE_CANDLESTICK_PATTERN_FILTER:
+				if long_mode and "bearish_reversal" in df.columns:
+					# Don't enter long if bearish reversal detected
+					pattern_allows = not df["bearish_reversal"].iloc[i]
+				elif not long_mode and "bullish_reversal" in df.columns:
+					# Don't enter short if bullish reversal detected
+					pattern_allows = not df["bullish_reversal"].iloc[i]
+
+			# Divergence Filter: Avoid entries during divergence
+			divergence_allows = True
+			if USE_DIVERGENCE_FILTER:
+				if long_mode and "bearish_divergence" in df.columns:
+					# Don't enter long if bearish divergence (bull trap signal)
+					divergence_allows = not df["bearish_divergence"].iloc[i]
+				elif not long_mode and "bullish_divergence" in df.columns:
+					# Don't enter short if bullish divergence (bear trap signal)
+					divergence_allows = not df["bullish_divergence"].iloc[i]
+
+			if long_mode and enter_long and htf_allows and momentum_allows and breakout_allows and jma_trend_allows and ma_slope_allows and pattern_allows and divergence_allows:
 				in_position = True
-			elif (not long_mode) and enter_short and htf_allows and momentum_allows and breakout_allows:
+			elif (not long_mode) and enter_short and htf_allows and momentum_allows and breakout_allows and jma_trend_allows and ma_slope_allows and pattern_allows and divergence_allows:
 				in_position = True
 
 			if in_position:
@@ -1040,19 +1504,103 @@ def backtest_supertrend(df, atr_stop_mult=None, direction="long", min_hold_bars=
 				atr_val = df["atr"].iloc[i]
 				entry_atr = float(atr_val) if not np.isnan(atr_val) else 0.0
 				bars_in_position = 0
+				# Initialize exit strategy tracking
+				highest_price = entry_price if long_mode else entry_price
+				lowest_price = entry_price if not long_mode else entry_price
+				remaining_position = 1.0  # 100% of position
+				partial_exits_taken = []  # Track which partial exit levels hit
 			continue
 
 		bars_in_position += 1
 		stake = entry_capital if entry_capital is not None else equity / STAKE_DIVISOR
+		current_stake = stake * remaining_position
 		atr_buffer = entry_atr if entry_atr is not None else 0.0
 		stop_price = None
 		if atr_stop_mult is not None and atr_buffer and atr_buffer > 0:
 			stop_price = entry_price - atr_stop_mult * atr_buffer if long_mode else entry_price + atr_stop_mult * atr_buffer
 
+		# Track peak price for trailing stop
+		current_price = float(df["close"].iloc[i])
+		current_high = float(df["high"].iloc[i])
+		current_low = float(df["low"].iloc[i])
+
+		if long_mode:
+			highest_price = max(highest_price, current_high)
+		else:
+			lowest_price = min(lowest_price, current_low)
+
 		exit_price = None
 		exit_reason = None
+		partial_exit_amount = 0.0
 
-		if stop_price is not None:
+		# Advanced Exit Strategies (checked BEFORE traditional exits)
+
+		# 1. PROFIT TARGET - Full exit at target
+		if USE_PROFIT_TARGET and exit_price is None:
+			profit_pct = (current_price - entry_price) / entry_price if long_mode else (entry_price - current_price) / entry_price
+			if profit_pct >= PROFIT_TARGET_PCT:
+				exit_price = current_price
+				exit_reason = f"Profit target {PROFIT_TARGET_PCT*100:.1f}%"
+
+		# 2. PARTIAL EXITS at profit levels
+		if USE_PARTIAL_EXIT and remaining_position > 0.4 and exit_price is None:
+			profit_pct = (current_price - entry_price) / entry_price if long_mode else (entry_price - current_price) / entry_price
+			for level_idx, level in enumerate(PARTIAL_EXIT_LEVELS):
+				if level_idx not in partial_exits_taken and profit_pct >= level["profit_pct"]:
+					# Take partial exit
+					exit_amount = level["exit_pct"]
+					partial_exit_amount = exit_amount
+					remaining_position -= exit_amount
+					partial_exits_taken.append(level_idx)
+					# Record partial exit as separate trade
+					price_diff = current_price - entry_price if long_mode else entry_price - current_price
+					partial_stake = stake * exit_amount
+					gross_pnl = price_diff / entry_price * partial_stake
+					fees = partial_stake * FEE_RATE * 2.0
+					pnl_usd = gross_pnl - fees
+					equity += pnl_usd
+					trades.append({
+						"Zeit": entry_ts,
+						"Entry": entry_price,
+						"ExitZeit": ts,
+						"ExitPreis": current_price,
+						"Stake": partial_stake,
+						"Fees": fees,
+						"ExitReason": f"Partial exit {level['profit_pct']*100:.0f}% ({exit_amount*100:.0f}%)",
+						"PnL (USD)": pnl_usd,
+						"Equity": equity,
+						"Direction": direction.capitalize(),
+						"MinHoldBars": min_hold_bars
+					})
+					if remaining_position <= 0.01:  # Essentially fully exited
+						in_position = False
+						entry_capital = None
+						entry_atr = None
+						bars_in_position = 0
+						continue
+					break
+
+		# 3. TRAILING STOP - Exit on drawdown from peak
+		if USE_TRAILING_STOP and exit_price is None:
+			profit_pct = (current_price - entry_price) / entry_price if long_mode else (entry_price - current_price) / entry_price
+
+			# Only activate trailing stop after minimum profit reached
+			if profit_pct >= TRAILING_STOP_ACTIVATION_PCT:
+				if long_mode:
+					# Check drawdown from highest price
+					drawdown_from_peak = (highest_price - current_low) / highest_price
+					if drawdown_from_peak >= TRAILING_STOP_PCT:
+						exit_price = current_price
+						exit_reason = f"Trailing stop {TRAILING_STOP_PCT*100:.1f}%"
+				else:
+					# Short: check rise from lowest price
+					rise_from_trough = (current_high - lowest_price) / lowest_price
+					if rise_from_trough >= TRAILING_STOP_PCT:
+						exit_price = current_price
+						exit_reason = f"Trailing stop {TRAILING_STOP_PCT*100:.1f}%"
+
+		# Traditional exits (ATR stop, Trend flip) - only if no advanced exit triggered
+		if stop_price is not None and exit_price is None:
 			if long_mode and float(df["low"].iloc[i]) <= stop_price:
 				exit_price = stop_price
 				exit_reason = "ATR stop"
@@ -1071,9 +1619,10 @@ def backtest_supertrend(df, atr_stop_mult=None, direction="long", min_hold_bars=
 		if exit_price is None:
 			continue
 
+		# Calculate PnL for remaining position
 		price_diff = exit_price - entry_price if long_mode else entry_price - exit_price
-		gross_pnl = price_diff / entry_price * stake
-		fees = stake * FEE_RATE * 2.0
+		gross_pnl = price_diff / entry_price * current_stake
+		fees = current_stake * FEE_RATE * 2.0
 		pnl_usd = gross_pnl - fees
 		equity += pnl_usd
 		trades.append({
@@ -1081,13 +1630,13 @@ def backtest_supertrend(df, atr_stop_mult=None, direction="long", min_hold_bars=
 			"Entry": entry_price,
 			"ExitZeit": ts,
 			"ExitPreis": exit_price,
-			"Stake": stake,
+			"Stake": current_stake,
 			"Fees": fees,
 			"ExitReason": exit_reason,
 			"PnL (USD)": pnl_usd,
 			"Equity": equity,
 			"Direction": direction.capitalize(),
-			"MinHoldDays": min_hold_days
+			"MinHoldBars": min_hold_bars
 		})
 		in_position = False
 		entry_capital = None
@@ -1115,13 +1664,293 @@ def backtest_supertrend(df, atr_stop_mult=None, direction="long", min_hold_bars=
 			"PnL (USD)": pnl_usd,
 			"Equity": equity,
 			"Direction": direction.capitalize(),
-			"MinHoldDays": min_hold_days
+			"MinHoldBars": min_hold_bars
 		})
 
 	return pd.DataFrame(trades)
 
 
-def performance_report(trades_df, symbol, param_a, param_b, direction, min_hold_days):
+def backtest_htf_crossover(df, atr_stop_mult=None, direction="long", min_hold_bars=0):
+	"""
+	Backtest HTF Crossover Strategy
+	Entry: Close crosses HTF indicator (upward for long, downward for short)
+	Exit: Close crosses HTF indicator (opposite direction) or ATR stop
+	"""
+	direction = direction.lower()
+	if direction not in {"long", "short"}:
+		raise ValueError("direction must be 'long' or 'short'")
+	min_hold_bars = 0 if min_hold_bars is None else max(0, int(min_hold_bars))
+
+	long_mode = direction == "long"
+	equity = START_EQUITY
+	trades = []
+	in_position = False
+	entry_price = None
+	entry_ts = None
+	entry_capital = None
+	entry_atr = None
+	bars_in_position = 0
+
+	# Check if HTF indicator column exists
+	if "indicator_line" not in df.columns:
+		print("[Warning] HTF indicator column 'indicator_line' not found")
+		return pd.DataFrame(trades)
+
+	for i in range(1, len(df)):
+		ts = df.index[i]
+		curr = df.iloc[i]
+		prev = df.iloc[i - 1]
+
+		close_curr = float(curr["close"])
+		close_prev = float(prev["close"])
+		htf_curr = float(curr["indicator_line"])
+		htf_prev = float(prev["indicator_line"])
+
+		# Entry logic: Close crosses HTF indicator
+		if not in_position:
+			crossover_entry = False
+
+			if long_mode:
+				# Long entry: Close crosses above HTF
+				if close_prev < htf_prev and close_curr > htf_curr:
+					crossover_entry = True
+			else:
+				# Short entry: Close crosses below HTF
+				if close_prev > htf_prev and close_curr < htf_curr:
+					crossover_entry = True
+
+			# Apply filters (HTF, momentum, breakout) like in trend_flip strategy
+			if crossover_entry:
+				htf_value = int(curr["htf_trend"]) if "htf_trend" in df.columns else 0
+				htf_allows = True
+				if USE_HIGHER_TIMEFRAME_FILTER:
+					htf_allows = htf_value >= 1 if long_mode else htf_value <= -1
+
+				momentum_allows = True
+				if USE_MOMENTUM_FILTER and "momentum" in df.columns:
+					mom_value = curr["momentum"]
+					if pd.isna(mom_value):
+						momentum_allows = False
+					else:
+						momentum_allows = mom_value >= RSI_LONG_THRESHOLD if long_mode else mom_value <= RSI_SHORT_THRESHOLD
+
+				breakout_allows = True
+				if USE_BREAKOUT_FILTER:
+					atr_curr = curr["atr"]
+					if atr_curr is None or np.isnan(atr_curr) or atr_curr <= 0:
+						breakout_allows = False
+					else:
+						candle_range = float(curr["high"] - curr["low"])
+						breakout_allows = candle_range >= BREAKOUT_ATR_MULT * float(atr_curr)
+						if breakout_allows and BREAKOUT_REQUIRE_DIRECTION:
+							prev_high = float(prev["high"])
+							prev_low = float(prev["low"])
+							breakout_allows = close_curr > prev_high if long_mode else close_curr < prev_low
+
+				jma_trend_allows = True
+				if USE_JMA_TREND_FILTER and "jma_trend_direction" in df.columns:
+					trend_direction = curr["jma_trend_direction"]
+					if long_mode:
+						jma_trend_allows = trend_direction == "UP"
+					else:
+						jma_trend_allows = trend_direction == "DOWN"
+
+				# MA Slope Filter
+				ma_slope_allows = True
+				if USE_MA_SLOPE_FILTER and "ma_slope_direction" in df.columns:
+					slope_dir = curr["ma_slope_direction"]
+					if long_mode:
+						ma_slope_allows = slope_dir == "UP"
+					else:
+						ma_slope_allows = slope_dir == "DOWN"
+
+				# Candlestick Pattern Filter
+				pattern_allows = True
+				if USE_CANDLESTICK_PATTERN_FILTER:
+					if long_mode and "bearish_reversal" in df.columns:
+						pattern_allows = not curr["bearish_reversal"]
+					elif not long_mode and "bullish_reversal" in df.columns:
+						pattern_allows = not curr["bullish_reversal"]
+
+				# Divergence Filter
+				divergence_allows = True
+				if USE_DIVERGENCE_FILTER:
+					if long_mode and "bearish_divergence" in df.columns:
+						divergence_allows = not curr["bearish_divergence"]
+					elif not long_mode and "bullish_divergence" in df.columns:
+						divergence_allows = not curr["bullish_divergence"]
+
+				if htf_allows and momentum_allows and breakout_allows and jma_trend_allows and ma_slope_allows and pattern_allows and divergence_allows:
+					in_position = True
+					entry_price = close_curr
+					entry_ts = ts
+					entry_capital = equity / STAKE_DIVISOR
+					atr_val = curr["atr"]
+					entry_atr = float(atr_val) if not np.isnan(atr_val) else 0.0
+					bars_in_position = 0
+					# Initialize exit strategy tracking
+					highest_price = entry_price if long_mode else entry_price
+					lowest_price = entry_price if not long_mode else entry_price
+					remaining_position = 1.0
+					partial_exits_taken = []
+			continue
+
+		bars_in_position += 1
+		stake = entry_capital if entry_capital is not None else equity / STAKE_DIVISOR
+		current_stake = stake * remaining_position
+		atr_buffer = entry_atr if entry_atr is not None else 0.0
+		stop_price = None
+		if atr_stop_mult is not None and atr_buffer and atr_buffer > 0:
+			stop_price = entry_price - atr_stop_mult * atr_buffer if long_mode else entry_price + atr_stop_mult * atr_buffer
+
+		# Track peak for trailing stop
+		if long_mode:
+			highest_price = max(highest_price, float(curr["high"]))
+		else:
+			lowest_price = min(lowest_price, float(curr["low"]))
+
+		exit_price = None
+		exit_reason = None
+		partial_exit_amount = 0.0
+
+		# Advanced Exit Strategies
+		# 1. PROFIT TARGET
+		if USE_PROFIT_TARGET and exit_price is None:
+			profit_pct = (close_curr - entry_price) / entry_price if long_mode else (entry_price - close_curr) / entry_price
+			if profit_pct >= PROFIT_TARGET_PCT:
+				exit_price = close_curr
+				exit_reason = f"Profit target {PROFIT_TARGET_PCT*100:.1f}%"
+
+		# 2. PARTIAL EXITS
+		if USE_PARTIAL_EXIT and remaining_position > 0.4 and exit_price is None:
+			profit_pct = (close_curr - entry_price) / entry_price if long_mode else (entry_price - close_curr) / entry_price
+			for level_idx, level in enumerate(PARTIAL_EXIT_LEVELS):
+				if level_idx not in partial_exits_taken and profit_pct >= level["profit_pct"]:
+					exit_amount = level["exit_pct"]
+					partial_exit_amount = exit_amount
+					remaining_position -= exit_amount
+					partial_exits_taken.append(level_idx)
+					price_diff = close_curr - entry_price if long_mode else entry_price - close_curr
+					partial_stake = stake * exit_amount
+					gross_pnl = price_diff / entry_price * partial_stake
+					fees = partial_stake * FEE_RATE * 2.0
+					pnl_usd = gross_pnl - fees
+					equity += pnl_usd
+					trades.append({
+						"Zeit": entry_ts,
+						"Entry": entry_price,
+						"ExitZeit": ts,
+						"ExitPreis": close_curr,
+						"Stake": partial_stake,
+						"Fees": fees,
+						"ExitReason": f"Partial exit {level['profit_pct']*100:.0f}% ({exit_amount*100:.0f}%)",
+						"PnL (USD)": pnl_usd,
+						"Equity": equity,
+						"Direction": direction.capitalize(),
+						"MinHoldBars": min_hold_bars
+					})
+					if remaining_position <= 0.01:
+						in_position = False
+						entry_capital = None
+						entry_atr = None
+						bars_in_position = 0
+						continue
+					break
+
+		# 3. TRAILING STOP
+		if USE_TRAILING_STOP and exit_price is None:
+			profit_pct = (close_curr - entry_price) / entry_price if long_mode else (entry_price - close_curr) / entry_price
+			if profit_pct >= TRAILING_STOP_ACTIVATION_PCT:
+				if long_mode:
+					drawdown_from_peak = (highest_price - float(curr["low"])) / highest_price
+					if drawdown_from_peak >= TRAILING_STOP_PCT:
+						exit_price = close_curr
+						exit_reason = f"Trailing stop {TRAILING_STOP_PCT*100:.1f}%"
+				else:
+					rise_from_trough = (float(curr["high"]) - lowest_price) / lowest_price
+					if rise_from_trough >= TRAILING_STOP_PCT:
+						exit_price = close_curr
+						exit_reason = f"Trailing stop {TRAILING_STOP_PCT*100:.1f}%"
+
+		# Traditional exits - only if no advanced exit triggered
+		# ATR stop has priority
+		if stop_price is not None and exit_price is None:
+			if long_mode and float(curr["low"]) <= stop_price:
+				exit_price = stop_price
+				exit_reason = "ATR stop"
+			elif (not long_mode) and float(curr["high"]) >= stop_price:
+				exit_price = stop_price
+				exit_reason = "ATR stop"
+
+		# HTF crossover exit (only if min_hold_bars satisfied)
+		if exit_price is None and bars_in_position >= min_hold_bars:
+			if long_mode:
+				# Long exit: Close crosses below HTF
+				if close_prev > htf_prev and close_curr < htf_curr:
+					exit_price = close_curr
+					exit_reason = "HTF crossover exit"
+			else:
+				# Short exit: Close crosses above HTF
+				if close_prev < htf_prev and close_curr > htf_curr:
+					exit_price = close_curr
+					exit_reason = "HTF crossover exit"
+
+		if exit_price is None:
+			continue
+
+		# Calculate PnL for remaining position
+		price_diff = exit_price - entry_price if long_mode else entry_price - exit_price
+		gross_pnl = price_diff / entry_price * current_stake
+		fees = current_stake * FEE_RATE * 2.0
+		pnl_usd = gross_pnl - fees
+		equity += pnl_usd
+		trades.append({
+			"Zeit": entry_ts,
+			"Entry": entry_price,
+			"ExitZeit": ts,
+			"ExitPreis": exit_price,
+			"Stake": current_stake,
+			"Fees": fees,
+			"ExitReason": exit_reason,
+			"PnL (USD)": pnl_usd,
+			"Equity": equity,
+			"Direction": direction.capitalize(),
+			"MinHoldBars": min_hold_bars
+		})
+		in_position = False
+		entry_capital = None
+		entry_atr = None
+		bars_in_position = 0
+
+	# Close open position at final bar
+	if in_position:
+		last = df.iloc[-1]
+		exit_ts = last.name
+		exit_price = float(last["close"])
+		stake = entry_capital if entry_capital is not None else equity / STAKE_DIVISOR
+		price_diff = exit_price - entry_price if long_mode else entry_price - exit_price
+		gross_pnl = price_diff / entry_price * stake
+		fees = stake * FEE_RATE * 2.0
+		pnl_usd = gross_pnl - fees
+		equity += pnl_usd
+		trades.append({
+			"Zeit": entry_ts,
+			"Entry": entry_price,
+			"ExitZeit": exit_ts,
+			"ExitPreis": exit_price,
+			"Stake": stake,
+			"Fees": fees,
+			"ExitReason": "Final bar",
+			"PnL (USD)": pnl_usd,
+			"Equity": equity,
+			"Direction": direction.capitalize(),
+			"MinHoldBars": min_hold_bars
+		})
+
+	return pd.DataFrame(trades)
+
+
+def performance_report(trades_df, symbol, param_a, param_b, direction, min_hold_bars):
 	base = {
 		"Symbol": symbol,
 		"ParamA": param_a,
@@ -1143,7 +1972,7 @@ def performance_report(trades_df, symbol, param_a, param_b, direction, min_hold_
 			"MaxDrawdown": 0.0,
 			"FinalEquity": START_EQUITY,
 			"Direction": direction,
-			"MinHoldDays": min_hold_days,
+			"MinHoldBars": min_hold_bars,
 		}
 
 	wins = trades_df[trades_df["PnL (USD)"] > 0]
@@ -1165,7 +1994,7 @@ def performance_report(trades_df, symbol, param_a, param_b, direction, min_hold_
 		"MaxDrawdown": max_drawdown,
 		"FinalEquity": final_eq,
 		"Direction": direction,
-		"MinHoldDays": min_hold_days,
+		"MinHoldBars": min_hold_bars,
 	}
 
 
@@ -1210,9 +2039,9 @@ def build_equity_series(df, trades_df, direction):
 	return equity_series.ffill().fillna(START_EQUITY)
 
 
-def build_two_panel_figure(symbol, df, trades_df, param_a, param_b, direction, min_hold_days=None):
+def build_two_panel_figure(symbol, df, trades_df, param_a, param_b, direction, min_hold_bars=None):
 	direction_title = direction.capitalize()
-	hold_text = f", Hold≥{min_hold_days}d" if min_hold_days else ""
+	hold_text = f", Hold≥{min_hold_bars} bars" if min_hold_bars else ""
 	indicator_desc = f"{INDICATOR_DISPLAY_NAME} {PARAM_A_LABEL}={param_a}, {PARAM_B_LABEL}={param_b}"
 	line_name = "Supertrend" if INDICATOR_TYPE == "supertrend" else INDICATOR_DISPLAY_NAME
 	fig = make_subplots(
@@ -1455,7 +2284,7 @@ def write_combined_overall_best_report(sections):
 	def render_entry(entry):
 		meta = (
 			f"<h3>{entry['symbol']} – {entry['direction']} – {entry['indicator']} ({entry['htf']})<br>"
-			f"{entry['param_desc']}, ATRStop={entry['atr_label']}, MinHold={entry['min_hold_days']}d</h3>"
+			f"{entry['param_desc']}, ATRStop={entry['atr_label']}, MinHold={entry['min_min_hold_bars']}d</h3>"
 		)
 		html.append("<section>")
 		html.append(meta)
@@ -1491,7 +2320,7 @@ def write_flat_trade_list(rows):
 		PARAM_B_LABEL,
 		"ATRStopMultValue",
 		"ATRStopMult",
-		"MinHoldDays",
+		"MinHoldBars",
 		"FinalEquity",
 		"Trades",
 		"WinRate",
@@ -1607,12 +2436,11 @@ def _run_saved_rows(rows_df, table_title, save_path=None, aggregate_sections=Non
 		param_a, param_b = _normalize_param_values(param_a, param_b)
 		atr_mult = row.get("ATRStopMultValue", row.get("ATRStopMult"))
 		atr_mult = _normalize_atr_value(atr_mult)
-		hold_days = row.get("MinHoldDays", DEFAULT_MIN_HOLD_DAYS)
-		if pd.isna(hold_days):
-			hold_days = DEFAULT_MIN_HOLD_DAYS
+		min_hold_bars = row.get("MinHoldBars", DEFAULT_MIN_HOLD_BARS)
+		if pd.isna(min_hold_bars):
+			min_hold_bars = DEFAULT_MIN_HOLD_BARS
 		else:
-			hold_days = int(hold_days)
-		min_hold_bars = hold_days * BARS_PER_DAY
+			min_hold_bars = int(min_hold_bars)
 		if symbol not in data_cache:
 			data_cache[symbol] = prepare_symbol_dataframe(symbol)
 		df_raw = data_cache[symbol]
@@ -1624,24 +2452,33 @@ def _run_saved_rows(rows_df, table_title, save_path=None, aggregate_sections=Non
 					df_tmp[col] = df_raw[col]
 			st_cache[st_key] = df_tmp
 		df_st = st_cache[st_key]
-		trades = backtest_supertrend(
-			df_st,
-			atr_stop_mult=atr_mult,
-			direction=direction,
-			min_hold_bars=min_hold_bars,
-			min_hold_days=hold_days,
-		)
+
+		# Select backtest function based on indicator type
+		if INDICATOR_TYPE == "htf_crossover":
+			trades = backtest_htf_crossover(
+				df_st,
+				atr_stop_mult=atr_mult,
+				direction=direction,
+				min_hold_bars=min_hold_bars,
+			)
+		else:  # Default: trend_flip for all other indicators
+			trades = backtest_supertrend(
+				df_st,
+				atr_stop_mult=atr_mult,
+				direction=direction,
+				min_hold_bars=min_hold_bars,
+			)
 		direction_title = direction.capitalize()
 		atr_label = "None" if atr_mult is None else atr_mult
 		param_desc = f"{PARAM_A_LABEL}={param_a}, {PARAM_B_LABEL}={param_b}"
-		print(f"  · {symbol} {direction_title} ({param_desc}, ATR={atr_label}, MinHold={hold_days}d)")
+		print(f"  · {symbol} {direction_title} ({param_desc}, ATR={atr_label}, MinHold={min_hold_bars} bars)")
 		stats = performance_report(
 			trades,
 			symbol,
 			param_a,
 			param_b,
 			direction_title,
-			hold_days,
+			min_hold_bars,
 		)
 		updated_row = dict(row_dict)
 		updated_row.update({
@@ -1649,7 +2486,7 @@ def _run_saved_rows(rows_df, table_title, save_path=None, aggregate_sections=Non
 			"ParamB": param_b,
 			PARAM_A_LABEL: param_a,
 			PARAM_B_LABEL: param_b,
-			"MinHoldDays": hold_days,
+			"MinHoldBars": min_hold_bars,
 			"ATRStopMult": atr_label,
 			"ATRStopMultValue": atr_mult,
 			"HTF": HIGHER_TIMEFRAME,
@@ -1668,16 +2505,16 @@ def _run_saved_rows(rows_df, table_title, save_path=None, aggregate_sections=Non
 			param_a,
 			param_b,
 			direction_title,
-			min_hold_days=hold_days,
+			min_hold_bars=min_hold_bars,
 		)
 		fig_html = pio.to_html(fig, include_plotlyjs="cdn", full_html=False)
 		figs_blocks.append(
-			f"<h2>{symbol} – {direction_title} gespeicherte Parameter: {param_desc}, ATRStop={atr_label}, MinHold={hold_days}d</h2>\n"
+			f"<h2>{symbol} – {direction_title} gespeicherte Parameter: {param_desc}, ATRStop={atr_label}, MinHold={min_hold_bars} bars</h2>\n"
 			+ fig_html
 		)
 		trade_table_html = df_to_html_table(
 			trades,
-			title=f"Trade-Liste {symbol} ({direction_title} gespeicherte Parameter, MinHold={hold_days}d)",
+			title=f"Trade-Liste {symbol} ({direction_title} gespeicherte Parameter, MinHold={min_hold_bars} bars)",
 		)
 		sections_blocks.append(trade_table_html)
 		csv_suffix = "" if direction == "long" else "_short"
@@ -1693,7 +2530,7 @@ def _run_saved_rows(rows_df, table_title, save_path=None, aggregate_sections=Non
 				"direction": direction_title,
 				"param_desc": param_desc,
 				"atr_label": atr_label,
-				"min_hold_days": hold_days,
+				"min_min_hold_bars": min_hold_bars,
 				"fig_html": fig_html,
 				"trade_table_html": trade_table_html,
 				"final_equity": stats.get("FinalEquity", START_EQUITY),
@@ -1721,7 +2558,7 @@ def run_parameter_sweep():
 	clear_directory(OUT_DIR)
 
 	directions = get_enabled_directions()
-	hold_day_candidates = MIN_HOLD_DAY_VALUES if USE_MIN_HOLD_FILTER else [DEFAULT_MIN_HOLD_DAYS]
+	hold_bar_candidates = MIN_HOLD_BAR_VALUES if USE_MIN_HOLD_FILTER else [DEFAULT_MIN_HOLD_BARS]
 
 	for symbol in SYMBOLS:
 		df_raw = prepare_symbol_dataframe(symbol)
@@ -1740,32 +2577,39 @@ def run_parameter_sweep():
 					df_cache[cache_key] = df_tmp
 				df_st = df_cache[cache_key]
 				for atr_mult in ATR_STOP_MULTS:
-					for hold_days in hold_day_candidates:
-						min_hold_bars = hold_days * BARS_PER_DAY
+					for min_hold_bars in hold_bar_candidates:
 						for direction in directions:
 							df_st_with_htf = df_st.copy()
 							for col in ("htf_trend", "htf_indicator", "momentum"):
 								if col in df_raw.columns:
 									df_st_with_htf[col] = df_raw[col]
-							trades = backtest_supertrend(
-								df_st_with_htf,
-								atr_stop_mult=atr_mult,
-								direction=direction,
-								min_hold_bars=min_hold_bars,
-								min_hold_days=hold_days,
-							)
+							# Select backtest function based on indicator type
+							if INDICATOR_TYPE == "htf_crossover":
+								trades = backtest_htf_crossover(
+									df_st_with_htf,
+									atr_stop_mult=atr_mult,
+									direction=direction,
+									min_hold_bars=min_hold_bars,
+								)
+							else:  # Default: trend_flip for all other indicators
+								trades = backtest_supertrend(
+									df_st_with_htf,
+									atr_stop_mult=atr_mult,
+									direction=direction,
+									min_hold_bars=min_hold_bars,
+								)
 							stats = performance_report(
 								trades,
 								symbol,
 								param_a,
 								param_b,
 								direction.capitalize(),
-								hold_days,
+								min_hold_bars,
 							)
 							stats["ATRStopMult"] = atr_mult if atr_mult is not None else "None"
 							stats["MinHoldBars"] = min_hold_bars
 							results[direction].append(stats)
-							trades_per_combo[direction][(param_a, param_b, atr_mult, hold_days)] = trades
+							trades_per_combo[direction][(param_a, param_b, atr_mult, min_hold_bars)] = trades
 
 		for direction in directions:
 			dir_results = results[direction]
@@ -1781,7 +2625,7 @@ def run_parameter_sweep():
 
 			best_param_a, best_param_b = DEFAULT_PARAM_A, DEFAULT_PARAM_B
 			best_atr = None
-			best_hold_days = DEFAULT_MIN_HOLD_DAYS
+			best_hold_bars = DEFAULT_MIN_HOLD_BARS
 			final_equity = START_EQUITY
 			trades_count = 0
 			win_rate = 0.0
@@ -1794,13 +2638,13 @@ def run_parameter_sweep():
 				best_param_b = best_param_b if not pd.isna(best_param_b) else DEFAULT_PARAM_B
 				best_atr_raw = best_row.get("ATRStopMult", "None")
 				best_atr = best_atr_raw if best_atr_raw != "None" else None
-				best_hold_days = int(best_row.get("MinHoldDays", DEFAULT_MIN_HOLD_DAYS))
+				best_hold_bars = int(best_row.get("MinHoldBars", DEFAULT_MIN_HOLD_BARS))
 				final_equity = float(best_row.get("FinalEquity", START_EQUITY))
 				trades_count = int(best_row.get("Trades", 0))
 				win_rate = float(best_row.get("WinRate", 0.0))
 				max_dd = float(best_row.get("MaxDrawdown", 0.0))
 				best_df = df_cache[(best_param_a, best_param_b)]
-				best_trades = trades_per_combo[direction][(best_param_a, best_param_b, best_atr, best_hold_days)]
+				best_trades = trades_per_combo[direction][(best_param_a, best_param_b, best_atr, best_hold_bars)]
 			else:
 				best_df = compute_indicator(df_raw, best_param_a, best_param_b)
 				for col in ("htf_trend", "htf_indicator", "momentum"):
@@ -1822,7 +2666,7 @@ def run_parameter_sweep():
 				"Factor": best_param_b if INDICATOR_TYPE == "supertrend" else None,
 				"ATRStopMult": atr_label,
 				"ATRStopMultValue": best_atr,
-				"MinHoldDays": best_hold_days,
+				"MinHoldBars": best_hold_bars,
 				"HTF": HIGHER_TIMEFRAME,
 				"FinalEquity": final_equity,
 				"Trades": trades_count,
@@ -1837,18 +2681,18 @@ def run_parameter_sweep():
 				best_param_a,
 				best_param_b,
 				direction.capitalize(),
-				min_hold_days=best_hold_days,
+				min_hold_bars=best_hold_bars,
 			)
 			fig_html = pio.to_html(fig, include_plotlyjs="cdn", full_html=False)
 			figs_blocks.append(
-				f"<h2>{symbol} – {direction.capitalize()} beste Parameter: {PARAM_A_LABEL}={best_param_a}, {PARAM_B_LABEL}={best_param_b}, ATRStop={atr_label}, MinHold={best_hold_days}d</h2>\n"
+				f"<h2>{symbol} – {direction.capitalize()} beste Parameter: {PARAM_A_LABEL}={best_param_a}, {PARAM_B_LABEL}={best_param_b}, ATRStop={atr_label}, MinHold={best_hold_bars} bars</h2>\n"
 				+ fig_html
 			)
 
 			sections_blocks.append(
 				df_to_html_table(
 					best_trades,
-					title=f"Trade-Liste {symbol} ({direction.capitalize()} beste Parameter, MinHold={best_hold_days}d)",
+					title=f"Trade-Liste {symbol} ({direction.capitalize()} beste Parameter, MinHold={best_hold_bars} bars)",
 				)
 			)
 
