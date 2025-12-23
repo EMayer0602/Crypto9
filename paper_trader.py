@@ -2107,6 +2107,221 @@ def generate_trade_charts(trades_df: pd.DataFrame, open_positions_df: pd.DataFra
             print(f"[Chart] Failed for {symbol}: {exc}")
 
 
+def generate_equity_curve(
+    trades_df: pd.DataFrame,
+    start_capital: float = None,
+    output_dir: str = os.path.join("report_html", "charts"),
+) -> None:
+    """Generate equity curve and drawdown charts from closed trades."""
+    if trades_df is None or trades_df.empty:
+        print("[Equity] No trades available for equity curve.")
+        return
+
+    if start_capital is None:
+        start_capital = START_TOTAL_CAPITAL
+
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Prepare data - sort by exit time
+    df = trades_df.copy()
+    if "exit_time" not in df.columns or "pnl" not in df.columns:
+        print("[Equity] Missing required columns (exit_time, pnl).")
+        return
+
+    df["exit_time"] = pd.to_datetime(df["exit_time"], errors="coerce")
+    df = df.dropna(subset=["exit_time", "pnl"])
+    df = df.sort_values("exit_time").reset_index(drop=True)
+
+    if df.empty:
+        print("[Equity] No valid trades for equity curve.")
+        return
+
+    # Calculate cumulative PnL and equity
+    df["cumulative_pnl"] = df["pnl"].cumsum()
+    df["equity"] = start_capital + df["cumulative_pnl"]
+
+    # Calculate drawdown
+    df["peak"] = df["equity"].cummax()
+    df["drawdown"] = df["peak"] - df["equity"]
+    df["drawdown_pct"] = (df["drawdown"] / df["peak"]) * 100
+
+    max_drawdown = df["drawdown"].max()
+    max_drawdown_pct = df["drawdown_pct"].max()
+    max_dd_idx = df["drawdown"].idxmax()
+    max_dd_date = df.loc[max_dd_idx, "exit_time"] if max_dd_idx in df.index else None
+
+    # Create figure with secondary y-axis
+    from plotly.subplots import make_subplots
+
+    fig = make_subplots(
+        rows=3, cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.05,
+        row_heights=[0.5, 0.25, 0.25],
+        subplot_titles=("Equity Curve", "Drawdown (USDT)", "Cumulative PnL by Symbol")
+    )
+
+    # Equity curve
+    fig.add_trace(
+        go.Scatter(
+            x=df["exit_time"],
+            y=df["equity"],
+            mode="lines",
+            name="Equity",
+            line=dict(color="blue", width=2),
+            fill="tozeroy",
+            fillcolor="rgba(0, 100, 255, 0.1)"
+        ),
+        row=1, col=1
+    )
+
+    # Peak equity line
+    fig.add_trace(
+        go.Scatter(
+            x=df["exit_time"],
+            y=df["peak"],
+            mode="lines",
+            name="Peak Equity",
+            line=dict(color="green", width=1, dash="dot")
+        ),
+        row=1, col=1
+    )
+
+    # Starting capital reference line
+    fig.add_hline(
+        y=start_capital,
+        line_dash="dash",
+        line_color="gray",
+        annotation_text=f"Start: {start_capital:,.0f}",
+        row=1, col=1
+    )
+
+    # Drawdown area
+    fig.add_trace(
+        go.Scatter(
+            x=df["exit_time"],
+            y=-df["drawdown"],  # Negative to show below zero
+            mode="lines",
+            name="Drawdown",
+            line=dict(color="red", width=1),
+            fill="tozeroy",
+            fillcolor="rgba(255, 0, 0, 0.3)"
+        ),
+        row=2, col=1
+    )
+
+    # Max drawdown annotation
+    if max_dd_date is not None:
+        fig.add_annotation(
+            x=max_dd_date,
+            y=-max_drawdown,
+            text=f"Max DD: {max_drawdown:,.0f} ({max_drawdown_pct:.1f}%)",
+            showarrow=True,
+            arrowhead=2,
+            arrowcolor="red",
+            font=dict(color="red"),
+            row=2, col=1
+        )
+
+    # Per-symbol cumulative PnL
+    if "symbol" in df.columns:
+        symbols = df["symbol"].unique()
+        colors = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
+                  "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf"]
+
+        for i, symbol in enumerate(sorted(symbols)):
+            sym_df = df[df["symbol"] == symbol].copy()
+            sym_df["sym_cumulative_pnl"] = sym_df["pnl"].cumsum()
+            color = colors[i % len(colors)]
+
+            fig.add_trace(
+                go.Scatter(
+                    x=sym_df["exit_time"],
+                    y=sym_df["sym_cumulative_pnl"],
+                    mode="lines",
+                    name=symbol,
+                    line=dict(color=color, width=1.5)
+                ),
+                row=3, col=1
+            )
+
+    # Final statistics
+    final_equity = df["equity"].iloc[-1]
+    total_return = ((final_equity - start_capital) / start_capital) * 100
+    total_trades = len(df)
+
+    fig.update_layout(
+        title=dict(
+            text=f"Equity Curve | Start: {start_capital:,.0f} → Final: {final_equity:,.0f} USDT | Return: {total_return:.1f}% | Trades: {total_trades} | Max DD: {max_drawdown:,.0f} ({max_drawdown_pct:.1f}%)",
+            font=dict(size=14)
+        ),
+        height=900,
+        showlegend=True,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        template="plotly_white",
+        hovermode="x unified"
+    )
+
+    fig.update_xaxes(title_text="Date", row=3, col=1)
+    fig.update_yaxes(title_text="Equity (USDT)", row=1, col=1)
+    fig.update_yaxes(title_text="Drawdown (USDT)", row=2, col=1)
+    fig.update_yaxes(title_text="Cumulative PnL", row=3, col=1)
+
+    # Save chart
+    out_path = os.path.join(output_dir, "equity_curve.html")
+    fig.write_html(out_path, include_plotlyjs="cdn")
+    print(f"[Equity] Saved equity curve to {out_path}")
+
+    # Also create a simple monthly/weekly returns heatmap if enough data
+    _generate_returns_summary(df, start_capital, output_dir)
+
+
+def _generate_returns_summary(df: pd.DataFrame, start_capital: float, output_dir: str) -> None:
+    """Generate monthly returns summary."""
+    if df.empty or "exit_time" not in df.columns:
+        return
+
+    df = df.copy()
+    df["month"] = df["exit_time"].dt.to_period("M")
+
+    monthly = df.groupby("month").agg({
+        "pnl": ["sum", "count", lambda x: (x > 0).sum(), lambda x: (x < 0).sum()]
+    }).reset_index()
+    monthly.columns = ["month", "pnl", "trades", "winners", "losers"]
+    monthly["win_rate"] = (monthly["winners"] / monthly["trades"] * 100).round(1)
+    monthly["month_str"] = monthly["month"].astype(str)
+
+    # Create bar chart for monthly returns
+    colors = ["green" if x >= 0 else "red" for x in monthly["pnl"]]
+
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=monthly["month_str"],
+        y=monthly["pnl"],
+        marker_color=colors,
+        text=[f"{p:,.0f}<br>{t} trades<br>{wr:.0f}% WR" for p, t, wr in zip(monthly["pnl"], monthly["trades"], monthly["win_rate"])],
+        textposition="outside",
+        name="Monthly PnL"
+    ))
+
+    total_pnl = monthly["pnl"].sum()
+    avg_monthly = monthly["pnl"].mean()
+    best_month = monthly.loc[monthly["pnl"].idxmax()]
+    worst_month = monthly.loc[monthly["pnl"].idxmin()]
+
+    fig.update_layout(
+        title=f"Monthly Returns | Total: {total_pnl:,.0f} USDT | Avg: {avg_monthly:,.0f}/month | Best: {best_month['month_str']} ({best_month['pnl']:,.0f}) | Worst: {worst_month['month_str']} ({worst_month['pnl']:,.0f})",
+        xaxis_title="Month",
+        yaxis_title="PnL (USDT)",
+        template="plotly_white",
+        height=500
+    )
+
+    out_path = os.path.join(output_dir, "monthly_returns.html")
+    fig.write_html(out_path, include_plotlyjs="cdn")
+    print(f"[Equity] Saved monthly returns to {out_path}")
+
+
 def compute_net_open_equity(open_positions_df: pd.DataFrame) -> float:
     if open_positions_df.empty:
         return 0.0
@@ -2931,6 +3146,7 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
             print("=" * 120 + "\n")
 
         generate_trade_charts(trades_df, output_dir=os.path.join("report_html", "charts"))
+        generate_equity_curve(trades_df, start_capital=START_TOTAL_CAPITAL, output_dir=os.path.join("report_html", "charts"))
         if open_positions:
             print(f"[Simulation] Open positions remaining: {len(open_positions)}")
         else:
