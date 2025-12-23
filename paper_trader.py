@@ -2371,8 +2371,16 @@ def run_simulation(
 
     # Pre-download historical data if needed
     print(f"[Simulation] Checking historical data availability...")
-    unique_symbols = best_df['symbol'].unique() if 'symbol' in best_df.columns else []
-    unique_timeframes = best_df['htf'].unique() if 'htf' in best_df.columns else []
+    unique_symbols = best_df['Symbol'].unique() if 'Symbol' in best_df.columns else []
+
+    # Only download Binance-supported timeframes
+    # Non-standard timeframes (3h, 9h, 15h, 18h, 21h, etc.) will be synthesized from 1h at runtime
+    BINANCE_SUPPORTED_TIMEFRAMES = {"1h", "2h", "4h", "6h", "8h", "12h", "1d"}
+    unique_timeframes = ["1h"]  # Always need 1h for synthesis
+    if 'HTF' in best_df.columns:
+        for tf in best_df['HTF'].unique():
+            if tf in BINANCE_SUPPORTED_TIMEFRAMES and tf not in unique_timeframes:
+                unique_timeframes.append(tf)
 
     # Add buffer for indicator warmup (30 days before start for safety)
     download_start = start_ts - pd.Timedelta(days=30)
