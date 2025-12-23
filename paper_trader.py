@@ -748,7 +748,7 @@ def load_best_rows(active_indicators: Optional[List[str]] = None) -> pd.DataFram
         raise FileNotFoundError(
             f"Overall summary file {BEST_PARAMS_CSV} not found. Run a parameter sweep first."
         )
-    df = pd.read_csv(BEST_PARAMS_CSV, sep=";", decimal=",")
+    df = pd.read_csv(BEST_PARAMS_CSV)  # American format: comma separator, period decimal
     if df.empty:
         return df
     if active_indicators:
