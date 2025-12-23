@@ -1288,6 +1288,10 @@ def process_snapshot(
     if not entry_allowed:
         if entry_reason:
             _signal_log(f"{context.symbol} {context.direction} entry skipped: {entry_reason}")
+            # Debug: show first blocked entry for each symbol
+            if context.symbol in ("BTC/EUR", "ETH/EUR") and not hasattr(evaluate_entry, f"_debug_{context.symbol}_{context.direction}"):
+                setattr(evaluate_entry, f"_debug_{context.symbol}_{context.direction}", True)
+                print(f"[DEBUG] {context.symbol} {context.direction} {context.indicator} {context.htf}: {entry_reason}")
         return trades
 
     entry_price = float(df_slice.iloc[-1]["close"])
