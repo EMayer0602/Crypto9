@@ -249,6 +249,13 @@ _exchange = None
 _data_exchange = None
 DATA_CACHE = {}
 
+
+def clear_data_cache():
+	"""Clear the data cache to force fresh data fetch including updated synthetic bars."""
+	global DATA_CACHE
+	DATA_CACHE = {}
+
+
 # ============================================================================
 # LOCAL CONFIGURATION OVERRIDE
 # ============================================================================

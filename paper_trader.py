@@ -2862,6 +2862,8 @@ def main(
         reset_state_file()
     if configure_exchange:
         st.configure_exchange(use_testnet=use_testnet)
+    # Clear data cache to get fresh synthetic bars for current period
+    st.clear_data_cache()
     raw_symbols = allowed_symbols if allowed_symbols else DEFAULT_SYMBOL_ALLOWLIST
     config_df = ensure_config(raw_symbols or st.SYMBOLS)
     cfg_lookup = load_config_lookup(config_df)
