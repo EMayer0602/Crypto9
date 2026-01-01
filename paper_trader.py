@@ -1967,7 +1967,7 @@ def generate_trade_charts(trades_df: pd.DataFrame, open_positions_df: pd.DataFra
 
             df = pd.DataFrame()
             try:
-                df = build_indicator_dataframe(symbol, indicator, htf_value, param_a, param_b)
+                df = build_indicator_dataframe(symbol, indicator, htf_value, param_a, param_b, use_all_data=True)
             except Exception as exc:
                 print(f"[Chart] Indicator data failed for {symbol}: {exc}")
 
