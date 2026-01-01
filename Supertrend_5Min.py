@@ -92,7 +92,7 @@ DEFAULT_MIN_HOLD_BARS = 0
 MIN_HOLD_BAR_VALUES = [0, 12, 24]
 
 USE_HIGHER_TIMEFRAME_FILTER = True
-HIGHER_TIMEFRAME = "12h"
+HIGHER_TIMEFRAME = "6h"
 HTF_LOOKBACK = 1000  # Increased for longer backtests
 HTF_LENGTH = 20
 HTF_FACTOR = 3.0
@@ -401,13 +401,13 @@ def _maybe_append_synthetic_bar(df, symbol, timeframe):
 				"low": float(slice_df["low"].min()),
 				"close": float(slice_df["close"].iloc[-1]),
 				"volume": float(slice_df["volume"].sum()),
-			}, index=[current_end])
+			}, index=[current_start])
 
 			combined = pd.concat([df, synthetic])
 			combined = combined[~combined.index.duplicated(keep="last")]
 			combined = combined.sort_index()
 
-			print(f"[Synthetic] Created current bar for {symbol} {timeframe} using {len(slice_df)} 1m bars (ends {current_end.strftime('%Y-%m-%d %H:%M')})")
+			print(f"[Synthetic] Created current bar for {symbol} {timeframe} using {len(slice_df)} 1m bars (starts {current_start.strftime('%Y-%m-%d %H:%M')})")
 			return combined
 	except Exception as exc:
 		print(f"[Synthetic] Failed to fetch 1m data for {symbol}: {exc}")
@@ -435,13 +435,13 @@ def _maybe_append_synthetic_bar(df, symbol, timeframe):
 				"low": last_price,   # Conservative: use current price
 				"close": last_price,
 				"volume": 0.0,  # Ticker doesn't provide volume for incomplete bar
-			}, index=[current_end])
+			}, index=[current_start])
 
 			combined = pd.concat([df, synthetic])
 			combined = combined[~combined.index.duplicated(keep="last")]
 			combined = combined.sort_index()
 
-			print(f"[Synthetic] Created current bar for {symbol} {timeframe} using ticker data @ {last_price:.2f} (ends {current_end.strftime('%Y-%m-%d %H:%M')})")
+			print(f"[Synthetic] Created current bar for {symbol} {timeframe} using ticker data @ {last_price:.2f} (starts {current_start.strftime('%Y-%m-%d %H:%M')})")
 			return combined
 	except Exception as exc:
 		print(f"[Synthetic] Failed to fetch ticker for {symbol}: {exc}")
