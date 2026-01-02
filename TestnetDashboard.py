@@ -111,6 +111,78 @@ def calculate_trade_stats(orders: list) -> dict:
     }
 
 
+def match_trades(orders: list, symbol: str) -> list:
+    """Match BUY/SELL orders into round-trip trades.
+
+    Long trade: BUY entry -> SELL exit
+    Short trade: SELL entry -> BUY exit (on margin/futures, rare on spot)
+    """
+    filled = [o for o in orders if o.get("status") == "FILLED"]
+    filled.sort(key=lambda x: x.get("time", 0))
+
+    matched = []
+    position_qty = 0.0
+    position_cost = 0.0
+    entry_time = None
+    entry_side = None
+
+    for o in filled:
+        side = o.get("side")
+        qty = float(o.get("executedQty", 0))
+        quote = float(o.get("cummulativeQuoteQty", 0))
+        ts = o.get("time", 0)
+        order_time = datetime.fromtimestamp(ts/1000, tz=timezone.utc) if ts else None
+
+        if position_qty == 0:
+            # Opening new position
+            position_qty = qty
+            position_cost = quote
+            entry_time = order_time
+            entry_side = side
+        elif entry_side == "BUY" and side == "SELL":
+            # Closing long position
+            pnl = quote - position_cost
+            matched.append({
+                "symbol": symbol,
+                "direction": "LONG",
+                "entry_time": entry_time,
+                "exit_time": order_time,
+                "entry_value": position_cost,
+                "exit_value": quote,
+                "qty": position_qty,
+                "pnl": pnl,
+                "pnl_pct": (pnl / position_cost * 100) if position_cost > 0 else 0
+            })
+            position_qty = 0
+            position_cost = 0
+            entry_time = None
+            entry_side = None
+        elif entry_side == "SELL" and side == "BUY":
+            # Closing short position
+            pnl = position_cost - quote
+            matched.append({
+                "symbol": symbol,
+                "direction": "SHORT",
+                "entry_time": entry_time,
+                "exit_time": order_time,
+                "entry_value": position_cost,
+                "exit_value": quote,
+                "qty": position_qty,
+                "pnl": pnl,
+                "pnl_pct": (pnl / position_cost * 100) if position_cost > 0 else 0
+            })
+            position_qty = 0
+            position_cost = 0
+            entry_time = None
+            entry_side = None
+        else:
+            # Adding to position (same side)
+            position_qty += qty
+            position_cost += quote
+
+    return matched
+
+
 def generate_dashboard():
     """Generate HTML dashboard."""
     print("Fetching testnet data...")
@@ -133,7 +205,7 @@ def generate_dashboard():
                 open_positions.append({"asset": asset, "amount": total})
 
     # Get order history for each symbol (filtered by date)
-    all_trades = []
+    all_matched_trades = []
     symbol_stats = {}
     for sym in SYMBOLS:
         orders = get_all_orders(sym)
@@ -152,23 +224,28 @@ def generate_dashboard():
             stats = calculate_trade_stats(orders)
             if stats["trades"] > 0:
                 symbol_stats[sym] = stats
-            for o in orders:
-                if o.get("status") == "FILLED":
-                    ts = o.get("time", 0)
-                    all_trades.append({
-                        "symbol": sym,
-                        "side": o.get("side"),
-                        "qty": float(o.get("executedQty", 0)),
-                        "quote": float(o.get("cummulativeQuoteQty", 0)),
-                        "time": datetime.fromtimestamp(ts/1000, tz=timezone.utc) if ts else None
-                    })
 
-    # Sort trades by time
-    all_trades.sort(key=lambda x: x["time"] or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+            # Match trades into round-trips
+            matched = match_trades(orders, sym)
+            all_matched_trades.extend(matched)
+
+    # Sort matched trades by exit time (most recent first)
+    all_matched_trades.sort(key=lambda x: x["exit_time"] or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+
+    # Separate long and short trades
+    long_trades = [t for t in all_matched_trades if t["direction"] == "LONG"]
+    short_trades = [t for t in all_matched_trades if t["direction"] == "SHORT"]
+
+    # Calculate total volume for share calculation
+    total_volume = sum(t["entry_value"] for t in all_matched_trades) if all_matched_trades else 1
 
     # Calculate totals
-    total_realized_pnl = sum(s.get("realized_pnl", 0) for s in symbol_stats.values())
-    total_trades = sum(s.get("trades", 0) for s in symbol_stats.values())
+    total_realized_pnl = sum(t["pnl"] for t in all_matched_trades)
+    total_closed_trades = len(all_matched_trades)
+    long_pnl = sum(t["pnl"] for t in long_trades)
+    short_pnl = sum(t["pnl"] for t in short_trades)
+    long_wins = sum(1 for t in long_trades if t["pnl"] > 0)
+    short_wins = sum(1 for t in short_trades if t["pnl"] > 0)
 
     # Generate HTML
     html = f"""<!DOCTYPE html>
@@ -178,21 +255,23 @@ def generate_dashboard():
     <title>Testnet Trading Dashboard</title>
     <style>
         body {{ font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }}
-        .container {{ max-width: 1200px; margin: 0 auto; }}
+        .container {{ max-width: 1400px; margin: 0 auto; }}
         h1 {{ color: #333; border-bottom: 2px solid #007bff; padding-bottom: 10px; }}
         h2 {{ color: #555; margin-top: 30px; }}
+        h3 {{ color: #666; margin-top: 20px; }}
         table {{ border-collapse: collapse; width: 100%; margin-top: 10px; background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }}
-        th, td {{ border: 1px solid #ddd; padding: 10px; text-align: right; }}
+        th, td {{ border: 1px solid #ddd; padding: 8px; text-align: right; }}
         th {{ background: #007bff; color: white; text-align: center; }}
-        td:first-child {{ text-align: left; font-weight: bold; }}
-        .positive {{ color: green; }}
-        .negative {{ color: red; }}
+        td:first-child {{ text-align: left; }}
+        .positive {{ color: green; font-weight: bold; }}
+        .negative {{ color: red; font-weight: bold; }}
         .summary-box {{ display: inline-block; background: white; padding: 20px; margin: 10px; border-radius: 5px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); min-width: 150px; text-align: center; }}
         .summary-box h3 {{ margin: 0 0 10px 0; color: #666; font-size: 14px; }}
         .summary-box .value {{ font-size: 24px; font-weight: bold; }}
-        .buy {{ background: #d4edda; }}
-        .sell {{ background: #f8d7da; }}
+        .long-header {{ background: #28a745 !important; }}
+        .short-header {{ background: #dc3545 !important; }}
         .timestamp {{ color: #666; font-size: 12px; margin-top: 20px; }}
+        .section {{ margin-bottom: 30px; }}
     </style>
 </head>
 <body>
@@ -201,12 +280,20 @@ def generate_dashboard():
 
     <div class="summary-boxes">
         <div class="summary-box">
-            <h3>Total Trades</h3>
-            <div class="value">{total_trades}</div>
+            <h3>Closed Trades</h3>
+            <div class="value">{total_closed_trades}</div>
         </div>
         <div class="summary-box">
             <h3>Realized PnL</h3>
             <div class="value {'positive' if total_realized_pnl >= 0 else 'negative'}">{total_realized_pnl:,.2f}</div>
+        </div>
+        <div class="summary-box">
+            <h3>Long Trades</h3>
+            <div class="value">{len(long_trades)} ({long_wins}W)</div>
+        </div>
+        <div class="summary-box">
+            <h3>Short Trades</h3>
+            <div class="value">{len(short_trades)} ({short_wins}W)</div>
         </div>
         <div class="summary-box">
             <h3>Open Positions</h3>
@@ -251,25 +338,52 @@ def generate_dashboard():
             <td class="{pnl_class}">{stats['realized_pnl']:,.2f}</td>
         </tr>\n"""
 
-    html += """    </table>
-
-    <h2>Recent Trades (Last 50)</h2>
-    <table>
-        <tr><th>Time</th><th>Symbol</th><th>Side</th><th>Quantity</th><th>Quote Amount</th></tr>
-"""
-    for trade in all_trades[:50]:
-        side_class = "buy" if trade["side"] == "BUY" else "sell"
-        time_str = trade["time"].strftime("%Y-%m-%d %H:%M") if trade["time"] else "N/A"
-        html += f"""        <tr class="{side_class}">
-            <td>{time_str}</td>
-            <td>{trade['symbol']}</td>
-            <td>{trade['side']}</td>
-            <td>{trade['qty']:,.4f}</td>
-            <td>{trade['quote']:,.2f}</td>
+    # Helper function to generate trade table rows
+    def trade_table_rows(trades, header_class=""):
+        if not trades:
+            return "<tr><td colspan='8'>No trades</td></tr>\n"
+        rows = ""
+        for t in trades:
+            pnl_class = "positive" if t["pnl"] >= 0 else "negative"
+            entry_str = t["entry_time"].strftime("%Y-%m-%d %H:%M") if t["entry_time"] else "N/A"
+            exit_str = t["exit_time"].strftime("%Y-%m-%d %H:%M") if t["exit_time"] else "N/A"
+            share = (t["entry_value"] / total_volume * 100) if total_volume > 0 else 0
+            rows += f"""        <tr>
+            <td>{t['symbol']}</td>
+            <td>{entry_str}</td>
+            <td>{exit_str}</td>
+            <td>{t['entry_value']:,.2f}</td>
+            <td>{t['exit_value']:,.2f}</td>
+            <td class="{pnl_class}">{t['pnl']:,.2f}</td>
+            <td class="{pnl_class}">{t['pnl_pct']:+.2f}%</td>
+            <td>{share:.1f}%</td>
         </tr>\n"""
+        return rows
+
+    # Long Trades section
+    html += f"""    </table>
+
+    <div class="section">
+    <h2>Long Trades ({len(long_trades)} closed, PnL: <span class="{'positive' if long_pnl >= 0 else 'negative'}">{long_pnl:,.2f}</span>)</h2>
+    <table>
+        <tr class="long-header"><th>Symbol</th><th>Entry</th><th>Exit</th><th>Entry Value</th><th>Exit Value</th><th>PnL</th><th>PnL %</th><th>Share</th></tr>
+"""
+    html += trade_table_rows(long_trades)
+
+    # Short Trades section
+    html += f"""    </table>
+    </div>
+
+    <div class="section">
+    <h2>Short Trades ({len(short_trades)} closed, PnL: <span class="{'positive' if short_pnl >= 0 else 'negative'}">{short_pnl:,.2f}</span>)</h2>
+    <table>
+        <tr class="short-header"><th>Symbol</th><th>Entry</th><th>Exit</th><th>Entry Value</th><th>Exit Value</th><th>PnL</th><th>PnL %</th><th>Share</th></tr>
+"""
+    html += trade_table_rows(short_trades)
 
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     html += f"""    </table>
+    </div>
 
     <p class="timestamp">Generated: {timestamp}</p>
 </div>
