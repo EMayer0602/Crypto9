@@ -252,8 +252,59 @@ DATA_CACHE = {}
 
 def clear_data_cache():
 	"""Clear the data cache to force fresh data fetch including updated synthetic bars."""
-	global DATA_CACHE
+	global DATA_CACHE, FUTURES_DATA_CACHE
 	DATA_CACHE = {}
+	FUTURES_DATA_CACHE = {}
+
+
+# Global futures exchange (unauthenticated, for public OHLCV data)
+_futures_exchange = None
+FUTURES_DATA_CACHE = {}
+
+
+def get_futures_exchange():
+	"""Get or create unauthenticated futures exchange for public data."""
+	global _futures_exchange
+	if _futures_exchange is None:
+		_futures_exchange = ccxt.binance({
+			'options': {'defaultType': 'future'},
+			'enableRateLimit': True,
+		})
+	return _futures_exchange
+
+
+def fetch_futures_data(symbol: str, timeframe: str, limit: int) -> pd.DataFrame:
+	"""
+	Fetch futures OHLCV data for a symbol.
+	Converts spot symbol (e.g., BTC/EUR) to futures symbol (e.g., BTC/USDT:USDT).
+	"""
+	# Convert spot symbol to futures symbol
+	base = symbol.split("/")[0]
+	futures_symbol = f"{base}/USDT:USDT"
+
+	cache_key = (futures_symbol, timeframe, limit)
+	if cache_key in FUTURES_DATA_CACHE:
+		return FUTURES_DATA_CACHE[cache_key].copy()
+
+	try:
+		exchange = get_futures_exchange()
+		ohlcv = exchange.fetch_ohlcv(futures_symbol, timeframe, limit=limit)
+		df = pd.DataFrame(ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
+		df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms", utc=True)
+		df.set_index("timestamp", inplace=True)
+		df.index = df.index.tz_convert(BERLIN_TZ)
+		FUTURES_DATA_CACHE[cache_key] = df
+		print(f"[Futures] Loaded {len(df)} bars for {futures_symbol} {timeframe}")
+		return df.copy()
+	except Exception as e:
+		print(f"[Futures] Failed to fetch {futures_symbol}: {e}")
+		return pd.DataFrame()
+
+
+def clear_futures_cache():
+	"""Clear futures data cache."""
+	global FUTURES_DATA_CACHE
+	FUTURES_DATA_CACHE = {}
 
 
 # ============================================================================

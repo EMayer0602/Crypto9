@@ -89,6 +89,7 @@ DEFAULT_ALLOWED_DIRECTIONS = ["long", "short"]  # Enable both long and short tra
 DEFAULT_USE_TESTNET = False  # Testnet should be opt-in with --testnet flag
 USE_TIME_BASED_EXIT = True  # Enable time-based exits based on optimal hold times
 SIGNAL_DEBUG = False
+USE_FUTURES_SIGNALS = False  # Use futures data for signal generation (Option 1 from futures lead analysis)
 DEFAULT_SIGNAL_INTERVAL_MIN = 15
 DEFAULT_SPIKE_INTERVAL_MIN = 5
 DEFAULT_ATR_SPIKE_MULT = 2.5
@@ -111,6 +112,14 @@ def set_max_open_positions(value: int) -> None:
 def set_signal_debug(enabled: bool) -> None:
     global SIGNAL_DEBUG
     SIGNAL_DEBUG = bool(enabled)
+
+
+def set_use_futures_signals(enabled: bool) -> None:
+    """Enable/disable using futures data for signal generation (Option 1)."""
+    global USE_FUTURES_SIGNALS
+    USE_FUTURES_SIGNALS = bool(enabled)
+    if USE_FUTURES_SIGNALS:
+        print("[Config] Using FUTURES data for signal generation (trades on spot prices)")
 
 
 def load_env_file(path: str = ".env") -> None:
@@ -933,7 +942,35 @@ def build_indicator_dataframe(symbol: str, indicator_key: str, htf_value: str, p
     st.apply_indicator_type(indicator_key)
     st.apply_higher_timeframe(htf_value)
     df_raw = st.prepare_symbol_dataframe(symbol, use_all_cached_data=use_all_data)
-    df_ind = st.compute_indicator(df_raw.copy(), param_a, param_b)
+
+    # Option 1: Use futures data for signal generation (futures lead analysis)
+    if USE_FUTURES_SIGNALS:
+        # Fetch futures data for the same time period
+        futures_df = st.fetch_futures_data(symbol, st.TIMEFRAME, len(df_raw) + 100)
+        if not futures_df.empty:
+            # Compute indicator on futures data
+            futures_ind = st.compute_indicator(futures_df.copy(), param_a, param_b)
+
+            # Compute indicator on spot data (for prices only)
+            df_ind = st.compute_indicator(df_raw.copy(), param_a, param_b)
+
+            # Align futures signals with spot data by timestamp
+            common_idx = df_ind.index.intersection(futures_ind.index)
+            if len(common_idx) > 100:
+                # Copy signal columns from futures to spot dataframe
+                signal_cols = ["trend_flag", "trend_flip", "supertrend", "upper_band", "lower_band"]
+                for col in signal_cols:
+                    if col in futures_ind.columns:
+                        df_ind.loc[common_idx, col] = futures_ind.loc[common_idx, col]
+                print(f"[Futures] Applied futures signals to {symbol} ({len(common_idx)} bars)")
+            else:
+                print(f"[Futures] Not enough common bars for {symbol} ({len(common_idx)}), using spot signals")
+        else:
+            print(f"[Futures] No futures data for {symbol}, falling back to spot signals")
+            df_ind = st.compute_indicator(df_raw.copy(), param_a, param_b)
+    else:
+        df_ind = st.compute_indicator(df_raw.copy(), param_a, param_b)
+
     for col in ("htf_trend", "htf_indicator", "momentum"):
         if col in df_raw.columns:
             df_ind[col] = df_raw[col]
@@ -2971,6 +3008,11 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         default=None,
         help="Override the maximum number of concurrent open positions (default 5)",
     )
+    parser.add_argument(
+        "--use-futures-signals",
+        action="store_true",
+        help="Use futures data for signal generation (entries/exits from futures, trades on spot prices)",
+    )
     return parser.parse_args(argv)
 
 
@@ -2990,6 +3032,7 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
 
     use_testnet = bool(args.testnet or DEFAULT_USE_TESTNET)
     set_signal_debug(args.debug_signals)
+    set_use_futures_signals(args.use_futures_signals)
     api_key, api_secret = get_api_credentials(use_testnet=use_testnet)
     if use_testnet and (not api_key or not api_secret):
         print("[Warn] Testnet API credentials are missing in .env; requests may fail.")
