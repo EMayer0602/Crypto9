@@ -90,8 +90,6 @@ DEFAULT_USE_TESTNET = False  # Testnet should be opt-in with --testnet flag
 USE_TIME_BASED_EXIT = True  # Enable time-based exits based on optimal hold times
 SIGNAL_DEBUG = False
 USE_FUTURES_SIGNALS = False  # Use futures data for signal generation (Option 1 from futures lead analysis)
-USE_FUTURES_FILTER = False  # Use futures trend as entry filter (Option 2: only trade with futures trend)
-FUTURES_LEAD_BARS = 18  # How many bars futures leads spot (from cross-correlation analysis)
 DEFAULT_SIGNAL_INTERVAL_MIN = 15
 DEFAULT_SPIKE_INTERVAL_MIN = 5
 DEFAULT_ATR_SPIKE_MULT = 2.5
@@ -116,22 +114,12 @@ def set_signal_debug(enabled: bool) -> None:
     SIGNAL_DEBUG = bool(enabled)
 
 
-def set_use_futures_signals(enabled: bool, lead_bars: int = None) -> None:
-    """Enable/disable using futures data for signal generation (Option 1)."""
-    global USE_FUTURES_SIGNALS, FUTURES_LEAD_BARS
+def set_use_futures_signals(enabled: bool) -> None:
+    """Enable/disable using futures data for signal generation."""
+    global USE_FUTURES_SIGNALS
     USE_FUTURES_SIGNALS = bool(enabled)
-    if lead_bars is not None:
-        FUTURES_LEAD_BARS = lead_bars
     if USE_FUTURES_SIGNALS:
-        print(f"[Config] Using FUTURES data for signal generation (lead={FUTURES_LEAD_BARS} bars)")
-
-
-def set_use_futures_filter(enabled: bool) -> None:
-    """Enable/disable using futures trend as entry filter (Option 2)."""
-    global USE_FUTURES_FILTER
-    USE_FUTURES_FILTER = bool(enabled)
-    if USE_FUTURES_FILTER:
-        print("[Config] Using FUTURES trend as entry filter (long only if futures bullish, short only if futures bearish)")
+        print("[Config] Using FUTURES data for signal generation")
 
 
 def load_env_file(path: str = ".env") -> None:
@@ -984,22 +972,6 @@ def build_indicator_dataframe(symbol: str, indicator_key: str, htf_value: str, p
     else:
         df_ind = st.compute_indicator(df_raw.copy(), param_a, param_b)
 
-    # Option 2: Use futures trend as entry filter (not replacing signals)
-    if USE_FUTURES_FILTER and not USE_FUTURES_SIGNALS:
-        futures_df = st.fetch_futures_data(symbol, st.TIMEFRAME, len(df_raw) + 100)
-        if not futures_df.empty:
-            futures_ind = st.compute_indicator(futures_df.copy(), param_a, param_b)
-            common_idx = df_ind.index.intersection(futures_ind.index)
-            if len(common_idx) > 100:
-                # Add futures_trend column for filtering (1=bullish, -1=bearish)
-                df_ind['futures_trend'] = 0
-                df_ind.loc[common_idx, 'futures_trend'] = futures_ind.loc[common_idx, 'trend_flag']
-                print(f"[Futures] Added futures trend filter to {symbol} ({len(common_idx)} bars)")
-            else:
-                df_ind['futures_trend'] = 0  # No filter if not enough data
-        else:
-            df_ind['futures_trend'] = 0  # No filter if no futures data
-
     for col in ("htf_trend", "htf_indicator", "momentum"):
         if col in df_raw.columns:
             df_ind[col] = df_raw[col]
@@ -1136,15 +1108,6 @@ def filters_allow_entry(direction: str, df: pd.DataFrame) -> tuple[bool, str]:
                 return False, f"EMA-{SECONDARY_EMA_PERIOD} slope unavailable"
             if ema_50_slope < SECONDARY_SLOPE_THRESHOLD:
                 return False, f"EMA-{SECONDARY_EMA_PERIOD} slope too low ({ema_50_slope:.3f}% < {SECONDARY_SLOPE_THRESHOLD}%)"
-
-    # Futures trend filter: only trade in direction of futures trend
-    if USE_FUTURES_FILTER:
-        futures_trend = curr.get("futures_trend", 0)
-        if futures_trend != 0:  # Only filter if we have futures data
-            if direction == "long" and futures_trend != 1:
-                return False, f"Futures trend bearish ({futures_trend})"
-            if direction == "short" and futures_trend != -1:
-                return False, f"Futures trend bullish ({futures_trend})"
 
     return True, ""
 
@@ -3051,17 +3014,6 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         action="store_true",
         help="Use futures data for signal generation (entries/exits from futures, trades on spot prices)",
     )
-    parser.add_argument(
-        "--use-futures-filter",
-        action="store_true",
-        help="Use futures trend as entry filter (long only if futures bullish, short only if bearish)",
-    )
-    parser.add_argument(
-        "--futures-lead",
-        type=int,
-        default=18,
-        help="Number of bars futures leads spot (default: 18, from cross-correlation analysis)",
-    )
     return parser.parse_args(argv)
 
 
@@ -3081,8 +3033,7 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
 
     use_testnet = bool(args.testnet or DEFAULT_USE_TESTNET)
     set_signal_debug(args.debug_signals)
-    set_use_futures_signals(args.use_futures_signals, args.futures_lead)
-    set_use_futures_filter(args.use_futures_filter)
+    set_use_futures_signals(args.use_futures_signals)
     api_key, api_secret = get_api_credentials(use_testnet=use_testnet)
     if use_testnet and (not api_key or not api_secret):
         print("[Warn] Testnet API credentials are missing in .env; requests may fail.")
