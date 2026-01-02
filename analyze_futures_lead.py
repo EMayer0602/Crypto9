@@ -49,14 +49,14 @@ def download_spot_and_futures(
 
     # Download futures data
     try:
-        # Need to use futures exchange
-        exchange = st.get_exchange()
-        # Check if exchange supports futures
-        if hasattr(exchange, 'options'):
-            original_type = exchange.options.get('defaultType', 'spot')
-            exchange.options['defaultType'] = 'future'
+        # Create a separate unauthenticated exchange for futures (OHLCV is public data)
+        import ccxt
+        futures_exchange = ccxt.binance({
+            'options': {'defaultType': 'future'},
+            'enableRateLimit': True,
+        })
 
-        futures_ohlcv = exchange.fetch_ohlcv(futures_symbol, timeframe, limit=bars_needed)
+        futures_ohlcv = futures_exchange.fetch_ohlcv(futures_symbol, timeframe, limit=bars_needed)
         futures_df = pd.DataFrame(
             futures_ohlcv,
             columns=["timestamp", "open", "high", "low", "close", "volume"]
@@ -65,20 +65,18 @@ def download_spot_and_futures(
         futures_df.set_index("timestamp", inplace=True)
         futures_df.index = futures_df.index.tz_convert(st.BERLIN_TZ)
 
-        # Reset exchange type
-        if hasattr(exchange, 'options'):
-            exchange.options['defaultType'] = original_type
-
         print(f"[Futures] Futures data: {len(futures_df)} bars")
     except Exception as e:
         print(f"[Futures] Failed to fetch futures {futures_symbol}: {e}")
         # Try alternative futures symbol format
         try:
+            import ccxt
             alt_futures = f"{base}USDT"
-            exchange = st.get_exchange()
-            if hasattr(exchange, 'options'):
-                exchange.options['defaultType'] = 'future'
-            futures_ohlcv = exchange.fetch_ohlcv(alt_futures, timeframe, limit=bars_needed)
+            futures_exchange = ccxt.binance({
+                'options': {'defaultType': 'future'},
+                'enableRateLimit': True,
+            })
+            futures_ohlcv = futures_exchange.fetch_ohlcv(alt_futures, timeframe, limit=bars_needed)
             futures_df = pd.DataFrame(
                 futures_ohlcv,
                 columns=["timestamp", "open", "high", "low", "close", "volume"]
