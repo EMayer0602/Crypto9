@@ -224,6 +224,25 @@ python compare_equity_curves.py --run-simulations
 python compare_equity_curves.py --periods "2024-06-01,2024-12-31,H2_2024" "2025-01-01,2025-06-30,H1_2025"
 ```
 
+**Adding a new period:**
+
+Step 1 - Run simulation for the new period:
+```bash
+python paper_trader.py --simulate --start 2025-01-01 --end 2025-12-31 \
+  --sim-log simulation_logs/full_2025_trades.csv \
+  --sim-json simulation_logs/full_2025_trades.json
+```
+
+Step 2 - Include in comparison (label must match filename: `Full_2025` → `full_2025_trades.csv`):
+```bash
+python compare_equity_curves.py --periods "2024-06-01,2024-12-31,H2_2024" "2025-01-01,2025-06-30,H1_2025" "2025-01-01,2025-12-31,Full_2025"
+```
+
+Or run all simulations automatically:
+```bash
+python compare_equity_curves.py --run-simulations --periods "2024-06-01,2024-12-31,H2_2024" "2025-01-01,2025-06-30,H1_2025" "2025-01-01,2025-12-31,Full_2025"
+```
+
 Default periods compared:
 - H2 2024 (Jun-Dec 2024)
 - H1 2025 (Jan-Jun 2025)
