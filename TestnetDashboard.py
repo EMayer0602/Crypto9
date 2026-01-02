@@ -320,24 +320,6 @@ def generate_dashboard():
     else:
         html += "        <tr><td colspan='2'>No open positions</td></tr>\n"
 
-    html += """    </table>
-
-    <h2>Statistics by Symbol</h2>
-    <table>
-        <tr><th>Symbol</th><th>Trades</th><th>Buys</th><th>Sells</th><th>Buy Volume</th><th>Sell Volume</th><th>Realized PnL</th></tr>
-"""
-    for sym, stats in sorted(symbol_stats.items()):
-        pnl_class = "positive" if stats["realized_pnl"] >= 0 else "negative"
-        html += f"""        <tr>
-            <td>{sym}</td>
-            <td>{stats['trades']}</td>
-            <td>{stats['buys']}</td>
-            <td>{stats['sells']}</td>
-            <td>{stats['buy_volume']:,.2f}</td>
-            <td>{stats['sell_volume']:,.2f}</td>
-            <td class="{pnl_class}">{stats['realized_pnl']:,.2f}</td>
-        </tr>\n"""
-
     # Helper function to generate trade table rows
     def trade_table_rows(trades, header_class=""):
         if not trades:
