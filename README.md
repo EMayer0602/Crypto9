@@ -176,6 +176,68 @@ python paper_trader.py --replay-trades-csv report_html/last48_trades.csv
 
 ---
 
+## Analysis & Visualization
+
+### 12) Equity Curve (Kapitalkurve)
+After running a simulation, an equity curve is automatically generated showing:
+- Capital growth over time
+- Peak equity line
+- Drawdown visualization
+- Cumulative PnL by symbol
+
+Output: `report_html/charts/equity_curve.html`
+
+The equity curve shows:
+- **Start → Final Capital** with return percentage
+- **Maximum Drawdown** in USDT and percentage
+- **Trade count** and timing
+
+### 13) Monthly PnL Bar Chart (Monatliche PnL)
+Automatically generated alongside the equity curve:
+- Bar chart with monthly returns
+- Color-coded (green = profit, red = loss)
+- Win rate per month
+- Trade count per month
+
+Output: `report_html/charts/monthly_returns.html`
+
+Shows:
+- **Total PnL** across all months
+- **Average monthly return**
+- **Best/Worst month** identification
+
+### 14) Equity Curve Comparison (Kapitalkurvenvergleich)
+Compare performance across different time periods:
+
+**Using existing simulation logs:**
+```bash
+python compare_equity_curves.py
+```
+
+**Run new simulations and compare:**
+```bash
+python compare_equity_curves.py --run-simulations
+```
+
+**Custom periods:**
+```bash
+python compare_equity_curves.py --periods "2024-06-01,2024-12-31,H2_2024" "2025-01-01,2025-06-30,H1_2025"
+```
+
+Default periods compared:
+- H2 2024 (Jun-Dec 2024)
+- H1 2025 (Jan-Jun 2025)
+- Full 2025 (Jan-Dec 2025)
+
+Output: `report_html/charts/equity_comparison.html`
+
+The comparison shows:
+- **Overlaid equity curves** (normalized by days from start)
+- **Drawdown comparison**
+- **Summary bar chart** with return %, trade count, max drawdown
+
+---
+
 ## Common Workflows
 
 ### Full Backtest with Reports
@@ -233,7 +295,11 @@ python ClearPositions.py
 | `paper_trading_simulation_log.csv/json` | Simulation trade history |
 | `paper_trading_actual_trades.csv/json` | Live trade history |
 | `report_html/best_params_overall.csv` | Optimized parameters per symbol |
-| `report_html/charts/*.html` | Interactive price charts |
+| `report_html/charts/*.html` | Interactive price charts per symbol |
+| `report_html/charts/equity_curve.html` | Equity curve with drawdown |
+| `report_html/charts/monthly_returns.html` | Monthly PnL bar chart |
+| `report_html/charts/equity_comparison.html` | Multi-period comparison |
+| `simulation_logs/*_trades.csv/json` | Period-specific simulation logs |
 | `ohlcv_cache/*.csv` | Cached OHLCV data |
 
 ---
