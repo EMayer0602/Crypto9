@@ -24,6 +24,9 @@ SYMBOLS = ["BTCEUR", "ETHEUR", "SUIEUR", "SOLEUR", "XRPEUR", "LINKEUR",
 # Base currencies (don't count as positions)
 BASE_CURRENCIES = {"EUR", "USDT", "USDC", "BUSD", "BTC", "TUSD"}
 
+# Relevant trading assets (filter out testnet junk)
+RELEVANT_ASSETS = {"ETH", "SOL", "XRP", "LINK", "SUI", "ZEC", "LUNC", "TNSR", "BNB"}
+
 OUTPUT_DIR = Path("report_testnet")
 
 
@@ -112,7 +115,7 @@ def generate_dashboard():
     # Get balances
     balances = get_account_balances()
 
-    # Filter relevant balances
+    # Filter relevant balances (ignore testnet junk tokens)
     open_positions = []
     base_balances = []
     for bal in balances:
@@ -123,7 +126,7 @@ def generate_dashboard():
         if total > 0:
             if asset in BASE_CURRENCIES:
                 base_balances.append({"asset": asset, "amount": total})
-            else:
+            elif asset in RELEVANT_ASSETS:
                 open_positions.append({"asset": asset, "amount": total})
 
     # Get order history for each symbol
