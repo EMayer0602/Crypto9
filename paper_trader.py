@@ -954,25 +954,19 @@ def build_indicator_dataframe(symbol: str, indicator_key: str, htf_value: str, p
             # Compute indicator on futures data
             futures_ind = st.compute_indicator(futures_df.copy(), param_a, param_b)
 
-            # Compute indicator on spot data (for prices only)
+            # Compute indicator on spot data (keeps spot prices and bands)
             df_ind = st.compute_indicator(df_raw.copy(), param_a, param_b)
 
-            # SHIFT futures signals forward by lead amount
-            # Futures at time T predicts spot at T+LEAD, so we use futures signal from T-LEAD for spot at T
-            # This is done by shifting futures signals forward (positive shift)
-            signal_cols = ["trend_flag", "trend_flip", "supertrend", "upper_band", "lower_band"]
-            for col in signal_cols:
-                if col in futures_ind.columns:
-                    futures_ind[col] = futures_ind[col].shift(FUTURES_LEAD_BARS)
-
-            # Align shifted futures signals with spot data by timestamp
+            # Align futures signals with spot data by timestamp
             common_idx = df_ind.index.intersection(futures_ind.index)
             if len(common_idx) > 100:
-                # Copy shifted signal columns from futures to spot dataframe
-                for col in signal_cols:
+                # Only copy TREND DIRECTION signals from futures
+                # DO NOT copy price-based bands (supertrend/upper_band/lower_band)
+                # because futures is in USDT, spot is in EUR - different price scales!
+                for col in ["trend_flag", "trend_flip"]:
                     if col in futures_ind.columns:
                         df_ind.loc[common_idx, col] = futures_ind.loc[common_idx, col]
-                print(f"[Futures] Applied futures signals to {symbol} (lead={FUTURES_LEAD_BARS} bars, {len(common_idx)} aligned)")
+                print(f"[Futures] Applied futures trend signals to {symbol} ({len(common_idx)} bars)")
             else:
                 print(f"[Futures] Not enough common bars for {symbol} ({len(common_idx)}), using spot signals")
         else:
