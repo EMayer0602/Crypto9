@@ -6,8 +6,8 @@ import requests
 from dotenv import load_dotenv
 from datetime import datetime, timezone
 
-# .env laden
-load_dotenv("C:/Users/Edgar.000/Documents/____Trading strategies/Supertrend_5Min/.env")
+# .env laden (aus aktuellem Verzeichnis)
+load_dotenv()
 
 API_KEY = os.getenv("BINANCE_API_KEY_TEST")
 API_SECRET = os.getenv("BINANCE_API_SECRET_TEST")

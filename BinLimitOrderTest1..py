@@ -5,8 +5,8 @@ import hashlib
 import requests
 from dotenv import load_dotenv
 
-# .env laden (Pfad anpassen falls nötig)
-load_dotenv("C:/Users/Edgar.000/Documents/____Trading strategies/Supertrend_5Min/.env")
+# .env laden (aus aktuellem Verzeichnis)
+load_dotenv()
 
 API_KEY = os.getenv("BINANCE_API_KEY_TEST")
 API_SECRET = os.getenv("BINANCE_API_SECRET_TEST")
