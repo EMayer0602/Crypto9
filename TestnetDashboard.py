@@ -27,6 +27,9 @@ BASE_CURRENCIES = {"EUR", "USDT", "USDC", "BUSD", "BTC", "TUSD"}
 # Relevant trading assets (filter out testnet junk)
 RELEVANT_ASSETS = {"ETH", "SOL", "XRP", "LINK", "SUI", "ZEC", "LUNC", "TNSR", "BNB"}
 
+# Only show trades from this date onwards (set to None to show all)
+TRADES_SINCE_DATE = datetime(2026, 1, 2, tzinfo=timezone.utc)  # Today
+
 OUTPUT_DIR = Path("report_testnet")
 
 
@@ -129,12 +132,23 @@ def generate_dashboard():
             elif asset in RELEVANT_ASSETS:
                 open_positions.append({"asset": asset, "amount": total})
 
-    # Get order history for each symbol
+    # Get order history for each symbol (filtered by date)
     all_trades = []
     symbol_stats = {}
     for sym in SYMBOLS:
         orders = get_all_orders(sym)
         if orders:
+            # Filter orders by date if TRADES_SINCE_DATE is set
+            if TRADES_SINCE_DATE:
+                filtered_orders = []
+                for o in orders:
+                    ts = o.get("time", 0)
+                    if ts:
+                        order_time = datetime.fromtimestamp(ts/1000, tz=timezone.utc)
+                        if order_time >= TRADES_SINCE_DATE:
+                            filtered_orders.append(o)
+                orders = filtered_orders
+
             stats = calculate_trade_stats(orders)
             if stats["trades"] > 0:
                 symbol_stats[sym] = stats
