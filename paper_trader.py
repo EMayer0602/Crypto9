@@ -90,6 +90,7 @@ DEFAULT_USE_TESTNET = False  # Testnet should be opt-in with --testnet flag
 USE_TIME_BASED_EXIT = True  # Enable time-based exits based on optimal hold times
 SIGNAL_DEBUG = False
 USE_FUTURES_SIGNALS = False  # Use futures data for signal generation (Option 1 from futures lead analysis)
+FUTURES_LEAD_BARS = 18  # How many bars futures leads spot (from cross-correlation analysis)
 DEFAULT_SIGNAL_INTERVAL_MIN = 15
 DEFAULT_SPIKE_INTERVAL_MIN = 5
 DEFAULT_ATR_SPIKE_MULT = 2.5
@@ -114,12 +115,14 @@ def set_signal_debug(enabled: bool) -> None:
     SIGNAL_DEBUG = bool(enabled)
 
 
-def set_use_futures_signals(enabled: bool) -> None:
+def set_use_futures_signals(enabled: bool, lead_bars: int = None) -> None:
     """Enable/disable using futures data for signal generation (Option 1)."""
-    global USE_FUTURES_SIGNALS
+    global USE_FUTURES_SIGNALS, FUTURES_LEAD_BARS
     USE_FUTURES_SIGNALS = bool(enabled)
+    if lead_bars is not None:
+        FUTURES_LEAD_BARS = lead_bars
     if USE_FUTURES_SIGNALS:
-        print("[Config] Using FUTURES data for signal generation (trades on spot prices)")
+        print(f"[Config] Using FUTURES data for signal generation (lead={FUTURES_LEAD_BARS} bars)")
 
 
 def load_env_file(path: str = ".env") -> None:
@@ -954,15 +957,22 @@ def build_indicator_dataframe(symbol: str, indicator_key: str, htf_value: str, p
             # Compute indicator on spot data (for prices only)
             df_ind = st.compute_indicator(df_raw.copy(), param_a, param_b)
 
-            # Align futures signals with spot data by timestamp
+            # SHIFT futures signals forward by lead amount
+            # Futures at time T predicts spot at T+LEAD, so we use futures signal from T-LEAD for spot at T
+            # This is done by shifting futures signals forward (positive shift)
+            signal_cols = ["trend_flag", "trend_flip", "supertrend", "upper_band", "lower_band"]
+            for col in signal_cols:
+                if col in futures_ind.columns:
+                    futures_ind[col] = futures_ind[col].shift(FUTURES_LEAD_BARS)
+
+            # Align shifted futures signals with spot data by timestamp
             common_idx = df_ind.index.intersection(futures_ind.index)
             if len(common_idx) > 100:
-                # Copy signal columns from futures to spot dataframe
-                signal_cols = ["trend_flag", "trend_flip", "supertrend", "upper_band", "lower_band"]
+                # Copy shifted signal columns from futures to spot dataframe
                 for col in signal_cols:
                     if col in futures_ind.columns:
                         df_ind.loc[common_idx, col] = futures_ind.loc[common_idx, col]
-                print(f"[Futures] Applied futures signals to {symbol} ({len(common_idx)} bars)")
+                print(f"[Futures] Applied futures signals to {symbol} (lead={FUTURES_LEAD_BARS} bars, {len(common_idx)} aligned)")
             else:
                 print(f"[Futures] Not enough common bars for {symbol} ({len(common_idx)}), using spot signals")
         else:
@@ -3013,6 +3023,12 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         action="store_true",
         help="Use futures data for signal generation (entries/exits from futures, trades on spot prices)",
     )
+    parser.add_argument(
+        "--futures-lead",
+        type=int,
+        default=18,
+        help="Number of bars futures leads spot (default: 18, from cross-correlation analysis)",
+    )
     return parser.parse_args(argv)
 
 
@@ -3032,7 +3048,7 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
 
     use_testnet = bool(args.testnet or DEFAULT_USE_TESTNET)
     set_signal_debug(args.debug_signals)
-    set_use_futures_signals(args.use_futures_signals)
+    set_use_futures_signals(args.use_futures_signals, args.futures_lead)
     api_key, api_secret = get_api_credentials(use_testnet=use_testnet)
     if use_testnet and (not api_key or not api_secret):
         print("[Warn] Testnet API credentials are missing in .env; requests may fail.")
