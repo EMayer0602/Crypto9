@@ -3050,15 +3050,18 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
     allowed_indicators = parse_indicator_argument(args.indicators)
     force_symbol, force_direction = parse_force_entry_argument(args.force_entry)
 
-    # Handle stake sizing: dynamic by default, fixed if --stake provided
+    use_testnet = bool(args.testnet or DEFAULT_USE_TESTNET)
+
+    # Handle stake sizing: dynamic by default, fixed if --stake provided or testnet
     if args.stake is not None:
         stake_value = args.stake
         print(f"[Config] Using fixed stake: {stake_value} USDT")
+    elif use_testnet:
+        stake_value = TESTNET_DEFAULT_STAKE
+        print(f"[Config] Using testnet fixed stake: {stake_value} USDT")
     else:
         stake_value = None  # None triggers dynamic sizing (total_capital/7)
         print("[Config] Using dynamic position sizing: stake = total_capital / 7")
-
-    use_testnet = bool(args.testnet or DEFAULT_USE_TESTNET)
 
     # Update output paths based on testnet mode
     global SIMULATION_SUMMARY_HTML, SIMULATION_SUMMARY_JSON, REPORT_DIR

@@ -80,7 +80,7 @@ SYMBOLS = [
 	"ZEC/USDC",
 ]
 
-# Testnet only supports USDT pairs
+# Testnet symbols - use USDC where available, USDT otherwise
 TESTNET_SYMBOLS = [
 	"BTC/USDT",
 	"ETH/USDT",
@@ -88,14 +88,13 @@ TESTNET_SYMBOLS = [
 	"LINK/USDT",
 	"SOL/USDT",
 	"BNB/USDT",
-	"SUI/USDT",
-	"ZEC/USDT",
+	"SUI/USDC",    # USDC available
+	"ZEC/USDC",    # USDC available
 	"LUNC/USDT",
-	"TNSR/USDT",
+	"TNSR/USDC",   # USDC available
 ]
 
 # Map testnet symbols to their equivalents for parameter lookup
-# Note: ZEC, LUNC, TNSR use USDC/USDT in production, not EUR
 TESTNET_TO_EUR_MAP = {
 	"BTC/USDT": "BTC/EUR",
 	"ETH/USDT": "ETH/EUR",
@@ -103,10 +102,10 @@ TESTNET_TO_EUR_MAP = {
 	"LINK/USDT": "LINK/EUR",
 	"SOL/USDT": "SOL/EUR",
 	"BNB/USDT": "BNB/EUR",
-	"SUI/USDT": "SUI/EUR",
-	"ZEC/USDT": "ZEC/USDC",
-	"LUNC/USDT": "LUNC/USDT",
-	"TNSR/USDT": "TNSR/USDC",
+	"SUI/USDC": "SUI/EUR",
+	"ZEC/USDC": "ZEC/USDC",    # same as production
+	"LUNC/USDT": "LUNC/USDT",  # same as production
+	"TNSR/USDC": "TNSR/USDC",  # same as production
 }
 
 
