@@ -18,13 +18,14 @@ BASE_URL = "https://testnet.binance.vision"
 RECV_WINDOW_MS = 5_000
 
 # Trading symbols - Testnet only supports USDT pairs
-SYMBOLS = ["BTCUSDT", "ETHUSDT", "XRPUSDT", "LINKUSDT", "SOLUSDT", "BNBUSDT"]
+SYMBOLS = ["BTCUSDT", "ETHUSDT", "XRPUSDT", "LINKUSDT", "SOLUSDT", "BNBUSDT",
+           "SUIUSDT", "ZECUSDT", "LUNCUSDT", "TNSRUSDT"]
 
 # Base currencies (don't count as positions)
 BASE_CURRENCIES = {"USDT", "USDC", "BUSD", "BTC", "TUSD"}
 
 # Relevant trading assets (filter out testnet junk)
-RELEVANT_ASSETS = {"BTC", "ETH", "SOL", "XRP", "LINK", "BNB"}
+RELEVANT_ASSETS = {"BTC", "ETH", "SOL", "XRP", "LINK", "BNB", "SUI", "ZEC", "LUNC", "TNSR"}
 
 # Only show trades from this date onwards (set to None to show all)
 TRADES_SINCE_DATE = datetime(2026, 1, 2, tzinfo=timezone.utc)  # Today

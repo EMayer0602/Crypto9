@@ -88,9 +88,14 @@ TESTNET_SYMBOLS = [
 	"LINK/USDT",
 	"SOL/USDT",
 	"BNB/USDT",
+	"SUI/USDT",
+	"ZEC/USDT",
+	"LUNC/USDT",
+	"TNSR/USDT",
 ]
 
-# Map testnet symbols to their EUR equivalents for parameter lookup
+# Map testnet symbols to their equivalents for parameter lookup
+# Note: ZEC, LUNC, TNSR use USDC/USDT in production, not EUR
 TESTNET_TO_EUR_MAP = {
 	"BTC/USDT": "BTC/EUR",
 	"ETH/USDT": "ETH/EUR",
@@ -98,6 +103,10 @@ TESTNET_TO_EUR_MAP = {
 	"LINK/USDT": "LINK/EUR",
 	"SOL/USDT": "SOL/EUR",
 	"BNB/USDT": "BNB/EUR",
+	"SUI/USDT": "SUI/EUR",
+	"ZEC/USDT": "ZEC/USDC",
+	"LUNC/USDT": "LUNC/USDT",
+	"TNSR/USDT": "TNSR/USDC",
 }
 
 
