@@ -1806,8 +1806,10 @@ def backtest_htf_crossover(df, atr_stop_mult=None, direction="long", min_hold_ba
 
 		close_curr = float(curr["close"])
 		close_prev = float(prev["close"])
-		htf_curr = float(curr["indicator_line"])
-		htf_prev = float(prev["indicator_line"])
+		# Use HTF indicator for crossover (not main TF indicator_line)
+		htf_col = "htf_indicator" if "htf_indicator" in df.columns else "indicator_line"
+		htf_curr = float(curr[htf_col]) if pd.notna(curr[htf_col]) else close_curr
+		htf_prev = float(prev[htf_col]) if pd.notna(prev[htf_col]) else close_prev
 
 		# Entry logic: Close crosses HTF indicator
 		if not in_position:
