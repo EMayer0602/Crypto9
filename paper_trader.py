@@ -1619,8 +1619,9 @@ def calc_symbol_stats(trades_df: pd.DataFrame) -> List[Dict[str, Any]]:
         return []
 
     symbol_stats = []
-
-    for symbol in sorted(trades_df["symbol"].unique()):
+    # Filter out NaN symbols and sort
+    valid_symbols = [s for s in trades_df["symbol"].unique() if pd.notna(s) and isinstance(s, str)]
+    for symbol in sorted(valid_symbols):
         sym_df = trades_df[trades_df["symbol"] == symbol].copy()
         if sym_df.empty:
             continue
