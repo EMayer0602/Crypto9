@@ -80,6 +80,39 @@ SYMBOLS = [
 	"ZEC/USDC",
 ]
 
+# Testnet only supports USDT pairs
+TESTNET_SYMBOLS = [
+	"BTC/USDT",
+	"ETH/USDT",
+	"XRP/USDT",
+	"LINK/USDT",
+	"SOL/USDT",
+	"BNB/USDT",
+]
+
+# Map testnet symbols to their EUR equivalents for parameter lookup
+TESTNET_TO_EUR_MAP = {
+	"BTC/USDT": "BTC/EUR",
+	"ETH/USDT": "ETH/EUR",
+	"XRP/USDT": "XRP/EUR",
+	"LINK/USDT": "LINK/EUR",
+	"SOL/USDT": "SOL/EUR",
+	"BNB/USDT": "BNB/EUR",
+}
+
+
+def get_symbols(use_testnet: bool = None) -> list:
+	"""Return TESTNET_SYMBOLS if testnet mode, otherwise SYMBOLS."""
+	if use_testnet is None:
+		use_testnet = USE_TESTNET
+	return TESTNET_SYMBOLS if use_testnet else SYMBOLS
+
+
+def map_symbol_for_params(symbol: str) -> str:
+	"""Map testnet USDT symbol to EUR equivalent for parameter lookup."""
+	return TESTNET_TO_EUR_MAP.get(symbol, symbol)
+
+
 RUN_PARAMETER_SWEEP = True  # ← AKTIVIERT für komplette Optimierung
 RUN_SAVED_PARAMS = False
 RUN_OVERALL_BEST = False  # ← Deaktiviert, weil wir neu optimieren

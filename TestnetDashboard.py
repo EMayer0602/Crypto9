@@ -17,15 +17,14 @@ API_SECRET = os.getenv("BINANCE_API_SECRET_TEST")
 BASE_URL = "https://testnet.binance.vision"
 RECV_WINDOW_MS = 5_000
 
-# Trading symbols
-SYMBOLS = ["BTCEUR", "ETHEUR", "SUIEUR", "SOLEUR", "XRPEUR", "LINKEUR",
-           "ZECUSDC", "LUNCUSDT", "TNSRUSDC"]
+# Trading symbols - Testnet only supports USDT pairs
+SYMBOLS = ["BTCUSDT", "ETHUSDT", "XRPUSDT", "LINKUSDT", "SOLUSDT", "BNBUSDT"]
 
 # Base currencies (don't count as positions)
-BASE_CURRENCIES = {"EUR", "USDT", "USDC", "BUSD", "BTC", "TUSD"}
+BASE_CURRENCIES = {"USDT", "USDC", "BUSD", "BTC", "TUSD"}
 
 # Relevant trading assets (filter out testnet junk)
-RELEVANT_ASSETS = {"ETH", "SOL", "XRP", "LINK", "SUI", "ZEC", "LUNC", "TNSR", "BNB"}
+RELEVANT_ASSETS = {"BTC", "ETH", "SOL", "XRP", "LINK", "BNB"}
 
 # Only show trades from this date onwards (set to None to show all)
 TRADES_SINCE_DATE = datetime(2026, 1, 2, tzinfo=timezone.utc)  # Today
