@@ -85,9 +85,9 @@ def get_report_dir(use_testnet: bool = False) -> str:
     """Return the appropriate report directory based on testnet mode."""
     return "report_testnet" if use_testnet else "report_html"
 BEST_PARAMS_CSV = st.OVERALL_PARAMS_CSV
-START_TOTAL_CAPITAL = 16_000.0
+START_TOTAL_CAPITAL = 16_500.0
 MAX_OPEN_POSITIONS = 10
-STAKE_DIVISOR = 10  # stake = current total_capital / STAKE_DIVISOR = 16000/10 = 1600
+STAKE_DIVISOR = 10  # stake = current total_capital / STAKE_DIVISOR = 16500/10 = 1650
 DEFAULT_DIRECTION_CAPITAL = 2_800.0
 BASE_BAR_MINUTES = st.timeframe_to_minutes(st.TIMEFRAME)
 DEFAULT_SYMBOL_ALLOWLIST = [sym.strip() for sym in st.SYMBOLS if sym and sym.strip()]
@@ -3052,16 +3052,13 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
 
     use_testnet = bool(args.testnet or DEFAULT_USE_TESTNET)
 
-    # Handle stake sizing: dynamic by default, fixed if --stake provided or testnet
+    # Handle stake sizing: dynamic by default, fixed if --stake provided
     if args.stake is not None:
         stake_value = args.stake
         print(f"[Config] Using fixed stake: {stake_value} USDT")
-    elif use_testnet:
-        stake_value = TESTNET_DEFAULT_STAKE
-        print(f"[Config] Using testnet fixed stake: {stake_value} USDT")
     else:
-        stake_value = None  # None triggers dynamic sizing (total_capital/7)
-        print("[Config] Using dynamic position sizing: stake = total_capital / 7")
+        stake_value = None  # None triggers dynamic sizing
+        print(f"[Config] Using dynamic position sizing: stake = total_capital / {STAKE_DIVISOR}")
 
     # Update output paths based on testnet mode
     global SIMULATION_SUMMARY_HTML, SIMULATION_SUMMARY_JSON, REPORT_DIR
