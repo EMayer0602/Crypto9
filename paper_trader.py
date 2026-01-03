@@ -480,21 +480,21 @@ def filter_best_rows_by_symbol(df: pd.DataFrame, symbols: List[str]) -> pd.DataF
 
 
 def remap_best_rows_for_testnet(df: pd.DataFrame) -> pd.DataFrame:
-    """Remap EUR symbols to USDT for testnet trading.
+    """Remap USDC symbols to testnet equivalents for trading.
 
-    Uses parameters trained on EUR pairs but trades USDT pairs on testnet.
+    Uses parameters trained on USDC pairs but trades USDT/USDC on testnet.
     """
     if df.empty or "Symbol" not in df.columns:
         return df
-    # Reverse map: EUR -> USDT
-    eur_to_usdt = {v: k for k, v in st.TESTNET_TO_EUR_MAP.items()}
+    # Reverse map: USDC -> testnet symbol
+    usdc_to_testnet = {v: k for k, v in st.TESTNET_TO_USDC_MAP.items()}
     df = df.copy()
-    df["Symbol"] = df["Symbol"].map(lambda s: eur_to_usdt.get(s, s))
+    df["Symbol"] = df["Symbol"].map(lambda s: usdc_to_testnet.get(s, s))
     return df
 
 
-def get_eur_equivalents_for_testnet(testnet_symbols: List[str]) -> List[str]:
-    """Get EUR symbol equivalents for testnet USDT symbols."""
+def get_usdc_equivalents_for_testnet(testnet_symbols: List[str]) -> List[str]:
+    """Get USDC symbol equivalents for testnet symbols."""
     return [st.map_symbol_for_params(s) for s in testnet_symbols]
 
 
@@ -2751,11 +2751,11 @@ def run_simulation(
     cfg_lookup = load_config_lookup(config_df)
     best_df = load_best_rows(active_indicators=allowed_indicators)
     print(f"[DEBUG] After load_best_rows: {len(best_df)} rows, symbols: {best_df['Symbol'].unique().tolist() if 'Symbol' in best_df.columns else 'N/A'}")
-    # For testnet: filter by EUR equivalents (what's in CSV), then remap to USDT
+    # For testnet: filter by USDC equivalents (what's in CSV), then remap to USDT
     if use_testnet:
-        eur_equivalents = get_eur_equivalents_for_testnet(raw_symbols)
-        symbol_filter = normalize_symbol_list(eur_equivalents)
-        print(f"[DEBUG] Testnet mode: using EUR equivalents for params: {symbol_filter}")
+        usdc_equivalents = get_usdc_equivalents_for_testnet(raw_symbols)
+        symbol_filter = normalize_symbol_list(usdc_equivalents)
+        print(f"[DEBUG] Testnet mode: using USDC equivalents for params: {symbol_filter}")
     else:
         symbol_filter = normalize_symbol_list(raw_symbols)
     print(f"[DEBUG] symbol_filter: {symbol_filter}")
@@ -2922,11 +2922,11 @@ def main(
     cfg_lookup = load_config_lookup(config_df)
     best_df = load_best_rows(active_indicators=allowed_indicators)
     print(f"[DEBUG] Loaded {len(best_df)} rows from best_params_overall.csv")
-    # For testnet: filter by EUR equivalents (what's in CSV), then remap to USDT
+    # For testnet: filter by USDC equivalents (what's in CSV), then remap to USDT
     if use_testnet:
-        eur_equivalents = get_eur_equivalents_for_testnet(raw_symbols)
-        symbol_filter = normalize_symbol_list(eur_equivalents)
-        print(f"[DEBUG] Testnet: EUR equivalents = {eur_equivalents}")
+        usdc_equivalents = get_usdc_equivalents_for_testnet(raw_symbols)
+        symbol_filter = normalize_symbol_list(usdc_equivalents)
+        print(f"[DEBUG] Testnet: USDC equivalents = {usdc_equivalents}")
     else:
         symbol_filter = normalize_symbol_list(raw_symbols)
     print(f"[DEBUG] symbol_filter = {symbol_filter}")

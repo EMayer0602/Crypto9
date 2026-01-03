@@ -64,48 +64,52 @@ EXCHANGE_ID = "binance"
 TIMEFRAME = "1h"
 LOOKBACK = 8760  # 1 year of hourly bars
 OHLCV_CACHE_DIR = "ohlcv_cache"  # Directory for persistent OHLCV data storage
+# USDx symbols for optimization sweep
 SYMBOLS = [
-	"BTC/EUR",
-	"ETH/EUR",
-	"XRP/EUR",
-	# "ADA/EUR",
-	# "BNB/EUR",
-	"LINK/EUR",
-	# "DOGE/EUR",
-	"LUNC/USDT",
-	"SOL/EUR",
-	"SUI/EUR",
-	"TNSR/USDC",
-	# "ZEC/EUR",
+	"BTC/USDC",
+	"ETH/USDC",
+	"SOL/USDC",
+	"XRP/USDC",
+	"LINK/USDC",
+	"SUI/USDC",
 	"ZEC/USDC",
+	"TNSR/USDC",
+	"ADA/USDC",
+	"ICP/USDC",
+	"BNB/USDC",
+	"LUNC/USDT",  # nur USDT verfügbar
 ]
 
 # Testnet symbols - use USDC where available, USDT otherwise
 TESTNET_SYMBOLS = [
 	"BTC/USDT",
 	"ETH/USDT",
+	"SOL/USDT",
 	"XRP/USDT",
 	"LINK/USDT",
-	"SOL/USDT",
+	"SUI/USDC",
+	"ZEC/USDC",
+	"TNSR/USDC",
+	"ADA/USDT",
+	"ICP/USDT",
 	"BNB/USDT",
-	"SUI/USDC",    # USDC available
-	"ZEC/USDC",    # USDC available
 	"LUNC/USDT",
-	"TNSR/USDC",   # USDC available
 ]
 
-# Map testnet symbols to their equivalents for parameter lookup
-TESTNET_TO_EUR_MAP = {
-	"BTC/USDT": "BTC/EUR",
-	"ETH/USDT": "ETH/EUR",
-	"XRP/USDT": "XRP/EUR",
-	"LINK/USDT": "LINK/EUR",
-	"SOL/USDT": "SOL/EUR",
-	"BNB/USDT": "BNB/EUR",
-	"SUI/USDC": "SUI/EUR",
-	"ZEC/USDC": "ZEC/USDC",    # same as production
-	"LUNC/USDT": "LUNC/USDT",  # same as production
-	"TNSR/USDC": "TNSR/USDC",  # same as production
+# Map testnet symbols to production USDC equivalents for parameter lookup
+TESTNET_TO_USDC_MAP = {
+	"BTC/USDT": "BTC/USDC",
+	"ETH/USDT": "ETH/USDC",
+	"SOL/USDT": "SOL/USDC",
+	"XRP/USDT": "XRP/USDC",
+	"LINK/USDT": "LINK/USDC",
+	"SUI/USDC": "SUI/USDC",
+	"ZEC/USDC": "ZEC/USDC",
+	"TNSR/USDC": "TNSR/USDC",
+	"ADA/USDT": "ADA/USDC",
+	"ICP/USDT": "ICP/USDC",
+	"BNB/USDT": "BNB/USDC",
+	"LUNC/USDT": "LUNC/USDT",
 }
 
 
@@ -117,8 +121,8 @@ def get_symbols(use_testnet: bool = None) -> list:
 
 
 def map_symbol_for_params(symbol: str) -> str:
-	"""Map testnet USDT symbol to EUR equivalent for parameter lookup."""
-	return TESTNET_TO_EUR_MAP.get(symbol, symbol)
+	"""Map testnet symbol to production USDC equivalent for parameter lookup."""
+	return TESTNET_TO_USDC_MAP.get(symbol, symbol)
 
 
 RUN_PARAMETER_SWEEP = True  # ← AKTIVIERT für komplette Optimierung
