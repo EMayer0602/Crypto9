@@ -2902,8 +2902,6 @@ def main(
         )
         if not trades:
             continue
-        for trade in trades:
-            append_trade_log(trade)
         closed_trades.extend(trades)
     save_state(state)
     marked_capital = write_live_reports(state, closed_trades)
