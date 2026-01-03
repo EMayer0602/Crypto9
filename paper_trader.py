@@ -472,25 +472,6 @@ def filter_best_rows_by_symbol(df: pd.DataFrame, symbols: List[str]) -> pd.DataF
     return filtered
 
 
-def remap_best_rows_for_testnet(df: pd.DataFrame) -> pd.DataFrame:
-    """Remap EUR symbols to USDT for testnet trading.
-
-    Uses parameters trained on EUR pairs but trades USDT pairs on testnet.
-    """
-    if df.empty or "Symbol" not in df.columns:
-        return df
-    # Reverse map: EUR -> USDT
-    eur_to_usdt = {v: k for k, v in st.TESTNET_TO_EUR_MAP.items()}
-    df = df.copy()
-    df["Symbol"] = df["Symbol"].map(lambda s: eur_to_usdt.get(s, s))
-    return df
-
-
-def get_eur_equivalents_for_testnet(testnet_symbols: List[str]) -> List[str]:
-    """Get EUR symbol equivalents for testnet USDT symbols."""
-    return [st.map_symbol_for_params(s) for s in testnet_symbols]
-
-
 def filter_best_rows_by_direction(df: pd.DataFrame, allowed: Optional[List[str]] = None) -> pd.DataFrame:
     if df.empty or "Direction" not in df.columns:
         return df
@@ -2519,9 +2500,9 @@ def run_signal_cycle(
     print_daily_closed_trades()
 
 
-def detect_atr_spikes(symbols: Sequence[str], atr_mult: float, use_testnet: bool = False) -> List[str]:
+def detect_atr_spikes(symbols: Sequence[str], atr_mult: float) -> List[str]:
     triggered: List[str] = []
-    target_symbols = list(symbols) if symbols else st.get_symbols(use_testnet)
+    target_symbols = list(symbols) if symbols else st.SYMBOLS
     for symbol in target_symbols:
         try:
             df = st.fetch_data(symbol, st.TIMEFRAME, max(st.ATR_WINDOW + 5, 50))
@@ -2566,7 +2547,7 @@ def monitor_loop(
                 run_signal_cycle(symbols, indicators, stake, use_testnet, order_executor, trade_notifier)
                 next_signal = now + signal_interval_min * 60.0
             if now >= next_spike:
-                spike_symbols = detect_atr_spikes(symbols, atr_mult, use_testnet)
+                spike_symbols = detect_atr_spikes(symbols, atr_mult)
                 if spike_symbols:
                     print(f"[{_now_str()}] Spike trigger for {', '.join(spike_symbols)}")
                     run_signal_cycle(spike_symbols, indicators, stake, use_testnet, order_executor, trade_notifier)
@@ -2736,27 +2717,15 @@ def run_simulation(
     if refresh_params:
         st.run_overall_best_params()
     st.configure_exchange(use_testnet=use_testnet)
-    # Use testnet symbols (USDT pairs) when in testnet mode
-    default_symbols = st.get_symbols(use_testnet)
-    raw_symbols = allowed_symbols if allowed_symbols else default_symbols
-    config_df = ensure_config(raw_symbols or default_symbols)
+    raw_symbols = allowed_symbols if allowed_symbols else DEFAULT_SYMBOL_ALLOWLIST
+    config_df = ensure_config(raw_symbols or st.SYMBOLS)
     cfg_lookup = load_config_lookup(config_df)
     best_df = load_best_rows(active_indicators=allowed_indicators)
     print(f"[DEBUG] After load_best_rows: {len(best_df)} rows, symbols: {best_df['Symbol'].unique().tolist() if 'Symbol' in best_df.columns else 'N/A'}")
-    # For testnet: filter by EUR equivalents (what's in CSV), then remap to USDT
-    if use_testnet:
-        eur_equivalents = get_eur_equivalents_for_testnet(raw_symbols)
-        symbol_filter = normalize_symbol_list(eur_equivalents)
-        print(f"[DEBUG] Testnet mode: using EUR equivalents for params: {symbol_filter}")
-    else:
-        symbol_filter = normalize_symbol_list(raw_symbols)
+    symbol_filter = normalize_symbol_list(raw_symbols)
     print(f"[DEBUG] symbol_filter: {symbol_filter}")
     best_df = filter_best_rows_by_symbol(best_df, symbol_filter)
     print(f"[DEBUG] After filter_by_symbol: {len(best_df)} rows, symbols: {best_df['Symbol'].unique().tolist() if 'Symbol' in best_df.columns else 'N/A'}")
-    # Remap EUR -> USDT for testnet trading
-    if use_testnet:
-        best_df = remap_best_rows_for_testnet(best_df)
-        print(f"[DEBUG] Remapped to testnet symbols: {best_df['Symbol'].unique().tolist() if 'Symbol' in best_df.columns else 'N/A'}")
     best_df = filter_best_rows_by_direction(best_df, DEFAULT_ALLOWED_DIRECTIONS)
     print(f"[DEBUG] After filter_by_direction: {len(best_df)} rows")
     best_df = select_best_indicator_per_symbol(best_df)
@@ -2906,22 +2875,12 @@ def main(
         st.configure_exchange(use_testnet=use_testnet)
     # Clear data cache to get fresh synthetic bars for current period
     st.clear_data_cache()
-    # Use testnet symbols (USDT pairs) when in testnet mode
-    default_symbols = st.get_symbols(use_testnet)
-    raw_symbols = allowed_symbols if allowed_symbols else default_symbols
-    config_df = ensure_config(raw_symbols or default_symbols)
+    raw_symbols = allowed_symbols if allowed_symbols else DEFAULT_SYMBOL_ALLOWLIST
+    config_df = ensure_config(raw_symbols or st.SYMBOLS)
     cfg_lookup = load_config_lookup(config_df)
     best_df = load_best_rows(active_indicators=allowed_indicators)
-    # For testnet: filter by EUR equivalents (what's in CSV), then remap to USDT
-    if use_testnet:
-        eur_equivalents = get_eur_equivalents_for_testnet(raw_symbols)
-        symbol_filter = normalize_symbol_list(eur_equivalents)
-    else:
-        symbol_filter = normalize_symbol_list(raw_symbols)
+    symbol_filter = normalize_symbol_list(raw_symbols)
     best_df = filter_best_rows_by_symbol(best_df, symbol_filter)
-    # Remap EUR -> USDT for testnet trading
-    if use_testnet:
-        best_df = remap_best_rows_for_testnet(best_df)
     best_df = select_best_indicator_per_symbol(best_df)
     if best_df.empty:
         print("[Skip] best_params_overall.csv enthält keine Daten.")
