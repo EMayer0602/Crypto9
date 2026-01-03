@@ -75,8 +75,15 @@ SIMULATION_LOG_FILE = "paper_trading_simulation_log.csv"
 SIMULATION_LOG_JSON = "paper_trading_simulation_log.json"
 SIMULATION_OPEN_POSITIONS_FILE = "paper_trading_actual_trades.csv"
 SIMULATION_OPEN_POSITIONS_JSON = "paper_trading_actual_trades.json"
+# Default paths - will be overridden by get_report_dir() for testnet
+REPORT_DIR = "report_html"
 SIMULATION_SUMMARY_HTML = os.path.join("report_html", "trading_summary.html")
 SIMULATION_SUMMARY_JSON = os.path.join("report_html", "trading_summary.json")
+
+
+def get_report_dir(use_testnet: bool = False) -> str:
+    """Return the appropriate report directory based on testnet mode."""
+    return "report_testnet" if use_testnet else "report_html"
 BEST_PARAMS_CSV = st.OVERALL_PARAMS_CSV
 START_TOTAL_CAPITAL = 16_000.0
 MAX_OPEN_POSITIONS = 10
@@ -2483,7 +2490,7 @@ def write_live_reports(final_state: Dict, closed_trades: List[TradeResult]) -> N
                 chart_df = chart_df.drop_duplicates(
                     subset=["symbol", "entry_time", "exit_time", "exit_price"], keep="last"
                 )
-        generate_trade_charts(chart_df, open_df, output_dir=os.path.join("report_html", "charts"))
+        generate_trade_charts(chart_df, open_df, output_dir=os.path.join(REPORT_DIR, "charts"))
     
     if current_trades_df.empty:
         print(f"[Live] Snapshot updated with no new trades this cycle. Total history: {len(all_trades_df)} trades.")
@@ -3052,6 +3059,15 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
         print("[Config] Using dynamic position sizing: stake = total_capital / 7")
 
     use_testnet = bool(args.testnet or DEFAULT_USE_TESTNET)
+
+    # Update output paths based on testnet mode
+    global SIMULATION_SUMMARY_HTML, SIMULATION_SUMMARY_JSON, REPORT_DIR
+    REPORT_DIR = get_report_dir(use_testnet)
+    SIMULATION_SUMMARY_HTML = os.path.join(REPORT_DIR, "trading_summary.html")
+    SIMULATION_SUMMARY_JSON = os.path.join(REPORT_DIR, "trading_summary.json")
+    if use_testnet:
+        print(f"[Config] Using testnet report directory: {REPORT_DIR}")
+
     set_signal_debug(args.debug_signals)
     set_use_futures_signals(args.use_futures_signals)
     api_key, api_secret = get_api_credentials(use_testnet=use_testnet)
@@ -3220,8 +3236,8 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
                 print(f"{ss['symbol']:<12} {ss['trades']:>7} {ss['winners']:>5} {ss['losers']:>5} {ss['win_rate']:>5.1f}% {ss['total_pnl']:>12.2f} {ss['avg_pnl']:>10.2f} {ss['best_trade']:>10.2f} {ss['worst_trade']:>10.2f} {ss['max_drawdown']:>10.2f} {pf_str:>6}")
             print("=" * 120 + "\n")
 
-        generate_trade_charts(trades_df, output_dir=os.path.join("report_html", "charts"))
-        generate_equity_curve(trades_df, start_capital=START_TOTAL_CAPITAL, output_dir=os.path.join("report_html", "charts"))
+        generate_trade_charts(trades_df, output_dir=os.path.join(REPORT_DIR, "charts"))
+        generate_equity_curve(trades_df, start_capital=START_TOTAL_CAPITAL, output_dir=os.path.join(REPORT_DIR, "charts"))
         if open_positions:
             print(f"[Simulation] Open positions remaining: {len(open_positions)}")
         else:
