@@ -2910,20 +2910,27 @@ def main(
     # Use testnet symbols (USDT pairs) when in testnet mode
     default_symbols = st.get_symbols(use_testnet)
     raw_symbols = allowed_symbols if allowed_symbols else default_symbols
+    print(f"[DEBUG] use_testnet={use_testnet}, raw_symbols={raw_symbols}")
     config_df = ensure_config(raw_symbols or default_symbols)
     cfg_lookup = load_config_lookup(config_df)
     best_df = load_best_rows(active_indicators=allowed_indicators)
+    print(f"[DEBUG] Loaded {len(best_df)} rows from best_params_overall.csv")
     # For testnet: filter by EUR equivalents (what's in CSV), then remap to USDT
     if use_testnet:
         eur_equivalents = get_eur_equivalents_for_testnet(raw_symbols)
         symbol_filter = normalize_symbol_list(eur_equivalents)
+        print(f"[DEBUG] Testnet: EUR equivalents = {eur_equivalents}")
     else:
         symbol_filter = normalize_symbol_list(raw_symbols)
+    print(f"[DEBUG] symbol_filter = {symbol_filter}")
     best_df = filter_best_rows_by_symbol(best_df, symbol_filter)
+    print(f"[DEBUG] After filter: {len(best_df)} rows")
     # Remap EUR -> USDT for testnet trading
     if use_testnet:
         best_df = remap_best_rows_for_testnet(best_df)
+        print(f"[DEBUG] After remap: symbols = {best_df['Symbol'].unique().tolist() if not best_df.empty else []}")
     best_df = select_best_indicator_per_symbol(best_df)
+    print(f"[DEBUG] After select_best: {len(best_df)} rows")
     if best_df.empty:
         print("[Skip] best_params_overall.csv enthält keine Daten.")
         return
