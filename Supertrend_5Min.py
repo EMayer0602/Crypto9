@@ -1416,6 +1416,9 @@ def prepare_symbol_dataframe(symbol, use_all_cached_data=False):
 	limit = None if use_all_cached_data else LOOKBACK
 	df = fetch_data(symbol, TIMEFRAME, limit)
 	df = attach_higher_timeframe_trend(df, symbol)
+	# Debug: Check htf_indicator
+	htf_valid = df["htf_indicator"].notna().sum() if "htf_indicator" in df.columns else 0
+	print(f"[DEBUG] {symbol}: htf_indicator has {htf_valid}/{len(df)} valid values")
 	df = attach_momentum_filter(df)
 	df = attach_jma_trend_filter(df)
 	df = attach_ma_slope_filter(df)
@@ -1812,8 +1815,13 @@ def backtest_htf_crossover(df, atr_stop_mult=None, direction="long", min_hold_ba
 		close_prev = float(prev["close"])
 		# Use HTF indicator for crossover (not main TF indicator_line)
 		htf_col = "htf_indicator" if "htf_indicator" in df.columns else "indicator_line"
-		htf_curr = float(curr[htf_col]) if pd.notna(curr[htf_col]) else close_curr
-		htf_prev = float(prev[htf_col]) if pd.notna(prev[htf_col]) else close_prev
+
+		# Skip if HTF indicator is NaN
+		if pd.isna(curr[htf_col]) or pd.isna(prev[htf_col]):
+			continue
+
+		htf_curr = float(curr[htf_col])
+		htf_prev = float(prev[htf_col])
 
 		# Entry logic: Close crosses HTF indicator
 		if not in_position:
