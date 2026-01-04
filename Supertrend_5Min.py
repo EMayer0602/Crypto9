@@ -584,12 +584,13 @@ def fetch_data(symbol, timeframe, limit):
 				if not cache_df.empty:
 					print(f"[API] Fetched {len(cache_df)} bars for {symbol} {timeframe} from {cache_df.index[0].strftime('%Y-%m-%d')} to {cache_df.index[-1].strftime('%Y-%m-%d')}")
 					save_ohlcv_to_cache(symbol, timeframe, cache_df)
-		# If we have enough data in persistent cache, use it
-		elif not persistent_df.empty and len(persistent_df) >= limit:
-			cache_df = persistent_df.tail(limit)
+		# If we have data in persistent cache, use it (prefer cache over API)
+		elif not persistent_df.empty:
+			# Use cached data - even if less than requested (API can't give more anyway)
+			cache_df = persistent_df.tail(limit) if len(persistent_df) >= limit else persistent_df
 			print(f"[Cache] Loaded {len(cache_df)} bars for {symbol} {timeframe}")
 		else:
-			# Fall back to API
+			# No cached data - fall back to API
 			cache_df = None
 			exchange = get_data_exchange()
 			supported_timeframes = getattr(exchange, "timeframes", {}) or {}
