@@ -1165,7 +1165,14 @@ def attach_higher_timeframe_trend(df_low, symbol):
 		df_low["htf_indicator"] = np.nan
 		return df_low
 
-	df_high = fetch_data(symbol, HIGHER_TIMEFRAME, HTF_LOOKBACK)
+	# Calculate how many HTF bars we need to cover the low TF date range
+	low_tf_minutes = timeframe_to_minutes(TIMEFRAME)
+	htf_minutes = timeframe_to_minutes(HIGHER_TIMEFRAME)
+	factor = max(1, htf_minutes // low_tf_minutes)
+	# Need enough HTF bars to cover low TF range, plus buffer for indicator warmup
+	htf_bars_needed = (len(df_low) // factor) + 100
+
+	df_high = fetch_data(symbol, HIGHER_TIMEFRAME, htf_bars_needed)
 	if df_high.empty:
 		print(f"[HTF] WARNING: No HTF data for {symbol} {HIGHER_TIMEFRAME}")
 		df_low = df_low.copy()
@@ -1174,7 +1181,8 @@ def attach_higher_timeframe_trend(df_low, symbol):
 		return df_low
 
 	# Debug: Check time ranges
-	print(f"[HTF] {symbol} {HIGHER_TIMEFRAME}: {len(df_high)} bars, range {df_high.index[0]} to {df_high.index[-1]}")
+	print(f"[HTF] {symbol} {HIGHER_TIMEFRAME}: {len(df_high)} bars (needed ~{htf_bars_needed})")
+	print(f"[HTF] HTF range: {df_high.index[0]} to {df_high.index[-1]}")
 	print(f"[HTF] LowTF range: {df_low.index[0]} to {df_low.index[-1]}")
 
 	if INDICATOR_TYPE == "supertrend" or INDICATOR_TYPE == "htf_crossover":
