@@ -450,14 +450,25 @@ def get_data_exchange():
 
 
 def _fetch_direct_ohlcv(symbol, timeframe, limit):
-	exchange = get_data_exchange()
-	buffer = max(50, limit // 5)
-	fetch_limit = limit + buffer
-	ohlcv = exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=fetch_limit)
-	cols = ["timestamp", "open", "high", "low", "close", "volume"]
-	df = pd.DataFrame(ohlcv, columns=cols)
-	df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms", utc=True).dt.tz_convert(BERLIN_TZ)
-	return df.set_index("timestamp").tail(limit)
+	"""Fetch OHLCV data directly from exchange API with proper error handling."""
+	try:
+		exchange = get_data_exchange()
+		buffer = max(50, limit // 5)
+		fetch_limit = limit + buffer
+		print(f"[API] Fetching {symbol} {timeframe} (limit={fetch_limit})...")
+		ohlcv = exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=fetch_limit)
+		if not ohlcv:
+			print(f"[API] Warning: No data returned for {symbol} {timeframe}")
+			return pd.DataFrame()
+		cols = ["timestamp", "open", "high", "low", "close", "volume"]
+		df = pd.DataFrame(ohlcv, columns=cols)
+		df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms", utc=True).dt.tz_convert(BERLIN_TZ)
+		result = df.set_index("timestamp").tail(limit)
+		print(f"[API] Got {len(result)} bars for {symbol} {timeframe}")
+		return result
+	except Exception as exc:
+		print(f"[API] ERROR fetching {symbol} {timeframe}: {exc}")
+		return pd.DataFrame()
 
 
 def _maybe_append_synthetic_bar(df, symbol, timeframe):
@@ -2667,12 +2678,65 @@ def _run_saved_rows(rows_df, table_title, save_path=None, aggregate_sections=Non
 	return updated_df.to_dict("records") if updated_df is not None else []
 
 
+def ensure_cache_populated(symbols, timeframe, min_bars):
+	"""Ensure OHLCV cache has enough data for all symbols before running sweep."""
+	import time
+
+	# Fixed start date: 2024-05-01 for historical sweep data
+	start_date = pd.Timestamp("2024-05-01", tz=BERLIN_TZ)
+
+	# Get all HTF candidates to cache them too
+	htf_candidates = get_highertimeframe_candidates()
+
+	print(f"\n[Cache Init] Checking cache for {len(symbols)} symbols")
+	print(f"[Cache Init] Main TF: {timeframe} needs {min_bars} bars")
+	print(f"[Cache Init] HTF candidates: {htf_candidates}")
+	print(f"[Cache Init] Will download from {start_date.strftime('%Y-%m-%d')} if needed\n")
+
+	for symbol in symbols:
+		# Check and populate main timeframe cache
+		cached_df = load_ohlcv_from_cache(symbol, timeframe)
+		cached_bars = len(cached_df) if cached_df is not None else 0
+
+		if cached_bars >= min_bars:
+			print(f"[Cache Init] {symbol} {timeframe}: OK ({cached_bars} bars)")
+		else:
+			print(f"[Cache Init] {symbol} {timeframe}: Need data (only {cached_bars} bars, need {min_bars})")
+			df = download_historical_ohlcv(symbol, timeframe, start_date)
+			if not df.empty:
+				save_ohlcv_to_cache(symbol, timeframe, df)
+				print(f"[Cache Init] {symbol} {timeframe}: Downloaded {len(df)} bars")
+			else:
+				print(f"[Cache Init] {symbol} {timeframe}: WARNING - No data!")
+			time.sleep(0.5)
+
+		# Also cache HTF data for this symbol
+		for htf in htf_candidates:
+			htf_cached = load_ohlcv_from_cache(symbol, htf)
+			htf_bars = len(htf_cached) if htf_cached is not None else 0
+
+			if htf_bars >= HTF_LOOKBACK:
+				continue  # HTF cache OK, skip silently
+
+			print(f"[Cache Init] {symbol} {htf}: Downloading HTF data...")
+			df = download_historical_ohlcv(symbol, htf, start_date)
+			if not df.empty:
+				save_ohlcv_to_cache(symbol, htf, df)
+				print(f"[Cache Init] {symbol} {htf}: Downloaded {len(df)} bars")
+			time.sleep(0.3)
+
+	print("\n[Cache Init] Cache check complete\n")
+
+
 def run_parameter_sweep():
 	figs_blocks = []
 	sections_blocks = []
 	ranking_tables = []
 	best_params_summary = []
 	clear_directory(OUT_DIR)
+
+	# Ensure cache is populated before running sweep
+	ensure_cache_populated(SYMBOLS, TIMEFRAME, LOOKBACK)
 
 	directions = get_enabled_directions()
 	hold_bar_candidates = MIN_HOLD_BAR_VALUES if USE_MIN_HOLD_FILTER else [DEFAULT_MIN_HOLD_BARS]
