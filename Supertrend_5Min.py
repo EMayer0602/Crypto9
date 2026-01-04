@@ -859,7 +859,33 @@ def compute_supertrend(df, length=10, factor=3.0):
 	df = df.copy()
 	length = max(1, int(length))
 	factor = float(factor)
+
+	# Debug: Check input data
+	if df.empty:
+		print(f"[Supertrend] ERROR: Empty dataframe")
+		df["supertrend"] = np.nan
+		df["st_trend"] = 0
+		return df
+
+	# Check for required columns
+	for col in ["high", "low", "close"]:
+		if col not in df.columns:
+			print(f"[Supertrend] ERROR: Missing column {col}")
+			df["supertrend"] = np.nan
+			df["st_trend"] = 0
+			return df
+		nan_count = df[col].isna().sum()
+		if nan_count > 0:
+			print(f"[Supertrend] WARNING: {col} has {nan_count} NaN values")
+
 	atr = AverageTrueRange(df["high"], df["low"], df["close"], window=length).average_true_range()
+	atr_valid = atr.notna().sum()
+	if atr_valid == 0:
+		print(f"[Supertrend] ERROR: ATR calculation returned all NaN (length={length})")
+		df["supertrend"] = np.nan
+		df["st_trend"] = 0
+		return df
+
 	hl2 = (df["high"] + df["low"]) / 2.0
 
 	basic_ub = hl2 + factor * atr
