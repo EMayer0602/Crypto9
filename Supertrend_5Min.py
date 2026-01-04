@@ -874,62 +874,70 @@ def compute_supertrend(df, length=10, factor=3.0):
 			df["supertrend"] = np.nan
 			df["st_trend"] = 0
 			return df
-		nan_count = df[col].isna().sum()
-		if nan_count > 0:
-			print(f"[Supertrend] WARNING: {col} has {nan_count} NaN values")
 
 	atr = AverageTrueRange(df["high"], df["low"], df["close"], window=length).average_true_range()
-	atr_valid = atr.notna().sum()
-	if atr_valid == 0:
+	if atr.isna().all():
 		print(f"[Supertrend] ERROR: ATR calculation returned all NaN (length={length})")
 		df["supertrend"] = np.nan
 		df["st_trend"] = 0
 		return df
 
-	hl2 = (df["high"] + df["low"]) / 2.0
+	# Use numpy arrays for speed (avoid slow .iloc in loops)
+	high = df["high"].values
+	low = df["low"].values
+	close = df["close"].values
+	atr_vals = atr.values
+	n = len(df)
 
-	basic_ub = hl2 + factor * atr
-	basic_lb = hl2 - factor * atr
+	hl2 = (high + low) / 2.0
+	basic_ub = hl2 + factor * atr_vals
+	basic_lb = hl2 - factor * atr_vals
 
-	final_ub = pd.Series(index=df.index, dtype=float)
-	final_lb = pd.Series(index=df.index, dtype=float)
-	for i in range(len(df)):
-		if i == 0:
-			final_ub.iloc[i] = basic_ub.iloc[i]
-			final_lb.iloc[i] = basic_lb.iloc[i]
+	final_ub = np.empty(n)
+	final_lb = np.empty(n)
+	final_ub[0] = basic_ub[0]
+	final_lb[0] = basic_lb[0]
+
+	# Vectorized-ish calculation for final bands (must be sequential due to dependencies)
+	for i in range(1, n):
+		prev_close = close[i - 1]
+		# Upper band
+		if basic_ub[i] < final_ub[i - 1] or prev_close > final_ub[i - 1]:
+			final_ub[i] = basic_ub[i]
 		else:
-			prev_ub = final_ub.iloc[i - 1]
-			prev_lb = final_lb.iloc[i - 1]
-			prev_close = df["close"].iloc[i - 1]
-			final_ub.iloc[i] = basic_ub.iloc[i] if (basic_ub.iloc[i] < prev_ub) or (prev_close > prev_ub) else prev_ub
-			final_lb.iloc[i] = basic_lb.iloc[i] if (basic_lb.iloc[i] > prev_lb) or (prev_close < prev_lb) else prev_lb
-
-	supertrend = pd.Series(index=df.index, dtype=float)
-	trend = pd.Series(index=df.index, dtype=int)
-	for i in range(len(df)):
-		close = df["close"].iloc[i]
-		if i == 0:
-			trend.iloc[i] = 1 if close >= final_lb.iloc[i] else -1
-			supertrend.iloc[i] = final_lb.iloc[i] if trend.iloc[i] == 1 else final_ub.iloc[i]
+			final_ub[i] = final_ub[i - 1]
+		# Lower band
+		if basic_lb[i] > final_lb[i - 1] or prev_close < final_lb[i - 1]:
+			final_lb[i] = basic_lb[i]
 		else:
-			prev_trend = trend.iloc[i - 1]
-			if prev_trend == 1:
-				if close <= final_lb.iloc[i]:
-					trend.iloc[i] = -1
-					supertrend.iloc[i] = final_ub.iloc[i]
-				else:
-					trend.iloc[i] = 1
-					supertrend.iloc[i] = final_lb.iloc[i]
+			final_lb[i] = final_lb[i - 1]
+
+	supertrend = np.empty(n)
+	trend = np.empty(n, dtype=np.int32)
+
+	# Initialize first values
+	trend[0] = 1 if close[0] >= final_lb[0] else -1
+	supertrend[0] = final_lb[0] if trend[0] == 1 else final_ub[0]
+
+	# Calculate trend and supertrend
+	for i in range(1, n):
+		if trend[i - 1] == 1:
+			if close[i] <= final_lb[i]:
+				trend[i] = -1
+				supertrend[i] = final_ub[i]
 			else:
-				if close >= final_ub.iloc[i]:
-					trend.iloc[i] = 1
-					supertrend.iloc[i] = final_lb.iloc[i]
-				else:
-					trend.iloc[i] = -1
-					supertrend.iloc[i] = final_ub.iloc[i]
+				trend[i] = 1
+				supertrend[i] = final_lb[i]
+		else:
+			if close[i] >= final_ub[i]:
+				trend[i] = 1
+				supertrend[i] = final_lb[i]
+			else:
+				trend[i] = -1
+				supertrend[i] = final_ub[i]
 
 	df["supertrend"] = supertrend
-	df["st_trend"] = trend.fillna(0).astype(int)
+	df["st_trend"] = trend
 	df["atr"] = atr
 	df["indicator_line"] = df["supertrend"]
 	df["trend_flag"] = df["st_trend"]
