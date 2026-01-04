@@ -860,29 +860,20 @@ def compute_supertrend(df, length=10, factor=3.0):
 	length = max(1, int(length))
 	factor = float(factor)
 
-	# Debug: Check input data
 	if df.empty:
-		print(f"[Supertrend] ERROR: Empty dataframe")
 		df["supertrend"] = np.nan
 		df["st_trend"] = 0
 		return df
 
-	# Check for required columns
 	for col in ["high", "low", "close"]:
 		if col not in df.columns:
-			print(f"[Supertrend] ERROR: Missing column {col}")
 			df["supertrend"] = np.nan
 			df["st_trend"] = 0
 			return df
 
 	atr = AverageTrueRange(df["high"], df["low"], df["close"], window=length).average_true_range()
-	if atr.isna().all():
-		print(f"[Supertrend] ERROR: ATR calculation returned all NaN (length={length})")
-		df["supertrend"] = np.nan
-		df["st_trend"] = 0
-		return df
 
-	# Use numpy arrays for speed (avoid slow .iloc in loops)
+	# Use numpy arrays for speed
 	high = df["high"].values
 	low = df["low"].values
 	close = df["close"].values
@@ -893,48 +884,57 @@ def compute_supertrend(df, length=10, factor=3.0):
 	basic_ub = hl2 + factor * atr_vals
 	basic_lb = hl2 - factor * atr_vals
 
-	final_ub = np.empty(n)
-	final_lb = np.empty(n)
-	final_ub[0] = basic_ub[0]
-	final_lb[0] = basic_lb[0]
+	# Find first valid ATR index (after warmup period)
+	first_valid = 0
+	for i in range(n):
+		if not np.isnan(atr_vals[i]):
+			first_valid = i
+			break
 
-	# Vectorized-ish calculation for final bands (must be sequential due to dependencies)
-	for i in range(1, n):
-		prev_close = close[i - 1]
-		# Upper band
-		if basic_ub[i] < final_ub[i - 1] or prev_close > final_ub[i - 1]:
-			final_ub[i] = basic_ub[i]
-		else:
-			final_ub[i] = final_ub[i - 1]
-		# Lower band
-		if basic_lb[i] > final_lb[i - 1] or prev_close < final_lb[i - 1]:
-			final_lb[i] = basic_lb[i]
-		else:
-			final_lb[i] = final_lb[i - 1]
+	# Initialize arrays with NaN
+	final_ub = np.full(n, np.nan)
+	final_lb = np.full(n, np.nan)
+	supertrend = np.full(n, np.nan)
+	trend = np.zeros(n, dtype=np.int32)
 
-	supertrend = np.empty(n)
-	trend = np.empty(n, dtype=np.int32)
+	# Start from first valid ATR value
+	if first_valid < n:
+		final_ub[first_valid] = basic_ub[first_valid]
+		final_lb[first_valid] = basic_lb[first_valid]
+		trend[first_valid] = 1 if close[first_valid] >= final_lb[first_valid] else -1
+		supertrend[first_valid] = final_lb[first_valid] if trend[first_valid] == 1 else final_ub[first_valid]
 
-	# Initialize first values
-	trend[0] = 1 if close[0] >= final_lb[0] else -1
-	supertrend[0] = final_lb[0] if trend[0] == 1 else final_ub[0]
+		# Calculate for remaining bars
+		for i in range(first_valid + 1, n):
+			prev_close = close[i - 1]
 
-	# Calculate trend and supertrend
-	for i in range(1, n):
-		if trend[i - 1] == 1:
-			if close[i] <= final_lb[i]:
-				trend[i] = -1
-				supertrend[i] = final_ub[i]
+			# Upper band
+			if basic_ub[i] < final_ub[i - 1] or prev_close > final_ub[i - 1]:
+				final_ub[i] = basic_ub[i]
 			else:
-				trend[i] = 1
-				supertrend[i] = final_lb[i]
-		else:
-			if close[i] >= final_ub[i]:
-				trend[i] = 1
-				supertrend[i] = final_lb[i]
+				final_ub[i] = final_ub[i - 1]
+
+			# Lower band
+			if basic_lb[i] > final_lb[i - 1] or prev_close < final_lb[i - 1]:
+				final_lb[i] = basic_lb[i]
 			else:
-				trend[i] = -1
-				supertrend[i] = final_ub[i]
+				final_lb[i] = final_lb[i - 1]
+
+			# Trend and supertrend
+			if trend[i - 1] == 1:
+				if close[i] <= final_lb[i]:
+					trend[i] = -1
+					supertrend[i] = final_ub[i]
+				else:
+					trend[i] = 1
+					supertrend[i] = final_lb[i]
+			else:
+				if close[i] >= final_ub[i]:
+					trend[i] = 1
+					supertrend[i] = final_lb[i]
+				else:
+					trend[i] = -1
+					supertrend[i] = final_ub[i]
 
 	df["supertrend"] = supertrend
 	df["st_trend"] = trend
