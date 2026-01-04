@@ -2685,12 +2685,14 @@ def ensure_cache_populated(symbols, timeframe, min_bars):
 	# Fixed start date: 2024-05-01 for historical sweep data
 	start_date = pd.Timestamp("2024-05-01", tz=BERLIN_TZ)
 
-	# Get all HTF candidates to cache them too
-	htf_candidates = get_highertimeframe_candidates()
+	# Only download Binance-supported timeframes
+	# Unsupported timeframes (3h, 5h, 7h, etc.) will be synthesized from 1h data by fetch_data()
+	binance_supported_tf = ["1h", "2h", "4h", "6h", "8h", "12h", "1d"]
 
 	print(f"\n[Cache Init] Checking cache for {len(symbols)} symbols")
 	print(f"[Cache Init] Main TF: {timeframe} needs {min_bars} bars")
-	print(f"[Cache Init] HTF candidates: {htf_candidates}")
+	print(f"[Cache Init] Downloading Binance-supported TFs: {binance_supported_tf}")
+	print(f"[Cache Init] (Other TFs like 3h, 5h, etc. will be synthesized from 1h data)")
 	print(f"[Cache Init] Will download from {start_date.strftime('%Y-%m-%d')} if needed\n")
 
 	for symbol in symbols:
@@ -2710,8 +2712,11 @@ def ensure_cache_populated(symbols, timeframe, min_bars):
 				print(f"[Cache Init] {symbol} {timeframe}: WARNING - No data!")
 			time.sleep(0.5)
 
-		# Also cache HTF data for this symbol
-		for htf in htf_candidates:
+		# Also cache Binance-supported HTF data for this symbol
+		for htf in binance_supported_tf:
+			if htf == timeframe:
+				continue  # Already handled above
+
 			htf_cached = load_ohlcv_from_cache(symbol, htf)
 			htf_bars = len(htf_cached) if htf_cached is not None else 0
 
