@@ -1211,8 +1211,16 @@ def attach_higher_timeframe_trend(df_low, symbol):
 	print(f"[HTF] HTF range: {df_high.index[0]} to {df_high.index[-1]}")
 	print(f"[HTF] LowTF range: {df_low.index[0]} to {df_low.index[-1]}")
 
+	# Debug: Check df_high content
+	print(f"[HTF] df_high columns: {list(df_high.columns)}")
+	print(f"[HTF] df_high dtypes: {df_high.dtypes.to_dict()}")
+	nan_check = {col: df_high[col].isna().sum() for col in ['open', 'high', 'low', 'close', 'volume'] if col in df_high.columns}
+	print(f"[HTF] NaN counts: {nan_check}")
+
 	if INDICATOR_TYPE == "supertrend" or INDICATOR_TYPE == "htf_crossover":
+		print(f"[HTF] Calling compute_supertrend with length={HTF_LENGTH}, factor={HTF_FACTOR}")
 		df_high_ind = compute_supertrend(df_high, length=HTF_LENGTH, factor=HTF_FACTOR)
+		print(f"[HTF] compute_supertrend returned, supertrend col exists: {'supertrend' in df_high_ind.columns}")
 		indicator_col = "supertrend"
 		trend_col = "st_trend"
 	elif INDICATOR_TYPE == "psar":
