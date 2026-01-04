@@ -572,9 +572,11 @@ def fetch_data(symbol, timeframe, limit):
 				cache_df = _fetch_direct_ohlcv(symbol, timeframe, 10000)
 				if not cache_df.empty:
 					print(f"[API] Fetched {len(cache_df)} bars for {symbol} {timeframe} from {cache_df.index[0].strftime('%Y-%m-%d')} to {cache_df.index[-1].strftime('%Y-%m-%d')}")
+					save_ohlcv_to_cache(symbol, timeframe, cache_df)
 		# If we have enough data in persistent cache, use it
 		elif not persistent_df.empty and len(persistent_df) >= limit:
 			cache_df = persistent_df.tail(limit)
+			print(f"[Cache] Loaded {len(cache_df)} bars for {symbol} {timeframe}")
 		else:
 			# Fall back to API
 			cache_df = None
@@ -582,6 +584,8 @@ def fetch_data(symbol, timeframe, limit):
 			supported_timeframes = getattr(exchange, "timeframes", {}) or {}
 			if timeframe in supported_timeframes:
 				cache_df = _fetch_direct_ohlcv(symbol, timeframe, limit)
+				if cache_df is not None and not cache_df.empty:
+					save_ohlcv_to_cache(symbol, timeframe, cache_df)
 			else:
 				target_minutes = timeframe_to_minutes(timeframe)
 				base_minutes = timeframe_to_minutes(TIMEFRAME)
