@@ -1167,10 +1167,15 @@ def attach_higher_timeframe_trend(df_low, symbol):
 
 	df_high = fetch_data(symbol, HIGHER_TIMEFRAME, HTF_LOOKBACK)
 	if df_high.empty:
+		print(f"[HTF] WARNING: No HTF data for {symbol} {HIGHER_TIMEFRAME}")
 		df_low = df_low.copy()
 		df_low["htf_trend"] = 0
 		df_low["htf_indicator"] = np.nan
 		return df_low
+
+	# Debug: Check time ranges
+	print(f"[HTF] {symbol} {HIGHER_TIMEFRAME}: {len(df_high)} bars, range {df_high.index[0]} to {df_high.index[-1]}")
+	print(f"[HTF] LowTF range: {df_low.index[0]} to {df_low.index[-1]}")
 
 	if INDICATOR_TYPE == "supertrend" or INDICATOR_TYPE == "htf_crossover":
 		df_high_ind = compute_supertrend(df_high, length=HTF_LENGTH, factor=HTF_FACTOR)
@@ -1199,7 +1204,17 @@ def attach_higher_timeframe_trend(df_low, symbol):
 		indicator_col: "htf_indicator",
 		trend_col: "htf_trend"
 	})
+
+	# Debug: Check indicator values before reindex
+	htf_valid = htf["htf_indicator"].notna().sum()
+	print(f"[HTF] Indicator computed: {htf_valid}/{len(htf)} valid values")
+
 	aligned = htf.reindex(df_low.index, method="ffill")
+
+	# Debug: Check after reindex
+	aligned_valid = aligned["htf_indicator"].notna().sum()
+	print(f"[HTF] After reindex: {aligned_valid}/{len(aligned)} valid values")
+
 	df_low = df_low.copy()
 	df_low["htf_trend"] = aligned["htf_trend"].fillna(0).astype(int)
 	df_low["htf_indicator"] = aligned["htf_indicator"]
