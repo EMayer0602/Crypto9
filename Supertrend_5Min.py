@@ -62,7 +62,7 @@ def timeframe_to_minutes(tf_str: str) -> int:
 
 EXCHANGE_ID = "binance"
 TIMEFRAME = "1h"
-LOOKBACK = 15000  # ~20 months of hourly bars (back to May 2024)
+LOOKBACK = 8760  # ~1 year of hourly bars (365 days × 24 hours)
 OHLCV_CACHE_DIR = "ohlcv_cache"  # Directory for persistent OHLCV data storage
 # USDx symbols for optimization sweep
 SYMBOLS = [
