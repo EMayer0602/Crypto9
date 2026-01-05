@@ -1,0 +1,25 @@
+Symbol;Direction;Indicator;IndicatorDisplay;ParamA;ParamB;Length;Factor;ATRStopMult;ATRStopMultValue;MinHoldBars;HTF;FinalEquity;Trades;WinRate;MaxDrawdown
+BTC/USDC;Long;htf_crossover;HTF Crossover;7;2,0;;;None;;24;13h;14149,946378030027;7;1,0;0,0
+BTC/USDC;Short;htf_crossover;HTF Crossover;7;2,0;;;None;;0;13h;14053,034718976984;8;0,625;32,19380378398455
+ETH/USDC;Long;htf_crossover;HTF Crossover;7;2,0;;;None;;12;13h;14069,438518851106;6;1,0;0,0
+ETH/USDC;Short;htf_crossover;HTF Crossover;14;3,0;;;1.0;1,0;24;13h;13980,148910674006;1;0,0;0,0
+SOL/USDC;Long;htf_crossover;HTF Crossover;7;2,0;;;None;;12;13h;14060,792266965984;12;0,9166666666666666;130,39934611628814
+SOL/USDC;Short;htf_crossover;HTF Crossover;7;2,0;;;None;;12;13h;14039,00296377844;8;0,75;91,34643221684018
+XRP/USDC;Long;htf_crossover;HTF Crossover;14;4,0;;;1.0;1,0;12;13h;13959,739720009897;12;0,4166666666666667;37,771567058140135
+XRP/USDC;Short;htf_crossover;HTF Crossover;7;2,0;;;None;;0;13h;14073,485035951668;4;0,75;2,0879020985212264
+LINK/USDC;Long;htf_crossover;HTF Crossover;10;2,0;;;1.0;1,0;0;13h;14070,790714324123;8;0,5;27,55739672357595
+LINK/USDC;Short;htf_crossover;HTF Crossover;7;2,0;;;None;;0;13h;14044,554934823092;3;1,0;0,0
+SUI/USDC;Long;htf_crossover;HTF Crossover;7;2,0;;;None;;0;13h;14034,058227641834;3;1,0;0,0
+SUI/USDC;Short;htf_crossover;HTF Crossover;7;2,0;;;None;;12;13h;14175,02235800644;8;1,0;0,0
+ZEC/USDC;Long;htf_crossover;HTF Crossover;7;2,0;;;None;;0;13h;14000,0;0;0,0;0,0
+ZEC/USDC;Short;htf_crossover;HTF Crossover;7;2,0;;;None;;0;13h;14000,0;0;0,0;0,0
+TNSR/USDC;Long;htf_crossover;HTF Crossover;7;2,0;;;None;;24;13h;14136,211312824242;11;0,9090909090909091;3,4039123898983235
+TNSR/USDC;Short;htf_crossover;HTF Crossover;7;2,0;;;None;;12;13h;14090,092011887216;5;1,0;0,0
+ADA/USDC;Long;htf_crossover;HTF Crossover;7;2,0;;;None;;0;13h;14057,09226394777;4;0,75;13,857453718268516
+ADA/USDC;Short;htf_crossover;HTF Crossover;10;3,0;;;2.0;2,0;12;13h;13991,215365860966;9;0,6666666666666666;55,79742189989156
+ICP/USDC;Long;htf_crossover;HTF Crossover;7;2,0;;;None;;24;13h;14088,47806551769;9;0,6666666666666666;17,25282872785465
+ICP/USDC;Short;htf_crossover;HTF Crossover;7;2,0;;;None;;0;13h;14040,718961176626;3;1,0;0,0
+BNB/USDC;Long;htf_crossover;HTF Crossover;7;2,0;;;None;;0;13h;14065,818544014652;4;0,75;2,0096897476796585
+BNB/USDC;Short;htf_crossover;HTF Crossover;7;2,0;;;None;;12;13h;14119,88077593113;12;0,75;16,871285780816834
+LUNC/USDT;Long;htf_crossover;HTF Crossover;7;2,0;;;None;;12;13h;14053,936198516245;2;1,0;0,0
+LUNC/USDT;Short;htf_crossover;HTF Crossover;7;2,0;;;None;;12;13h;14090,168404147897;12;0,9166666666666666;124,21325209262068
