@@ -125,7 +125,7 @@ def map_symbol_for_params(symbol: str) -> str:
 	return TESTNET_TO_USDC_MAP.get(symbol, symbol)
 
 
-RUN_PARAMETER_SWEEP = True  # ← AKTIVIERT für komplette Optimierung
+RUN_PARAMETER_SWEEP = False  # ← Deaktiviert, Parameter bereits berechnet
 RUN_SAVED_PARAMS = False
 RUN_OVERALL_BEST = True  # ← AKTIVIERT für Portfolio-Simulation
 ENABLE_LONGS = True
