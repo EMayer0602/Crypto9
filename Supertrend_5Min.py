@@ -2722,6 +2722,7 @@ def _run_saved_rows(rows_df, table_title, save_path=None, aggregate_sections=Non
 		sections_blocks.append(trade_table_html)
 		csv_suffix = "" if direction == "long" else "_short"
 		csv_path = os.path.join(OUT_DIR, f"trades_{symbol.replace('/', '_')}_{INDICATOR_SLUG}_best{csv_suffix}.csv")
+		os.makedirs(OUT_DIR, exist_ok=True)
 		trades.to_csv(csv_path, sep=";", decimal=",", index=False, encoding="utf-8")
 		updated_row["TradesCSV"] = csv_path
 		if aggregate_sections is not None:
