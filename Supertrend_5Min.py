@@ -127,7 +127,7 @@ def map_symbol_for_params(symbol: str) -> str:
 
 RUN_PARAMETER_SWEEP = True  # ← AKTIVIERT für komplette Optimierung
 RUN_SAVED_PARAMS = False
-RUN_OVERALL_BEST = False  # ← Deaktiviert, weil wir neu optimieren
+RUN_OVERALL_BEST = True  # ← AKTIVIERT für Portfolio-Simulation
 ENABLE_LONGS = True
 ENABLE_SHORTS = True  # Enabled for both long and short trading
 
@@ -185,7 +185,7 @@ DIVERGENCE_RSI_PERIOD = 14  # RSI period for divergence detection
 
 START_EQUITY = 14000.0
 RISK_FRACTION = 1
-STAKE_DIVISOR = 14
+STAKE_DIVISOR = 8  # Kapital / 8 pro Trade
 FEE_RATE = 0.001
 ATR_WINDOW = 14
 ATR_STOP_MULTS = [None, 1.0, 1.5, 2.0]
