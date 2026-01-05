@@ -131,6 +131,11 @@ RUN_OVERALL_BEST = False  # ← Deaktiviert, weil wir neu optimieren
 ENABLE_LONGS = True
 ENABLE_SHORTS = True  # Enabled for both long and short trading
 
+# === PERFORMANCE OPTIMIZATIONS ===
+SKIP_SYNTHETIC_BARS = True  # Skip synthetic bar creation for backtesting (big speedup!)
+PARALLEL_DATA_FETCH = True  # Fetch multiple symbols in parallel
+MAX_PARALLEL_WORKERS = 8    # Number of parallel workers for data fetching
+
 USE_MIN_HOLD_FILTER = True
 DEFAULT_MIN_HOLD_BARS = 0
 # Min hold bar values - examples for 1h timeframe: [0, 12, 24, 48] = [0h, 12h, 1d, 2d]
@@ -478,6 +483,10 @@ def _maybe_append_synthetic_bar(df, symbol, timeframe):
 	This ensures simulations always include the very latest data, even if the current
 	hour/period hasn't completed yet.
 	"""
+	# Skip synthetic bars for backtesting (big performance improvement!)
+	if SKIP_SYNTHETIC_BARS:
+		return df
+
 	try:
 		tf_minutes = timeframe_to_minutes(timeframe)
 	except ValueError:
