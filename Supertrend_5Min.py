@@ -2996,6 +2996,8 @@ def run_saved_params(rows_df=None):
 
 
 def run_overall_best_params():
+	os.makedirs(OUT_DIR, exist_ok=True)
+	os.makedirs(os.path.join(BASE_OUT_DIR, "charts"), exist_ok=True)
 	if not os.path.exists(OVERALL_PARAMS_CSV):
 		print("[Skip] Overall summary file missing. Run parameter sweeps first.")
 		return []
