@@ -252,6 +252,7 @@ def generate_dashboard():
 <html>
 <head>
     <meta charset="utf-8">
+    <meta http-equiv="refresh" content="60">
     <title>Testnet Trading Dashboard</title>
     <style>
         body {{ font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }}
