@@ -21,13 +21,14 @@ BASE_CURRENCIES = {"EUR", "USDT", "USDC", "BUSD", "BTC"}
 
 # Symbol mapping for selling (asset -> trading pair)
 SELL_PAIRS = {
-    "ETH": "ETHEUR",
-    "SOL": "SOLEUR",
-    "XRP": "XRPEUR",
-    "LINK": "LINKEUR",
-    "SUI": "SUIEUR",
-    "BNB": "BNBEUR",
-    "ICP": "ICPEUR",
+    "ETH": "ETHUSDT",
+    "SOL": "SOLUSDT",
+    "XRP": "XRPUSDT",
+    "LINK": "LINKUSDT",
+    "SUI": "SUIUSDT",
+    "BNB": "BNBUSDT",
+    "ICP": "ICPUSDT",
+    "ADA": "ADAUSDT",
     "TNSR": "TNSRUSDC",
     "ZEC": "ZECUSDC",
     "LUNC": "LUNCUSDT",
