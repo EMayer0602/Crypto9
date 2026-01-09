@@ -97,6 +97,7 @@ DEFAULT_USE_TESTNET = False  # Testnet should be opt-in with --testnet flag
 USE_TIME_BASED_EXIT = True  # Enable time-based exits based on optimal hold times
 SIGNAL_DEBUG = False
 USE_FUTURES_SIGNALS = False  # Use futures data for signal generation (Option 1 from futures lead analysis)
+_TESTNET_ACTIVE = False  # Track if testnet mode is active for dashboard updates
 DEFAULT_SIGNAL_INTERVAL_MIN = 15
 DEFAULT_SPIKE_INTERVAL_MIN = 5
 DEFAULT_ATR_SPIKE_MULT = 2.5
@@ -127,6 +128,12 @@ def set_use_futures_signals(enabled: bool) -> None:
     USE_FUTURES_SIGNALS = bool(enabled)
     if USE_FUTURES_SIGNALS:
         print("[Config] Using FUTURES data for signal generation")
+
+
+def set_testnet_active(enabled: bool) -> None:
+    """Track if testnet mode is active for dashboard updates."""
+    global _TESTNET_ACTIVE
+    _TESTNET_ACTIVE = bool(enabled)
 
 
 def load_env_file(path: str = ".env") -> None:
@@ -2496,6 +2503,16 @@ def write_live_reports(final_state: Dict, closed_trades: List[TradeResult]) -> N
         print(f"[Live] Snapshot updated with no new trades this cycle. Total history: {len(all_trades_df)} trades.")
     else:
         print(f"[Live] Snapshot includes {len(current_trades_df)} new trade(s). Total history: {len(all_trades_df)} trades.")
+
+    # Update testnet dashboard if in testnet mode
+    if _TESTNET_ACTIVE:
+        try:
+            from TestnetDashboard import generate_dashboard
+            generate_dashboard()
+            print("[Dashboard] Testnet dashboard updated")
+        except Exception as e:
+            print(f"[Dashboard] Failed to update: {e}")
+
     return float(summary.get("final_capital", final_state.get("total_capital", 0.0)))
 
 
@@ -3051,6 +3068,7 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
     force_symbol, force_direction = parse_force_entry_argument(args.force_entry)
 
     use_testnet = bool(args.testnet or DEFAULT_USE_TESTNET)
+    set_testnet_active(use_testnet)
 
     # Handle stake sizing: dynamic by default, fixed if --stake provided
     if args.stake is not None:
