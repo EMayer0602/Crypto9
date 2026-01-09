@@ -1,0 +1,19 @@
+{
+  "generated_at": "2026-01-09T12:42:29.087109+00:00",
+  "start": "2026-01-02T13:42:29.085435+01:00",
+  "end": "2026-01-09T13:42:29.085435+01:00",
+  "closed_trades": 0,
+  "open_positions": 3,
+  "closed_pnl": 0.0,
+  "avg_trade_pnl": 0.0,
+  "win_rate_pct": 0.0,
+  "winners": 0,
+  "losers": 0,
+  "open_equity": 86.463173,
+  "final_capital": 14086.463173,
+  "long_open": 3,
+  "long_open_equity": 86.463173,
+  "short_open": 0,
+  "short_open_equity": 0.0,
+  "symbol_stats": []
+}
