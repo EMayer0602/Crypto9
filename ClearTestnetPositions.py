@@ -84,6 +84,28 @@ def sell_market(symbol: str, quantity: float) -> dict:
         return {"error": str(e)}
 
 
+def buy_market_quote(symbol: str, quote_qty: float) -> dict:
+    """Place a market buy order using quote currency amount (e.g., 15 USDT)."""
+    endpoint = "/api/v3/order"
+    url = BASE_URL + endpoint
+    params = {
+        "symbol": symbol,
+        "side": "BUY",
+        "type": "MARKET",
+        "quoteOrderQty": quote_qty,
+        "timestamp": int(time.time() * 1000),
+        "recvWindow": RECV_WINDOW_MS,
+    }
+    query = sign_request(params, API_SECRET)
+    headers = {"X-MBX-APIKEY": API_KEY}
+
+    try:
+        response = requests.post(url + "?" + query, headers=headers, timeout=10)
+        return response.json()
+    except Exception as e:
+        return {"error": str(e)}
+
+
 def main():
     if not API_KEY or not API_SECRET:
         print("Error: BINANCE_API_KEY_TEST or BINANCE_API_SECRET_TEST not set in .env")
@@ -135,7 +157,38 @@ def main():
             print(f"OK (orderId: {result['orderId']}, filled: {filled_qty})")
         else:
             error = result.get("msg") or result.get("error") or str(result)
-            print(f"FAILED: {error}")
+            # Check if NOTIONAL error (position too small)
+            if "NOTIONAL" in str(error):
+                print(f"TOO SMALL - topping up first...")
+                # Buy 15 USDT worth to get above minimum
+                buy_result = buy_market_quote(symbol, 15.0)
+                if "orderId" in buy_result:
+                    bought_qty = float(buy_result.get("executedQty", 0))
+                    print(f"    Bought {bought_qty} {asset}, now selling all...")
+                    # Get updated balance and sell
+                    time.sleep(0.5)
+                    new_balances = get_account_balances()
+                    new_qty = 0
+                    for bal in new_balances:
+                        if bal["asset"] == asset:
+                            new_qty = float(bal["free"])
+                            break
+                    if new_qty > 0:
+                        if new_qty < 1:
+                            new_qty_str = f"{new_qty:.8f}"
+                        elif new_qty < 100:
+                            new_qty_str = f"{new_qty:.4f}"
+                        else:
+                            new_qty_str = f"{new_qty:.2f}"
+                        sell_result = sell_market(symbol, float(new_qty_str))
+                        if "orderId" in sell_result:
+                            print(f"    OK - sold {sell_result.get('executedQty', '?')} {asset}")
+                        else:
+                            print(f"    FAILED: {sell_result.get('msg') or sell_result}")
+                else:
+                    print(f"    Buy failed: {buy_result.get('msg') or buy_result}")
+            else:
+                print(f"FAILED: {error}")
 
     print("\nDone.")
 
