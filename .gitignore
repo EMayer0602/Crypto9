@@ -25,3 +25,11 @@ ENV/
 .DS_Store
 Thumbs.db
 report_testnet/
+
+# Generated data files
+ohlcv_cache/
+report_html/
+paper_trading_*.csv
+paper_trading_*.json
+paper_trading_*.html
+*.log
