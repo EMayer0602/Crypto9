@@ -17,13 +17,14 @@ load_dotenv()
 CRYPTO9_POSITIONS_FILE = "crypto9_testnet_positions.json"
 CRYPTO9_CLOSED_TRADES_FILE = "crypto9_testnet_closed_trades.json"
 
-# Spot Testnet API keys
-SPOT_API_KEY = os.getenv("BINANCE_API_KEY_TEST")
-SPOT_API_SECRET = os.getenv("BINANCE_API_SECRET_TEST")
-
-# Futures Testnet API keys (separate!)
+# Use Futures Testnet API keys for everything
+# (Spot testnet keys are expired/invalid)
 FUTURES_API_KEY = os.getenv("BINANCE_API_KEY_TEST_F")
 FUTURES_API_SECRET = os.getenv("BINANCE_API_SECRET_TEST_F")
+
+# Use same keys for Spot calls (will likely fail but doesn't matter)
+SPOT_API_KEY = FUTURES_API_KEY
+SPOT_API_SECRET = FUTURES_API_SECRET
 
 # API Base URLs
 SPOT_BASE_URL = "https://testnet.binance.vision"
