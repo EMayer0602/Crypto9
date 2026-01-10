@@ -88,6 +88,11 @@ BEST_PARAMS_CSV = st.OVERALL_PARAMS_CSV
 START_TOTAL_CAPITAL = 16_500.0
 MAX_OPEN_POSITIONS = 10
 STAKE_DIVISOR = 10  # stake = current total_capital / STAKE_DIVISOR = 16500/10 = 1650
+# Separate limits for Long (Spot) vs Short (Margin)
+MAX_LONG_POSITIONS = 10
+MAX_SHORT_POSITIONS = 5
+LONG_STAKE = 1500.0  # 15000 / 10 positions
+SHORT_STAKE = 200.0  # 1000 / 5 positions
 DEFAULT_DIRECTION_CAPITAL = 2_800.0
 BASE_BAR_MINUTES = st.timeframe_to_minutes(st.TIMEFRAME)
 DEFAULT_SYMBOL_ALLOWLIST = [sym.strip() for sym in st.SYMBOLS if sym and sym.strip()]
@@ -528,7 +533,7 @@ def select_best_indicator_per_symbol(df: pd.DataFrame) -> pd.DataFrame:
     return reduced_df.reset_index(drop=True)
 
 
-def determine_position_size(symbol: str, state: Dict, fixed_stake: Optional[float]) -> float:
+def determine_position_size(symbol: str, state: Dict, fixed_stake: Optional[float], direction: str = "long") -> float:
     """
     Determine position size for a trade.
 
@@ -536,23 +541,28 @@ def determine_position_size(symbol: str, state: Dict, fixed_stake: Optional[floa
         symbol: Trading symbol
         state: Current state dict with total_capital
         fixed_stake: Fixed stake amount (if provided), None for dynamic sizing
+        direction: Trade direction ("long" or "short")
 
     Returns:
         Position size in USDT
 
     Notes:
-        - If fixed_stake is None or 0: Uses dynamic sizing = total_capital / STAKE_DIVISOR (7)
-        - If fixed_stake is set: Uses that fixed amount
-        - Dynamic sizing provides compounding effect as capital grows
+        - Long (Spot): Dynamic sizing = total_capital / MAX_LONG_POSITIONS
+        - Short (Margin): Static 200 USDT (limited by 999 USD margin)
     """
     # Use fixed stake if provided and > 0
     if fixed_stake is not None and fixed_stake > 0:
         return fixed_stake
 
-    # Dynamic sizing based on current capital
-    total_capital = float(state.get("total_capital", START_TOTAL_CAPITAL))
-    dynamic_stake = total_capital / STAKE_DIVISOR
-    return max(dynamic_stake, 0.0)
+    # Direction-specific stake sizes
+    if direction.lower() == "short":
+        # Short: Static stake (limited by margin)
+        return SHORT_STAKE
+    else:
+        # Long: Dynamic sizing based on current capital
+        total_capital = float(state.get("total_capital", START_TOTAL_CAPITAL))
+        dynamic_stake = total_capital / MAX_LONG_POSITIONS
+        return max(dynamic_stake, 100.0)  # Minimum 100 USDT
 
 
 def record_symbol_trade(state: Dict, symbol: str) -> None:
@@ -1356,12 +1366,26 @@ def process_snapshot(
 
     if existing is None:
         open_positions = state.get("positions", [])
+        # Count Long and Short positions separately
+        long_count = sum(1 for p in open_positions if p.get("direction", "").lower() == "long")
+        short_count = sum(1 for p in open_positions if p.get("direction", "").lower() == "short")
+
+        # Check direction-specific limits
+        if context.direction.lower() == "long" and long_count >= MAX_LONG_POSITIONS:
+            if emit_entry_log:
+                print(f"[Entry] Skip {context.symbol} {context.direction} – max {MAX_LONG_POSITIONS} Long-Positionen erreicht")
+            _signal_log(f"{context.symbol} {context.direction} blocked: max long positions reached ({MAX_LONG_POSITIONS})")
+            return trades
+        if context.direction.lower() == "short" and short_count >= MAX_SHORT_POSITIONS:
+            if emit_entry_log:
+                print(f"[Entry] Skip {context.symbol} {context.direction} – max {MAX_SHORT_POSITIONS} Short-Positionen erreicht")
+            _signal_log(f"{context.symbol} {context.direction} blocked: max short positions reached ({MAX_SHORT_POSITIONS})")
+            return trades
+        # Also check total limit
         if len(open_positions) >= MAX_OPEN_POSITIONS:
             if emit_entry_log:
                 print(f"[Entry] Skip {context.symbol} {context.direction} – max {MAX_OPEN_POSITIONS} Positionen erreicht")
-            _signal_log(
-                f"{context.symbol} {context.direction} blocked: max positions reached ({MAX_OPEN_POSITIONS})"
-            )
+            _signal_log(f"{context.symbol} {context.direction} blocked: max positions reached ({MAX_OPEN_POSITIONS})")
             return trades
 
     if existing is not None:
@@ -1389,7 +1413,7 @@ def process_snapshot(
     entry_price = float(df_slice.iloc[-1]["close"])
     # Use small fixed stake on testnet to avoid insufficient balance
     stake_override = fixed_stake if fixed_stake is not None else (TESTNET_DEFAULT_STAKE if use_testnet else None)
-    stake = determine_position_size(context.symbol, state, stake_override)
+    stake = determine_position_size(context.symbol, state, stake_override, context.direction)
     size_units = stake / entry_price if entry_price else 0.0
     entry = Position(
         key=context.key,
@@ -2677,7 +2701,7 @@ def force_entry_position(
         return False
     # Use small fixed stake on testnet to avoid insufficient balance
     stake_override = fixed_stake if fixed_stake is not None else (TESTNET_DEFAULT_STAKE if use_testnet else None)
-    stake_value = determine_position_size(context.symbol, state, stake_override)
+    stake_value = determine_position_size(context.symbol, state, stake_override, context.direction)
     if stake_value <= 0:
         print("[Force] Stake-Betrag ist 0 – prüfe Kapital oder --stake.")
         return False
