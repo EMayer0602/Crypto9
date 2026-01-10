@@ -2717,9 +2717,8 @@ def force_entry_position(
     if find_position(state, context.key):
         print(f"[Force] Position {context.key} ist bereits offen.")
         return False
-    # Use small fixed stake on testnet to avoid insufficient balance
-    stake_override = fixed_stake if fixed_stake is not None else (TESTNET_DEFAULT_STAKE if use_testnet else None)
-    stake_value = determine_position_size(context.symbol, state, stake_override, context.direction)
+    # Use direction-specific stake sizes (SHORT_STAKE for shorts, dynamic for longs)
+    stake_value = determine_position_size(context.symbol, state, fixed_stake, context.direction)
     if stake_value <= 0:
         print("[Force] Stake-Betrag ist 0 – prüfe Kapital oder --stake.")
         return False
