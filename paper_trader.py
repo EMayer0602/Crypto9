@@ -2666,14 +2666,21 @@ def force_entry_position(
     if best_df.empty:
         print("[Force] Keine Strategiedaten gefunden (weder detailed HTML noch overall CSV).")
         return False
-    filtered = filter_best_rows_by_symbol(best_df, [requested_symbol])
+    # For testnet: map USDT symbol to USDC equivalent for parameter lookup
+    param_symbol = st.map_symbol_for_params(requested_symbol) if use_testnet else requested_symbol
+    print(f"[Force] Suche Parameter für {param_symbol} (trade as {requested_symbol})")
+    filtered = filter_best_rows_by_symbol(best_df, [param_symbol])
     filtered = filter_best_rows_by_direction(filtered, [direction_value])
     filtered = select_best_indicator_per_symbol(filtered)
     if filtered.empty:
-        print(f"[Force] Keine Strategiezeile für {requested_symbol} {direction_value} vorhanden.")
+        print(f"[Force] Keine Strategiezeile für {param_symbol} {direction_value} vorhanden.")
         return False
     row = filtered.iloc[0]
     context = build_strategy_context(row)
+    # For testnet: override context symbol to use USDT pair for trading
+    if use_testnet and context.symbol != requested_symbol:
+        context = context._replace(symbol=requested_symbol, key=f"{requested_symbol}_{context.direction}_{context.indicator}_{context.htf}")
+        print(f"[Force] Symbol für Trade auf {requested_symbol} gesetzt")
     df = build_dataframe_for_context(context)
     if df.empty:
         print(f"[Force] Keine Marktdaten für {requested_symbol} verfügbar.")
