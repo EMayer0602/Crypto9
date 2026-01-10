@@ -2685,8 +2685,7 @@ def force_entry_position(
     # For testnet: override context symbol to use USDT pair for trading
     if use_testnet and context.symbol != requested_symbol:
         context.symbol = requested_symbol
-        context.key = f"{requested_symbol}_{context.direction}_{context.indicator}_{context.htf}"
-        print(f"[Force] Symbol für Trade auf {requested_symbol} gesetzt")
+        print(f"[Force] Symbol für Trade auf {requested_symbol} gesetzt (key={context.key})")
     df = build_dataframe_for_context(context)
     if df.empty:
         print(f"[Force] Keine Marktdaten für {requested_symbol} verfügbar.")
