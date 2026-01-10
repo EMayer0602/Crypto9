@@ -466,6 +466,21 @@ def generate_dashboard():
         </div>
     </div>
 
+    <h2>Base Currency Balances</h2>
+    <table>
+        <tr><th>Source</th><th>Currency</th><th>Amount</th></tr>
+"""
+    # Add Spot base balances
+    for bal in sorted(spot_base_balances, key=lambda x: x["amount"], reverse=True):
+        html += f"        <tr><td><span class='badge badge-spot'>SPOT</span></td><td>{bal['asset']}</td><td>{bal['amount']:,.2f}</td></tr>\n"
+    # Add Futures USDT balance
+    if futures_usdt > 0:
+        html += f"        <tr><td><span class='badge badge-futures'>FUTURES</span></td><td>USDT</td><td>{futures_usdt:,.2f}</td></tr>\n"
+    if not spot_base_balances and futures_usdt == 0:
+        html += "        <tr><td colspan='3'>No balances</td></tr>\n"
+
+    html += """    </table>
+
     <h2>Open Positions</h2>
     <table>
         <tr><th>Source</th><th>Asset</th><th>Side</th><th>Amount</th><th>Entry Price</th><th>Unrealized PnL</th></tr>
