@@ -392,15 +392,19 @@ def generate_dashboard():
     for trade in crypto9_closed_trades:
         direction = trade.get("direction", "long").upper()
         source = "FUTURES" if direction == "SHORT" else "SPOT"
+        stake = trade.get("stake", 0)
+        pnl = trade.get("pnl", 0)
+        # Calculate exit_value: stake + pnl
+        exit_value = trade.get("exit_value") or (stake + pnl)
         trade_data = {
             "symbol": trade.get("symbol", "").replace("/", ""),
             "direction": direction,
             "source": source,
             "entry_time": trade.get("entry_time"),
             "exit_time": trade.get("exit_time") or trade.get("closed_at"),
-            "entry_value": trade.get("stake", 0),
-            "exit_value": trade.get("exit_value", 0),
-            "pnl": trade.get("pnl", 0),
+            "entry_value": stake,
+            "exit_value": exit_value,
+            "pnl": pnl,
             "pnl_pct": trade.get("pnl_pct", 0),
         }
         if direction == "LONG":
@@ -517,30 +521,51 @@ def generate_dashboard():
         html += "        <tr><td colspan='3'>No balances</td></tr>\n"
 
     html += """    </table>
-
-    <h2>Open Positions</h2>
-    <table>
-        <tr><th>Source</th><th>Asset</th><th>Side</th><th>Amount</th><th>Entry Price</th><th>Unrealized PnL</th></tr>
 """
-    if all_open_positions:
-        for pos in all_open_positions:
+
+    # Separate open positions into Long and Short
+    open_longs = [p for p in all_open_positions if p["side"] == "LONG"]
+    open_shorts = [p for p in all_open_positions if p["side"] == "SHORT"]
+    open_long_pnl = sum(p.get("unrealized_pnl", 0) for p in open_longs)
+    open_short_pnl = sum(p.get("unrealized_pnl", 0) for p in open_shorts)
+
+    def position_table_rows(positions):
+        if not positions:
+            return "<tr><td colspan='5'>No positions</td></tr>\n"
+        rows = ""
+        for pos in positions:
             source_class = "badge-spot" if pos["source"] == "SPOT" else "badge-futures"
-            side_class = "badge-long" if pos["side"] == "LONG" else "badge-short"
             entry_price = pos.get("entry_price", "-")
             entry_str = f"${entry_price:,.2f}" if isinstance(entry_price, (int, float)) else entry_price
             upnl = pos.get("unrealized_pnl", 0)
             upnl_class = "positive" if upnl >= 0 else "negative"
             upnl_str = f"${upnl:,.2f}" if upnl != 0 else "-"
-            html += f"""        <tr>
+            rows += f"""        <tr>
             <td><span class='badge {source_class}'>{pos['source']}</span></td>
             <td>{pos['asset']}</td>
-            <td><span class='badge {side_class}'>{pos['side']}</span></td>
             <td>{pos['amount']:,.6f}</td>
             <td>{entry_str}</td>
             <td class='{upnl_class}'>{upnl_str}</td>
         </tr>\n"""
-    else:
-        html += "        <tr><td colspan='6'>No open positions</td></tr>\n"
+        return rows
+
+    # Open Long Positions table
+    html += f"""
+    <h2>Open Long Positions ({len(open_longs)}, PnL: <span class="{'positive' if open_long_pnl >= 0 else 'negative'}">${open_long_pnl:,.2f}</span>)</h2>
+    <table>
+        <tr class="long-header"><th>Source</th><th>Asset</th><th>Amount</th><th>Entry Price</th><th>Unrealized PnL</th></tr>
+"""
+    html += position_table_rows(open_longs)
+
+    # Open Short Positions table
+    html += f"""    </table>
+
+    <h2>Open Short Positions ({len(open_shorts)}, PnL: <span class="{'positive' if open_short_pnl >= 0 else 'negative'}">${open_short_pnl:,.2f}</span>)</h2>
+    <table>
+        <tr class="short-header"><th>Source</th><th>Asset</th><th>Amount</th><th>Entry Price</th><th>Unrealized PnL</th></tr>
+"""
+    html += position_table_rows(open_shorts)
+    html += "    </table>\n"
 
     # Trade table helper
     def format_time(t):
