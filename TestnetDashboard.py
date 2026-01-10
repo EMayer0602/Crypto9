@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate HTML dashboard for Binance Testnet trading."""
+"""Generate HTML dashboard for Binance Testnet trading (Spot + Futures)."""
 
 import os
 import time
@@ -14,21 +14,25 @@ load_dotenv()
 
 API_KEY = os.getenv("BINANCE_API_KEY_TEST")
 API_SECRET = os.getenv("BINANCE_API_SECRET_TEST")
-BASE_URL = "https://testnet.binance.vision"
+
+# API Base URLs
+SPOT_BASE_URL = "https://testnet.binance.vision"
+FUTURES_BASE_URL = "https://testnet.binancefuture.com"
+
 RECV_WINDOW_MS = 5_000
 
 # Trading symbols - Testnet only supports USDT pairs
 SYMBOLS = ["BTCUSDT", "ETHUSDT", "XRPUSDT", "LINKUSDT", "SOLUSDT", "BNBUSDT",
-           "SUIUSDT", "ZECUSDT", "LUNCUSDT", "TNSRUSDT"]
+           "SUIUSDT", "ZECUSDT", "LUNCUSDT", "TNSRUSDT", "ADAUSDT", "ICPUSDT"]
 
 # Base currencies (don't count as positions)
 BASE_CURRENCIES = {"USDT", "USDC", "BUSD", "BTC", "TUSD"}
 
 # Relevant trading assets (filter out testnet junk)
-RELEVANT_ASSETS = {"BTC", "ETH", "SOL", "XRP", "LINK", "BNB", "SUI", "ZEC", "LUNC", "TNSR"}
+RELEVANT_ASSETS = {"BTC", "ETH", "SOL", "XRP", "LINK", "BNB", "SUI", "ZEC", "LUNC", "TNSR", "ADA", "ICP"}
 
 # Only show trades from this date onwards (set to None to show all)
-TRADES_SINCE_DATE = datetime(2026, 1, 2, tzinfo=timezone.utc)  # Today
+TRADES_SINCE_DATE = datetime(2026, 1, 2, tzinfo=timezone.utc)
 
 OUTPUT_DIR = Path("report_testnet")
 
@@ -39,10 +43,14 @@ def sign_request(params: dict, secret: str) -> str:
     return query_string + "&signature=" + signature
 
 
-def get_account_balances() -> list:
-    """Get all account balances."""
+# ============================================================================
+# SPOT TESTNET API
+# ============================================================================
+
+def get_spot_balances() -> list:
+    """Get all spot account balances."""
     endpoint = "/api/v3/account"
-    url = BASE_URL + endpoint
+    url = SPOT_BASE_URL + endpoint
     params = {
         "timestamp": int(time.time() * 1000),
         "recvWindow": RECV_WINDOW_MS,
@@ -54,14 +62,14 @@ def get_account_balances() -> list:
         response.raise_for_status()
         return response.json().get("balances", [])
     except Exception as e:
-        print(f"Error fetching balances: {e}")
+        print(f"Error fetching spot balances: {e}")
         return []
 
 
-def get_all_orders(symbol: str) -> list:
-    """Get all orders for a symbol."""
+def get_spot_orders(symbol: str) -> list:
+    """Get all spot orders for a symbol."""
     endpoint = "/api/v3/allOrders"
-    url = BASE_URL + endpoint
+    url = SPOT_BASE_URL + endpoint
     params = {
         "symbol": symbol,
         "timestamp": int(time.time() * 1000),
@@ -78,45 +86,95 @@ def get_all_orders(symbol: str) -> list:
         return []
 
 
-def calculate_trade_stats(orders: list) -> dict:
-    """Calculate trading statistics from orders."""
-    if not orders:
-        return {"trades": 0, "buys": 0, "sells": 0, "volume": 0, "pnl": 0}
+# ============================================================================
+# FUTURES TESTNET API
+# ============================================================================
 
-    buys = []
-    sells = []
-
-    for o in orders:
-        if o.get("status") != "FILLED":
-            continue
-        side = o.get("side")
-        qty = float(o.get("executedQty", 0))
-        quote = float(o.get("cummulativeQuoteQty", 0))
-
-        if side == "BUY":
-            buys.append({"qty": qty, "quote": quote})
-        elif side == "SELL":
-            sells.append({"qty": qty, "quote": quote})
-
-    total_buy_quote = sum(b["quote"] for b in buys)
-    total_sell_quote = sum(s["quote"] for s in sells)
-
-    return {
-        "trades": len(buys) + len(sells),
-        "buys": len(buys),
-        "sells": len(sells),
-        "buy_volume": total_buy_quote,
-        "sell_volume": total_sell_quote,
-        "realized_pnl": total_sell_quote - total_buy_quote if sells else 0
+def get_futures_balance() -> float:
+    """Get futures USDT balance."""
+    endpoint = "/fapi/v2/balance"
+    url = FUTURES_BASE_URL + endpoint
+    params = {
+        "timestamp": int(time.time() * 1000),
+        "recvWindow": RECV_WINDOW_MS,
     }
+    query = sign_request(params, API_SECRET)
+    headers = {"X-MBX-APIKEY": API_KEY}
+    try:
+        response = requests.get(url + "?" + query, headers=headers, timeout=10)
+        if response.status_code == 200:
+            for asset in response.json():
+                if asset["asset"] == "USDT":
+                    return float(asset["availableBalance"])
+        else:
+            print(f"Futures balance error: {response.status_code} - {response.text[:100]}")
+        return 0.0
+    except Exception as e:
+        print(f"Error fetching futures balance: {e}")
+        return 0.0
 
 
-def match_trades(orders: list, symbol: str) -> list:
-    """Match BUY/SELL orders into round-trip trades.
+def get_futures_positions() -> list:
+    """Get all open futures positions."""
+    endpoint = "/fapi/v2/positionRisk"
+    url = FUTURES_BASE_URL + endpoint
+    params = {
+        "timestamp": int(time.time() * 1000),
+        "recvWindow": RECV_WINDOW_MS,
+    }
+    query = sign_request(params, API_SECRET)
+    headers = {"X-MBX-APIKEY": API_KEY}
+    try:
+        response = requests.get(url + "?" + query, headers=headers, timeout=10)
+        if response.status_code == 200:
+            positions = []
+            for p in response.json():
+                amt = float(p.get("positionAmt", 0))
+                if amt != 0:
+                    positions.append({
+                        "symbol": p["symbol"],
+                        "side": "LONG" if amt > 0 else "SHORT",
+                        "amount": abs(amt),
+                        "entry_price": float(p.get("entryPrice", 0)),
+                        "mark_price": float(p.get("markPrice", 0)),
+                        "unrealized_pnl": float(p.get("unRealizedProfit", 0)),
+                        "leverage": p.get("leverage", "1"),
+                    })
+            return positions
+        else:
+            print(f"Futures positions error: {response.status_code}")
+        return []
+    except Exception as e:
+        print(f"Error fetching futures positions: {e}")
+        return []
 
-    Long trade: BUY entry -> SELL exit
-    Short trade: SELL entry -> BUY exit (on margin/futures, rare on spot)
-    """
+
+def get_futures_trades(symbol: str) -> list:
+    """Get futures trade history for a symbol."""
+    endpoint = "/fapi/v1/userTrades"
+    url = FUTURES_BASE_URL + endpoint
+    params = {
+        "symbol": symbol,
+        "timestamp": int(time.time() * 1000),
+        "recvWindow": RECV_WINDOW_MS,
+    }
+    query = sign_request(params, API_SECRET)
+    headers = {"X-MBX-APIKEY": API_KEY}
+    try:
+        response = requests.get(url + "?" + query, headers=headers, timeout=10)
+        if response.status_code == 200:
+            return response.json()
+        return []
+    except:
+        return []
+
+
+# ============================================================================
+# TRADE MATCHING
+# ============================================================================
+
+def match_spot_trades(orders: list, symbol: str) -> list:
+    """Match BUY/SELL spot orders into round-trip trades (LONG only)."""
     filled = [o for o in orders if o.get("status") == "FILLED"]
     filled.sort(key=lambda x: x.get("time", 0))
 
@@ -124,7 +182,6 @@ def match_trades(orders: list, symbol: str) -> list:
     position_qty = 0.0
     position_cost = 0.0
     entry_time = None
-    entry_side = None
 
     for o in filled:
         side = o.get("side")
@@ -133,18 +190,18 @@ def match_trades(orders: list, symbol: str) -> list:
         ts = o.get("time", 0)
         order_time = datetime.fromtimestamp(ts/1000, tz=timezone.utc) if ts else None
 
-        if position_qty == 0:
-            # Opening new position
+        if position_qty == 0 and side == "BUY":
+            # Opening long position
             position_qty = qty
             position_cost = quote
             entry_time = order_time
-            entry_side = side
-        elif entry_side == "BUY" and side == "SELL":
+        elif position_qty > 0 and side == "SELL":
             # Closing long position
             pnl = quote - position_cost
             matched.append({
                 "symbol": symbol,
                 "direction": "LONG",
+                "source": "SPOT",
                 "entry_time": entry_time,
                 "exit_time": order_time,
                 "entry_value": position_cost,
@@ -156,15 +213,68 @@ def match_trades(orders: list, symbol: str) -> list:
             position_qty = 0
             position_cost = 0
             entry_time = None
+        elif position_qty > 0 and side == "BUY":
+            # Adding to long
+            position_qty += qty
+            position_cost += quote
+
+    return matched
+
+
+def match_futures_trades(trades: list, symbol: str) -> list:
+    """Match futures trades into round-trips (LONG and SHORT)."""
+    if not trades:
+        return []
+
+    trades = sorted(trades, key=lambda x: x.get("time", 0))
+
+    matched = []
+    position_qty = 0.0
+    position_cost = 0.0
+    entry_time = None
+    entry_side = None  # "LONG" or "SHORT"
+
+    for t in trades:
+        side = t.get("side")  # BUY or SELL
+        qty = float(t.get("qty", 0))
+        quote = float(t.get("quoteQty", 0))
+        ts = t.get("time", 0)
+        trade_time = datetime.fromtimestamp(ts/1000, tz=timezone.utc) if ts else None
+
+        if position_qty == 0:
+            # Opening new position
+            position_qty = qty
+            position_cost = quote
+            entry_time = trade_time
+            entry_side = "LONG" if side == "BUY" else "SHORT"
+        elif entry_side == "LONG" and side == "SELL":
+            # Closing long
+            pnl = quote - position_cost
+            matched.append({
+                "symbol": symbol,
+                "direction": "LONG",
+                "source": "FUTURES",
+                "entry_time": entry_time,
+                "exit_time": trade_time,
+                "entry_value": position_cost,
+                "exit_value": quote,
+                "qty": position_qty,
+                "pnl": pnl,
+                "pnl_pct": (pnl / position_cost * 100) if position_cost > 0 else 0
+            })
+            position_qty = 0
+            position_cost = 0
+            entry_time = None
             entry_side = None
-        elif entry_side == "SELL" and side == "BUY":
-            # Closing short position
+        elif entry_side == "SHORT" and side == "BUY":
+            # Closing short
             pnl = position_cost - quote
             matched.append({
                 "symbol": symbol,
                 "direction": "SHORT",
+                "source": "FUTURES",
                 "entry_time": entry_time,
-                "exit_time": order_time,
+                "exit_time": trade_time,
                 "entry_value": position_cost,
                 "exit_value": quote,
                 "qty": position_qty,
@@ -176,70 +286,76 @@ def match_trades(orders: list, symbol: str) -> list:
             entry_time = None
             entry_side = None
         else:
-            # Adding to position (same side)
+            # Adding to position
             position_qty += qty
             position_cost += quote
 
     return matched
 
 
+# ============================================================================
+# DASHBOARD GENERATION
+# ============================================================================
+
 def generate_dashboard():
-    """Generate HTML dashboard."""
+    """Generate HTML dashboard with Spot + Futures data."""
     print("Fetching testnet data...")
 
-    # Get balances
-    balances = get_account_balances()
+    # ========== SPOT DATA ==========
+    print("  Fetching Spot balances...")
+    spot_balances = get_spot_balances()
 
-    # Filter relevant balances (ignore testnet junk tokens)
-    open_positions = []
-    base_balances = []
-    for bal in balances:
+    spot_base_balances = []
+    spot_positions = []
+    for bal in spot_balances:
         asset = bal["asset"]
         free = float(bal["free"])
         locked = float(bal["locked"])
         total = free + locked
         if total > 0:
             if asset in BASE_CURRENCIES:
-                base_balances.append({"asset": asset, "amount": total})
+                spot_base_balances.append({"asset": asset, "amount": total, "source": "SPOT"})
             elif asset in RELEVANT_ASSETS:
-                open_positions.append({"asset": asset, "amount": total})
+                spot_positions.append({"asset": asset, "amount": total, "source": "SPOT", "side": "LONG"})
 
-    # Get order history for each symbol (filtered by date)
-    all_matched_trades = []
-    symbol_stats = {}
+    # Spot trades
+    print("  Fetching Spot orders...")
+    spot_matched_trades = []
     for sym in SYMBOLS:
-        orders = get_all_orders(sym)
+        orders = get_spot_orders(sym)
         if orders:
-            # Filter orders by date if TRADES_SINCE_DATE is set
             if TRADES_SINCE_DATE:
-                filtered_orders = []
-                for o in orders:
-                    ts = o.get("time", 0)
-                    if ts:
-                        order_time = datetime.fromtimestamp(ts/1000, tz=timezone.utc)
-                        if order_time >= TRADES_SINCE_DATE:
-                            filtered_orders.append(o)
-                orders = filtered_orders
+                orders = [o for o in orders if o.get("time", 0) and
+                         datetime.fromtimestamp(o["time"]/1000, tz=timezone.utc) >= TRADES_SINCE_DATE]
+            matched = match_spot_trades(orders, sym)
+            spot_matched_trades.extend(matched)
 
-            stats = calculate_trade_stats(orders)
-            if stats["trades"] > 0:
-                symbol_stats[sym] = stats
+    # ========== FUTURES DATA ==========
+    print("  Fetching Futures balance...")
+    futures_usdt = get_futures_balance()
 
-            # Match trades into round-trips
-            matched = match_trades(orders, sym)
-            all_matched_trades.extend(matched)
+    print("  Fetching Futures positions...")
+    futures_positions = get_futures_positions()
 
-    # Sort matched trades by exit time (most recent first)
+    print("  Fetching Futures trades...")
+    futures_matched_trades = []
+    for sym in SYMBOLS:
+        trades = get_futures_trades(sym)
+        if trades:
+            if TRADES_SINCE_DATE:
+                trades = [t for t in trades if t.get("time", 0) and
+                         datetime.fromtimestamp(t["time"]/1000, tz=timezone.utc) >= TRADES_SINCE_DATE]
+            matched = match_futures_trades(trades, sym)
+            futures_matched_trades.extend(matched)
+
+    # ========== COMBINE DATA ==========
+    all_matched_trades = spot_matched_trades + futures_matched_trades
     all_matched_trades.sort(key=lambda x: x["exit_time"] or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
 
-    # Separate long and short trades
     long_trades = [t for t in all_matched_trades if t["direction"] == "LONG"]
     short_trades = [t for t in all_matched_trades if t["direction"] == "SHORT"]
 
-    # Calculate total volume for share calculation
     total_volume = sum(t["entry_value"] for t in all_matched_trades) if all_matched_trades else 1
-
-    # Calculate totals
     total_realized_pnl = sum(t["pnl"] for t in all_matched_trades)
     total_closed_trades = len(all_matched_trades)
     long_pnl = sum(t["pnl"] for t in long_trades)
@@ -247,97 +363,147 @@ def generate_dashboard():
     long_wins = sum(1 for t in long_trades if t["pnl"] > 0)
     short_wins = sum(1 for t in short_trades if t["pnl"] > 0)
 
-    # Generate HTML
+    # Combined open positions
+    all_open_positions = spot_positions.copy()
+    for fp in futures_positions:
+        all_open_positions.append({
+            "asset": fp["symbol"].replace("USDT", ""),
+            "amount": fp["amount"],
+            "source": "FUTURES",
+            "side": fp["side"],
+            "entry_price": fp["entry_price"],
+            "unrealized_pnl": fp["unrealized_pnl"]
+        })
+
+    # Calculate total unrealized PnL
+    total_unrealized_pnl = sum(fp["unrealized_pnl"] for fp in futures_positions)
+
+    # Total USDT (Spot + Futures)
+    spot_usdt = sum(b["amount"] for b in spot_base_balances if b["asset"] == "USDT")
+    total_usdt = spot_usdt + futures_usdt
+
+    # ========== GENERATE HTML ==========
     html = f"""<!DOCTYPE html>
 <html>
 <head>
     <meta charset="utf-8">
     <meta http-equiv="refresh" content="60">
-    <title>Testnet Trading Dashboard</title>
+    <title>Crypto9 Testnet Dashboard (Spot + Futures)</title>
     <style>
-        body {{ font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }}
+        body {{ font-family: Arial, sans-serif; margin: 20px; background: #1a1a2e; color: #eee; }}
         .container {{ max-width: 1400px; margin: 0 auto; }}
-        h1 {{ color: #333; border-bottom: 2px solid #007bff; padding-bottom: 10px; }}
-        h2 {{ color: #555; margin-top: 30px; }}
-        h3 {{ color: #666; margin-top: 20px; }}
-        table {{ border-collapse: collapse; width: 100%; margin-top: 10px; background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }}
-        th, td {{ border: 1px solid #ddd; padding: 8px; text-align: right; }}
-        th {{ background: #007bff; color: white; text-align: center; }}
+        h1 {{ color: #00d4ff; border-bottom: 2px solid #00d4ff; padding-bottom: 10px; }}
+        h2 {{ color: #aaa; margin-top: 30px; }}
+        table {{ border-collapse: collapse; width: 100%; margin-top: 10px; background: #16213e; }}
+        th, td {{ border: 1px solid #333; padding: 8px; text-align: right; }}
+        th {{ background: #0f3460; color: #00d4ff; text-align: center; }}
         td:first-child {{ text-align: left; }}
-        .positive {{ color: green; font-weight: bold; }}
-        .negative {{ color: red; font-weight: bold; }}
-        .summary-box {{ display: inline-block; background: white; padding: 20px; margin: 10px; border-radius: 5px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); min-width: 150px; text-align: center; }}
-        .summary-box h3 {{ margin: 0 0 10px 0; color: #666; font-size: 14px; }}
-        .summary-box .value {{ font-size: 24px; font-weight: bold; }}
-        .long-header {{ background: #28a745 !important; }}
-        .short-header {{ background: #dc3545 !important; }}
+        .positive {{ color: #00ff88; font-weight: bold; }}
+        .negative {{ color: #ff4757; font-weight: bold; }}
+        .summary-boxes {{ display: flex; flex-wrap: wrap; gap: 15px; margin: 20px 0; }}
+        .summary-box {{ background: #16213e; padding: 20px; border-radius: 10px; min-width: 140px; text-align: center; border: 1px solid #333; }}
+        .summary-box h3 {{ margin: 0 0 10px 0; color: #888; font-size: 12px; text-transform: uppercase; }}
+        .summary-box .value {{ font-size: 24px; font-weight: bold; color: #fff; }}
+        .long-header {{ background: #1e5631 !important; }}
+        .short-header {{ background: #5c1e1e !important; }}
         .timestamp {{ color: #666; font-size: 12px; margin-top: 20px; }}
         .section {{ margin-bottom: 30px; }}
+        .source-spot {{ color: #ffa502; }}
+        .source-futures {{ color: #ff6b81; }}
+        .badge {{ padding: 2px 6px; border-radius: 3px; font-size: 10px; margin-left: 5px; }}
+        .badge-spot {{ background: #ffa502; color: #000; }}
+        .badge-futures {{ background: #ff6b81; color: #fff; }}
+        .badge-long {{ background: #1e5631; color: #0f0; }}
+        .badge-short {{ background: #5c1e1e; color: #f66; }}
     </style>
 </head>
 <body>
 <div class="container">
-    <h1>Binance Testnet Dashboard</h1>
+    <h1>Crypto9 Testnet Dashboard</h1>
+    <p style="color:#666;">Spot (Longs) + Futures (Shorts) | Auto-refresh: 60s</p>
 
     <div class="summary-boxes">
+        <div class="summary-box">
+            <h3>Total USDT</h3>
+            <div class="value">${total_usdt:,.2f}</div>
+        </div>
+        <div class="summary-box">
+            <h3>Spot USDT</h3>
+            <div class="value">${spot_usdt:,.2f}</div>
+        </div>
+        <div class="summary-box">
+            <h3>Futures USDT</h3>
+            <div class="value">${futures_usdt:,.2f}</div>
+        </div>
+        <div class="summary-box">
+            <h3>Open Positions</h3>
+            <div class="value">{len(all_open_positions)}</div>
+        </div>
+        <div class="summary-box">
+            <h3>Unrealized PnL</h3>
+            <div class="value {'positive' if total_unrealized_pnl >= 0 else 'negative'}">${total_unrealized_pnl:,.2f}</div>
+        </div>
         <div class="summary-box">
             <h3>Closed Trades</h3>
             <div class="value">{total_closed_trades}</div>
         </div>
         <div class="summary-box">
             <h3>Realized PnL</h3>
-            <div class="value {'positive' if total_realized_pnl >= 0 else 'negative'}">{total_realized_pnl:,.2f}</div>
+            <div class="value {'positive' if total_realized_pnl >= 0 else 'negative'}">${total_realized_pnl:,.2f}</div>
         </div>
         <div class="summary-box">
-            <h3>Long Trades</h3>
-            <div class="value">{len(long_trades)} ({long_wins}W)</div>
+            <h3>Long ({len(long_trades)})</h3>
+            <div class="value {'positive' if long_pnl >= 0 else 'negative'}">${long_pnl:,.2f}</div>
         </div>
         <div class="summary-box">
-            <h3>Short Trades</h3>
-            <div class="value">{len(short_trades)} ({short_wins}W)</div>
-        </div>
-        <div class="summary-box">
-            <h3>Open Positions</h3>
-            <div class="value">{len(open_positions)}</div>
+            <h3>Short ({len(short_trades)})</h3>
+            <div class="value {'positive' if short_pnl >= 0 else 'negative'}">${short_pnl:,.2f}</div>
         </div>
     </div>
 
-    <h2>Base Currency Balances</h2>
-    <table>
-        <tr><th>Currency</th><th>Amount</th></tr>
-"""
-    for bal in sorted(base_balances, key=lambda x: x["amount"], reverse=True):
-        html += f"        <tr><td>{bal['asset']}</td><td>{bal['amount']:,.2f}</td></tr>\n"
-
-    html += """    </table>
-
     <h2>Open Positions</h2>
     <table>
-        <tr><th>Asset</th><th>Amount</th></tr>
+        <tr><th>Source</th><th>Asset</th><th>Side</th><th>Amount</th><th>Entry Price</th><th>Unrealized PnL</th></tr>
 """
-    if open_positions:
-        for pos in sorted(open_positions, key=lambda x: x["amount"], reverse=True)[:20]:
-            html += f"        <tr><td>{pos['asset']}</td><td>{pos['amount']:,.4f}</td></tr>\n"
+    if all_open_positions:
+        for pos in all_open_positions:
+            source_class = "badge-spot" if pos["source"] == "SPOT" else "badge-futures"
+            side_class = "badge-long" if pos["side"] == "LONG" else "badge-short"
+            entry_price = pos.get("entry_price", "-")
+            entry_str = f"${entry_price:,.2f}" if isinstance(entry_price, (int, float)) else entry_price
+            upnl = pos.get("unrealized_pnl", 0)
+            upnl_class = "positive" if upnl >= 0 else "negative"
+            upnl_str = f"${upnl:,.2f}" if upnl != 0 else "-"
+            html += f"""        <tr>
+            <td><span class='badge {source_class}'>{pos['source']}</span></td>
+            <td>{pos['asset']}</td>
+            <td><span class='badge {side_class}'>{pos['side']}</span></td>
+            <td>{pos['amount']:,.6f}</td>
+            <td>{entry_str}</td>
+            <td class='{upnl_class}'>{upnl_str}</td>
+        </tr>\n"""
     else:
-        html += "        <tr><td colspan='2'>No open positions</td></tr>\n"
+        html += "        <tr><td colspan='6'>No open positions</td></tr>\n"
 
-    # Helper function to generate trade table rows
-    def trade_table_rows(trades, header_class=""):
+    # Trade table helper
+    def trade_table_rows(trades):
         if not trades:
-            return "<tr><td colspan='8'>No trades</td></tr>\n"
+            return "<tr><td colspan='9'>No trades</td></tr>\n"
         rows = ""
         for t in trades:
             pnl_class = "positive" if t["pnl"] >= 0 else "negative"
-            entry_str = t["entry_time"].strftime("%Y-%m-%d %H:%M") if t["entry_time"] else "N/A"
-            exit_str = t["exit_time"].strftime("%Y-%m-%d %H:%M") if t["exit_time"] else "N/A"
+            entry_str = t["entry_time"].strftime("%m-%d %H:%M") if t["entry_time"] else "N/A"
+            exit_str = t["exit_time"].strftime("%m-%d %H:%M") if t["exit_time"] else "Open"
+            source_class = "badge-spot" if t["source"] == "SPOT" else "badge-futures"
             share = (t["entry_value"] / total_volume * 100) if total_volume > 0 else 0
             rows += f"""        <tr>
+            <td><span class='badge {source_class}'>{t['source']}</span></td>
             <td>{t['symbol']}</td>
             <td>{entry_str}</td>
             <td>{exit_str}</td>
-            <td>{t['entry_value']:,.2f}</td>
-            <td>{t['exit_value']:,.2f}</td>
-            <td class="{pnl_class}">{t['pnl']:,.2f}</td>
+            <td>${t['entry_value']:,.2f}</td>
+            <td>${t['exit_value']:,.2f}</td>
+            <td class="{pnl_class}">${t['pnl']:,.2f}</td>
             <td class="{pnl_class}">{t['pnl_pct']:+.2f}%</td>
             <td>{share:.1f}%</td>
         </tr>\n"""
@@ -347,9 +513,9 @@ def generate_dashboard():
     html += f"""    </table>
 
     <div class="section">
-    <h2>Long Trades ({len(long_trades)} closed, PnL: <span class="{'positive' if long_pnl >= 0 else 'negative'}">{long_pnl:,.2f}</span>)</h2>
+    <h2>Long Trades ({len(long_trades)} closed, PnL: <span class="{'positive' if long_pnl >= 0 else 'negative'}">${long_pnl:,.2f}</span>)</h2>
     <table>
-        <tr class="long-header"><th>Symbol</th><th>Entry</th><th>Exit</th><th>Entry Value</th><th>Exit Value</th><th>PnL</th><th>PnL %</th><th>Share</th></tr>
+        <tr class="long-header"><th>Source</th><th>Symbol</th><th>Entry</th><th>Exit</th><th>Entry $</th><th>Exit $</th><th>PnL</th><th>PnL %</th><th>Share</th></tr>
 """
     html += trade_table_rows(long_trades)
 
@@ -358,9 +524,9 @@ def generate_dashboard():
     </div>
 
     <div class="section">
-    <h2>Short Trades ({len(short_trades)} closed, PnL: <span class="{'positive' if short_pnl >= 0 else 'negative'}">{short_pnl:,.2f}</span>)</h2>
+    <h2>Short Trades ({len(short_trades)} closed, PnL: <span class="{'positive' if short_pnl >= 0 else 'negative'}">${short_pnl:,.2f}</span>)</h2>
     <table>
-        <tr class="short-header"><th>Symbol</th><th>Entry</th><th>Exit</th><th>Entry Value</th><th>Exit Value</th><th>PnL</th><th>PnL %</th><th>Share</th></tr>
+        <tr class="short-header"><th>Source</th><th>Symbol</th><th>Entry</th><th>Exit</th><th>Entry $</th><th>Exit $</th><th>PnL</th><th>PnL %</th><th>Share</th></tr>
 """
     html += trade_table_rows(short_trades)
 
@@ -368,7 +534,7 @@ def generate_dashboard():
     html += f"""    </table>
     </div>
 
-    <p class="timestamp">Generated: {timestamp}</p>
+    <p class="timestamp">Generated: {timestamp} | Spot: testnet.binance.vision | Futures: testnet.binancefuture.com</p>
 </div>
 </body>
 </html>"""
@@ -377,13 +543,13 @@ def generate_dashboard():
     OUTPUT_DIR.mkdir(exist_ok=True)
     output_path = OUTPUT_DIR / "dashboard.html"
     output_path.write_text(html, encoding="utf-8")
-    print(f"Dashboard saved to: {output_path}")
+    print(f"\nDashboard saved to: {output_path}")
     return output_path
 
 
 if __name__ == "__main__":
     if not API_KEY or not API_SECRET:
-        print("Error: BINANCE_API_KEY_TEST or BINANCE_API_SECRET_TEST not set")
+        print("Error: BINANCE_API_KEY_TEST or BINANCE_API_SECRET_TEST not set in .env")
     else:
         path = generate_dashboard()
-        print(f"\nOpen with: start {path}")
+        print(f"Open with: start {path}")
