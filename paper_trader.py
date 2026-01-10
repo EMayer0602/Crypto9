@@ -646,7 +646,12 @@ def ensure_config(symbols: List[str]) -> pd.DataFrame:
 def load_config_lookup(df: pd.DataFrame) -> Dict[str, ConfigEntry]:
     lookup: Dict[str, ConfigEntry] = {}
     for _, row in df.iterrows():
-        symbol = row["Symbol"].strip()
+        raw_symbol = row.get("Symbol")
+        if pd.isna(raw_symbol) or not isinstance(raw_symbol, str):
+            continue  # Skip invalid rows
+        symbol = raw_symbol.strip()
+        if not symbol:
+            continue
         lookup[symbol] = ConfigEntry(
             symbol=symbol,
             enable_long=bool(row.get("EnableLong", True)),
