@@ -10,6 +10,8 @@ Task Scheduler). On each invocation it
 from __future__ import annotations
 
 import argparse
+import hashlib
+import hmac
 import json
 import os
 import time
@@ -18,6 +20,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+import requests
 import plotly.graph_objects as go
 
 import numpy as np
@@ -293,6 +296,170 @@ class BinanceOrderExecutor(OrderExecutor):
         if symbol:
             return self._submit(symbol, side, amount)
         return None
+
+
+# Futures Testnet URL
+FUTURES_TESTNET_URL = "https://testnet.binancefuture.com"
+
+
+class BinanceFuturesOrderExecutor(OrderExecutor):
+    """Order executor for Binance Futures Testnet (used for SHORT trades)."""
+
+    def __init__(self, api_key: str = None, api_secret: str = None):
+        self.api_key = api_key or os.getenv("BINANCE_API_KEY_TEST", "")
+        self.api_secret = api_secret or os.getenv("BINANCE_API_SECRET_TEST", "")
+        self.base_url = FUTURES_TESTNET_URL
+        self.session = requests.Session()
+        self._precision_cache: Dict[str, int] = {}
+
+    def _sign(self, params: dict) -> str:
+        """Create HMAC SHA256 signature."""
+        query_string = "&".join([f"{k}={v}" for k, v in params.items()])
+        signature = hmac.new(
+            self.api_secret.encode(),
+            query_string.encode(),
+            hashlib.sha256
+        ).hexdigest()
+        return signature
+
+    def _request(self, method: str, endpoint: str, params: dict = None, signed: bool = False) -> Optional[dict]:
+        """Execute API request."""
+        if params is None:
+            params = {}
+        headers = {"X-MBX-APIKEY": self.api_key}
+        url = f"{self.base_url}{endpoint}"
+
+        if signed:
+            params["timestamp"] = int(time.time() * 1000)
+            params["signature"] = self._sign(params)
+
+        try:
+            if method == "GET":
+                response = self.session.get(url, params=params, headers=headers, timeout=30)
+            elif method == "POST":
+                response = self.session.post(url, params=params, headers=headers, timeout=30)
+            else:
+                return None
+
+            if response.status_code == 200:
+                return response.json()
+            else:
+                print(f"[Futures] API Error: {response.status_code} - {response.text}")
+                return None
+        except Exception as e:
+            print(f"[Futures] Request Error: {e}")
+            return None
+
+    def _get_precision(self, symbol: str) -> int:
+        """Get quantity precision for a symbol."""
+        if symbol in self._precision_cache:
+            return self._precision_cache[symbol]
+        result = self._request("GET", "/fapi/v1/exchangeInfo")
+        if result:
+            for s in result.get("symbols", []):
+                self._precision_cache[s["symbol"]] = s.get("quantityPrecision", 3)
+        return self._precision_cache.get(symbol, 3)
+
+    def _get_price(self, symbol: str) -> Optional[float]:
+        """Get current futures price."""
+        result = self._request("GET", "/fapi/v1/ticker/price", {"symbol": symbol})
+        if result:
+            return float(result.get("price", 0))
+        return None
+
+    def _ccxt_to_binance_symbol(self, symbol: str) -> str:
+        """Convert CCXT symbol (BTC/USDT) to Binance format (BTCUSDT)."""
+        return symbol.replace("/", "")
+
+    def _submit_futures_order(self, symbol: str, side: str, amount: float) -> Optional[dict]:
+        """Submit a futures market order."""
+        binance_symbol = self._ccxt_to_binance_symbol(symbol)
+        precision = self._get_precision(binance_symbol)
+        quantity = round(amount, precision)
+
+        if quantity <= 0:
+            print(f"[Futures] Skipping {side} {symbol}: quantity too small")
+            return None
+
+        params = {
+            "symbol": binance_symbol,
+            "side": side.upper(),
+            "type": "MARKET",
+            "quantity": quantity,
+        }
+
+        result = self._request("POST", "/fapi/v1/order", params, signed=True)
+        if result:
+            order_id = result.get("orderId", "unknown")
+            avg_price = float(result.get("avgPrice", 0)) or self._get_price(binance_symbol)
+            print(f"[Futures] {side.upper()} {quantity:.6f} {symbol} @ ${avg_price:.2f} -> {order_id}")
+            return result
+        return None
+
+    def submit_entry(self, position: Dict):
+        """Submit SHORT entry (SELL to open)."""
+        direction = str(position.get("direction", "long")).lower()
+        if direction != "short":
+            print(f"[Futures] Skipping non-short entry: {direction}")
+            return None
+        amount = float(position.get("size_units", 0.0) or 0.0)
+        symbol = position.get("symbol")
+        if symbol and amount > 0:
+            return self._submit_futures_order(symbol, "SELL", amount)
+        return None
+
+    def submit_exit(self, position: Dict, trade: TradeResult):
+        """Submit SHORT exit (BUY to close)."""
+        direction = str(position.get("direction", "long")).lower()
+        if direction != "short":
+            print(f"[Futures] Skipping non-short exit: {direction}")
+            return None
+        amount = float(position.get("size_units", trade.size_units))
+        symbol = position.get("symbol")
+        if symbol and amount > 0:
+            return self._submit_futures_order(symbol, "BUY", amount)
+        return None
+
+
+class HybridOrderExecutor(OrderExecutor):
+    """Routes Long trades to Spot, Short trades to Futures."""
+
+    def __init__(self, spot_executor: OrderExecutor, futures_executor: OrderExecutor):
+        self.spot_executor = spot_executor
+        self.futures_executor = futures_executor
+
+    def submit_entry(self, position: Dict):
+        direction = str(position.get("direction", "long")).lower()
+        if direction == "short":
+            return self.futures_executor.submit_entry(position)
+        else:
+            return self.spot_executor.submit_entry(position)
+
+    def submit_exit(self, position: Dict, trade: TradeResult):
+        direction = str(position.get("direction", "long")).lower()
+        if direction == "short":
+            return self.futures_executor.submit_exit(position, trade)
+        else:
+            return self.spot_executor.submit_exit(position, trade)
+
+
+def create_order_executor(use_testnet: bool = False) -> OrderExecutor:
+    """Create the appropriate order executor based on mode.
+
+    For testnet:
+      - Long trades → Spot Testnet (via ccxt)
+      - Short trades → Futures Testnet (via direct API)
+    For live:
+      - All trades → Spot (via ccxt)
+    """
+    spot_executor = BinanceOrderExecutor(st.get_exchange())
+
+    if use_testnet:
+        futures_executor = BinanceFuturesOrderExecutor()
+        print("[Config] Using HybridOrderExecutor: Long→Spot, Short→Futures")
+        return HybridOrderExecutor(spot_executor, futures_executor)
+    else:
+        return spot_executor
 
 
 def derive_fill_price(order: Dict) -> float:
@@ -3159,7 +3326,7 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
         st.configure_exchange(use_testnet=use_testnet)
         order_executor = None
         if args.place_orders:
-            order_executor = BinanceOrderExecutor(st.get_exchange())
+            order_executor = create_order_executor(use_testnet)
         success = force_entry_position(
             force_symbol,
             force_direction,
@@ -3184,7 +3351,7 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
         st.configure_exchange(use_testnet=use_testnet)
         order_executor = None
         if args.place_orders:
-            order_executor = BinanceOrderExecutor(st.get_exchange())
+            order_executor = create_order_executor(use_testnet)
         monitor_loop(
             allowed_symbols,
             allowed_indicators,
@@ -3203,7 +3370,7 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
     configure_exchange_flag = True
     if args.place_orders:
         st.configure_exchange(use_testnet=use_testnet)
-        order_executor = BinanceOrderExecutor(st.get_exchange())
+        order_executor = create_order_executor(use_testnet)
         configure_exchange_flag = False
 
     if args.simulate:
