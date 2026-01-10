@@ -543,14 +543,24 @@ def generate_dashboard():
         html += "        <tr><td colspan='6'>No open positions</td></tr>\n"
 
     # Trade table helper
+    def format_time(t):
+        if not t:
+            return "N/A"
+        if isinstance(t, str):
+            try:
+                return t[:16].replace("T", " ")  # "2026-01-10T12:00" -> "2026-01-10 12:00"
+            except:
+                return t
+        return t.strftime("%m-%d %H:%M") if hasattr(t, "strftime") else str(t)
+
     def trade_table_rows(trades):
         if not trades:
             return "<tr><td colspan='9'>No trades</td></tr>\n"
         rows = ""
         for t in trades:
             pnl_class = "positive" if t["pnl"] >= 0 else "negative"
-            entry_str = t["entry_time"].strftime("%m-%d %H:%M") if t["entry_time"] else "N/A"
-            exit_str = t["exit_time"].strftime("%m-%d %H:%M") if t["exit_time"] else "Open"
+            entry_str = format_time(t.get("entry_time"))
+            exit_str = format_time(t.get("exit_time")) if t.get("exit_time") else "Open"
             source_class = "badge-spot" if t["source"] == "SPOT" else "badge-futures"
             share = (t["entry_value"] / total_volume * 100) if total_volume > 0 else 0
             rows += f"""        <tr>

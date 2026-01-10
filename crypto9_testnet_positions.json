@@ -1,0 +1,13 @@
+[
+  {
+    "symbol": "BTC/USDT",
+    "direction": "long",
+    "indicator": "jma",
+    "htf": "6h",
+    "entry_time": "2026-01-10T12:00:00+01:00",
+    "entry_price": 94500.0,
+    "stake": 1500.0,
+    "size_units": 0.018209,
+    "tracked_at": "2026-01-10T12:00:00"
+  }
+]
