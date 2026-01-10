@@ -12,8 +12,13 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-API_KEY = os.getenv("BINANCE_API_KEY_TEST")
-API_SECRET = os.getenv("BINANCE_API_SECRET_TEST")
+# Spot Testnet API keys
+SPOT_API_KEY = os.getenv("BINANCE_API_KEY_TEST")
+SPOT_API_SECRET = os.getenv("BINANCE_API_SECRET_TEST")
+
+# Futures Testnet API keys (separate!)
+FUTURES_API_KEY = os.getenv("BINANCE_API_KEY_TEST_F")
+FUTURES_API_SECRET = os.getenv("BINANCE_API_SECRET_TEST_F")
 
 # API Base URLs
 SPOT_BASE_URL = "https://testnet.binance.vision"
@@ -55,8 +60,8 @@ def get_spot_balances() -> list:
         "timestamp": int(time.time() * 1000),
         "recvWindow": RECV_WINDOW_MS,
     }
-    query = sign_request(params, API_SECRET)
-    headers = {"X-MBX-APIKEY": API_KEY}
+    query = sign_request(params, SPOT_API_SECRET)
+    headers = {"X-MBX-APIKEY": SPOT_API_KEY}
     try:
         response = requests.get(url + "?" + query, headers=headers, timeout=10)
         response.raise_for_status()
@@ -75,8 +80,8 @@ def get_spot_orders(symbol: str) -> list:
         "timestamp": int(time.time() * 1000),
         "recvWindow": RECV_WINDOW_MS,
     }
-    query = sign_request(params, API_SECRET)
-    headers = {"X-MBX-APIKEY": API_KEY}
+    query = sign_request(params, SPOT_API_SECRET)
+    headers = {"X-MBX-APIKEY": SPOT_API_KEY}
     try:
         response = requests.get(url + "?" + query, headers=headers, timeout=10)
         if response.status_code == 200:
@@ -98,8 +103,8 @@ def get_futures_balance() -> float:
         "timestamp": int(time.time() * 1000),
         "recvWindow": RECV_WINDOW_MS,
     }
-    query = sign_request(params, API_SECRET)
-    headers = {"X-MBX-APIKEY": API_KEY}
+    query = sign_request(params, FUTURES_API_SECRET)
+    headers = {"X-MBX-APIKEY": FUTURES_API_KEY}
     try:
         response = requests.get(url + "?" + query, headers=headers, timeout=10)
         if response.status_code == 200:
@@ -122,8 +127,8 @@ def get_futures_positions() -> list:
         "timestamp": int(time.time() * 1000),
         "recvWindow": RECV_WINDOW_MS,
     }
-    query = sign_request(params, API_SECRET)
-    headers = {"X-MBX-APIKEY": API_KEY}
+    query = sign_request(params, FUTURES_API_SECRET)
+    headers = {"X-MBX-APIKEY": FUTURES_API_KEY}
     try:
         response = requests.get(url + "?" + query, headers=headers, timeout=10)
         if response.status_code == 200:
@@ -158,8 +163,8 @@ def get_futures_trades(symbol: str) -> list:
         "timestamp": int(time.time() * 1000),
         "recvWindow": RECV_WINDOW_MS,
     }
-    query = sign_request(params, API_SECRET)
-    headers = {"X-MBX-APIKEY": API_KEY}
+    query = sign_request(params, FUTURES_API_SECRET)
+    headers = {"X-MBX-APIKEY": FUTURES_API_KEY}
     try:
         response = requests.get(url + "?" + query, headers=headers, timeout=10)
         if response.status_code == 200:
@@ -548,8 +553,14 @@ def generate_dashboard():
 
 
 if __name__ == "__main__":
-    if not API_KEY or not API_SECRET:
-        print("Error: BINANCE_API_KEY_TEST or BINANCE_API_SECRET_TEST not set in .env")
-    else:
-        path = generate_dashboard()
-        print(f"Open with: start {path}")
+    missing = []
+    if not SPOT_API_KEY or not SPOT_API_SECRET:
+        missing.append("BINANCE_API_KEY_TEST / BINANCE_API_SECRET_TEST (Spot)")
+    if not FUTURES_API_KEY or not FUTURES_API_SECRET:
+        missing.append("BINANCE_API_KEY_TEST_F / BINANCE_API_SECRET_TEST_F (Futures)")
+    if missing:
+        print("Warning: Missing API keys in .env:")
+        for m in missing:
+            print(f"  - {m}")
+    path = generate_dashboard()
+    print(f"Open with: start {path}")
