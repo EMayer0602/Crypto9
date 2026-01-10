@@ -18,8 +18,8 @@ CRYPTO9_POSITIONS_FILE = "crypto9_testnet_positions.json"
 CRYPTO9_CLOSED_TRADES_FILE = "crypto9_testnet_closed_trades.json"
 
 # Spot Testnet API keys
-SPOT_API_KEY = os.getenv("BINANCE_API_KEY_TEST")
-SPOT_API_SECRET = os.getenv("BINANCE_API_SECRET_TEST")
+SPOT_API_KEY = os.getenv("BINANCE_API_KEY_SPOT")
+SPOT_API_SECRET = os.getenv("BINANCE_API_SECRET_SPOT")
 
 # Futures Testnet API keys
 FUTURES_API_KEY = os.getenv("BINANCE_API_KEY_TEST_F")
@@ -617,7 +617,7 @@ def generate_dashboard():
 if __name__ == "__main__":
     missing = []
     if not SPOT_API_KEY or not SPOT_API_SECRET:
-        missing.append("BINANCE_API_KEY_TEST / BINANCE_API_SECRET_TEST (Spot)")
+        missing.append("BINANCE_API_KEY_SPOT / BINANCE_API_SECRET_SPOT (Spot)")
     if not FUTURES_API_KEY or not FUTURES_API_SECRET:
         missing.append("BINANCE_API_KEY_TEST_F / BINANCE_API_SECRET_TEST_F (Futures)")
     if missing:
