@@ -2692,10 +2692,16 @@ def force_entry_position(
         return False
     signal_ts, entry_price, within_window = find_last_signal_bar(df, direction_value, lookback_hours=lookback_hours)
     if not within_window:
-        print(
-            f"[Force] Kein Signal in den letzten {lookback_hours:g}h für {requested_symbol} {direction_value} gefunden."
-        )
-        return False
+        if use_testnet:
+            # Testnet has limited data - use current price for forced entry
+            print(f"[Force] Kein Signal gefunden - verwende aktuellen Preis (Testnet-Modus)")
+            signal_ts = df.index[-1]
+            entry_price = float(df.iloc[-1]["close"])
+        else:
+            print(
+                f"[Force] Kein Signal in den letzten {lookback_hours:g}h für {requested_symbol} {direction_value} gefunden."
+            )
+            return False
     if entry_price is None or pd.isna(entry_price):
         print(f"[Force] Schlusskurs für {requested_symbol} nicht verfügbar.")
         return False
