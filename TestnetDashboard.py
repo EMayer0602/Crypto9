@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Generate HTML dashboard for Binance Testnet trading (Spot + Futures)."""
+"""Generate HTML dashboard for Crypto9 Testnet trading (local tracking)."""
 
 import os
+import json
 import time
 import hmac
 import hashlib
@@ -11,6 +12,10 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# Local Crypto9 tracking files
+CRYPTO9_POSITIONS_FILE = "crypto9_testnet_positions.json"
+CRYPTO9_CLOSED_TRADES_FILE = "crypto9_testnet_closed_trades.json"
 
 # Spot Testnet API keys
 SPOT_API_KEY = os.getenv("BINANCE_API_KEY_TEST")
@@ -175,6 +180,36 @@ def get_futures_trades(symbol: str) -> list:
 
 
 # ============================================================================
+# LOCAL CRYPTO9 TRACKING
+# ============================================================================
+
+def load_crypto9_positions() -> list:
+    """Load Crypto9's open positions from local tracking file."""
+    try:
+        if os.path.exists(CRYPTO9_POSITIONS_FILE):
+            with open(CRYPTO9_POSITIONS_FILE, "r") as f:
+                positions = json.load(f)
+                print(f"  Loaded {len(positions)} Crypto9 positions from local file")
+                return positions
+    except Exception as e:
+        print(f"Error loading Crypto9 positions: {e}")
+    return []
+
+
+def load_crypto9_closed_trades() -> list:
+    """Load Crypto9's closed trades from local tracking file."""
+    try:
+        if os.path.exists(CRYPTO9_CLOSED_TRADES_FILE):
+            with open(CRYPTO9_CLOSED_TRADES_FILE, "r") as f:
+                trades = json.load(f)
+                print(f"  Loaded {len(trades)} Crypto9 closed trades from local file")
+                return trades
+    except Exception as e:
+        print(f"Error loading Crypto9 closed trades: {e}")
+    return []
+
+
+# ============================================================================
 # TRADE MATCHING
 # ============================================================================
 
@@ -303,63 +338,77 @@ def match_futures_trades(trades: list, symbol: str) -> list:
 # ============================================================================
 
 def generate_dashboard():
-    """Generate HTML dashboard with Spot + Futures data."""
-    print("Fetching testnet data...")
+    """Generate HTML dashboard with Crypto9 local tracking + API balances."""
+    print("Fetching Crypto9 testnet data...")
 
-    # ========== SPOT DATA ==========
-    print("  Fetching Spot balances...")
+    # ========== LOCAL CRYPTO9 POSITIONS ==========
+    print("  Loading Crypto9 local positions...")
+    crypto9_positions = load_crypto9_positions()
+
+    # ========== LOCAL CRYPTO9 CLOSED TRADES ==========
+    print("  Loading Crypto9 closed trades...")
+    crypto9_closed_trades = load_crypto9_closed_trades()
+
+    # ========== API: BALANCES ONLY ==========
+    print("  Fetching Spot balances (API)...")
     spot_balances = get_spot_balances()
-
     spot_base_balances = []
-    spot_positions = []
     for bal in spot_balances:
         asset = bal["asset"]
         free = float(bal["free"])
         locked = float(bal["locked"])
         total = free + locked
-        if total > 0:
-            if asset in BASE_CURRENCIES:
-                spot_base_balances.append({"asset": asset, "amount": total, "source": "SPOT"})
-            elif asset in RELEVANT_ASSETS:
-                spot_positions.append({"asset": asset, "amount": total, "source": "SPOT", "side": "LONG"})
+        if total > 0 and asset in BASE_CURRENCIES:
+            spot_base_balances.append({"asset": asset, "amount": total, "source": "SPOT"})
 
-    # Spot trades
-    print("  Fetching Spot orders...")
-    spot_matched_trades = []
-    for sym in SYMBOLS:
-        orders = get_spot_orders(sym)
-        if orders:
-            if TRADES_SINCE_DATE:
-                orders = [o for o in orders if o.get("time", 0) and
-                         datetime.fromtimestamp(o["time"]/1000, tz=timezone.utc) >= TRADES_SINCE_DATE]
-            matched = match_spot_trades(orders, sym)
-            spot_matched_trades.extend(matched)
-
-    # ========== FUTURES DATA ==========
-    print("  Fetching Futures balance...")
+    print("  Fetching Futures balance (API)...")
     futures_usdt = get_futures_balance()
 
-    print("  Fetching Futures positions...")
-    futures_positions = get_futures_positions()
+    # ========== PROCESS CRYPTO9 POSITIONS ==========
+    all_open_positions = []
+    for pos in crypto9_positions:
+        symbol = pos.get("symbol", "").replace("/", "")
+        direction = pos.get("direction", "long").upper()
+        source = "FUTURES" if direction == "SHORT" else "SPOT"
+        entry_price = pos.get("entry_price", 0) or pos.get("entry_price_live", 0)
+        stake = pos.get("stake", 0)
+        size_units = pos.get("size_units", 0)
 
-    print("  Fetching Futures trades...")
-    futures_matched_trades = []
-    for sym in SYMBOLS:
-        trades = get_futures_trades(sym)
-        if trades:
-            if TRADES_SINCE_DATE:
-                trades = [t for t in trades if t.get("time", 0) and
-                         datetime.fromtimestamp(t["time"]/1000, tz=timezone.utc) >= TRADES_SINCE_DATE]
-            matched = match_futures_trades(trades, sym)
-            futures_matched_trades.extend(matched)
+        all_open_positions.append({
+            "asset": symbol.replace("USDT", "").replace("EUR", ""),
+            "symbol": symbol,
+            "amount": size_units,
+            "source": source,
+            "side": direction,
+            "entry_price": entry_price,
+            "stake": stake,
+            "unrealized_pnl": pos.get("unrealized_pnl", 0),
+            "entry_time": pos.get("entry_time", ""),
+        })
 
-    # ========== COMBINE DATA ==========
-    all_matched_trades = spot_matched_trades + futures_matched_trades
-    all_matched_trades.sort(key=lambda x: x["exit_time"] or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+    # ========== PROCESS CRYPTO9 CLOSED TRADES ==========
+    long_trades = []
+    short_trades = []
+    for trade in crypto9_closed_trades:
+        direction = trade.get("direction", "long").upper()
+        source = "FUTURES" if direction == "SHORT" else "SPOT"
+        trade_data = {
+            "symbol": trade.get("symbol", "").replace("/", ""),
+            "direction": direction,
+            "source": source,
+            "entry_time": trade.get("entry_time"),
+            "exit_time": trade.get("exit_time") or trade.get("closed_at"),
+            "entry_value": trade.get("stake", 0),
+            "exit_value": trade.get("exit_value", 0),
+            "pnl": trade.get("pnl", 0),
+            "pnl_pct": trade.get("pnl_pct", 0),
+        }
+        if direction == "LONG":
+            long_trades.append(trade_data)
+        else:
+            short_trades.append(trade_data)
 
-    long_trades = [t for t in all_matched_trades if t["direction"] == "LONG"]
-    short_trades = [t for t in all_matched_trades if t["direction"] == "SHORT"]
-
+    all_matched_trades = long_trades + short_trades
     total_volume = sum(t["entry_value"] for t in all_matched_trades) if all_matched_trades else 1
     total_realized_pnl = sum(t["pnl"] for t in all_matched_trades)
     total_closed_trades = len(all_matched_trades)
@@ -368,20 +417,8 @@ def generate_dashboard():
     long_wins = sum(1 for t in long_trades if t["pnl"] > 0)
     short_wins = sum(1 for t in short_trades if t["pnl"] > 0)
 
-    # Combined open positions
-    all_open_positions = spot_positions.copy()
-    for fp in futures_positions:
-        all_open_positions.append({
-            "asset": fp["symbol"].replace("USDT", ""),
-            "amount": fp["amount"],
-            "source": "FUTURES",
-            "side": fp["side"],
-            "entry_price": fp["entry_price"],
-            "unrealized_pnl": fp["unrealized_pnl"]
-        })
-
-    # Calculate total unrealized PnL
-    total_unrealized_pnl = sum(fp["unrealized_pnl"] for fp in futures_positions)
+    # Calculate total unrealized PnL from Crypto9 positions
+    total_unrealized_pnl = sum(p.get("unrealized_pnl", 0) for p in all_open_positions)
 
     # Total USDT (Spot + Futures)
     spot_usdt = sum(b["amount"] for b in spot_base_balances if b["asset"] == "USDT")
@@ -393,7 +430,7 @@ def generate_dashboard():
 <head>
     <meta charset="utf-8">
     <meta http-equiv="refresh" content="60">
-    <title>Crypto9 Testnet Dashboard (Spot + Futures)</title>
+    <title>Crypto9 Testnet Dashboard</title>
     <style>
         body {{ font-family: Arial, sans-serif; margin: 20px; background: #1a1a2e; color: #eee; }}
         .container {{ max-width: 1400px; margin: 0 auto; }}

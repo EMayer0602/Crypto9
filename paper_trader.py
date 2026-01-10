@@ -111,6 +111,74 @@ DEFAULT_SPIKE_INTERVAL_MIN = 5
 DEFAULT_ATR_SPIKE_MULT = 2.5
 DEFAULT_POLL_SECONDS = 30
 TESTNET_DEFAULT_STAKE = 2000.0
+TESTNET_POSITIONS_FILE = "crypto9_testnet_positions.json"
+TESTNET_CLOSED_TRADES_FILE = "crypto9_testnet_closed_trades.json"
+
+
+def save_testnet_position(position: Dict, use_testnet: bool = False) -> None:
+    """Save a position to the Crypto9 testnet tracking file."""
+    if not use_testnet:
+        return
+    try:
+        positions = load_testnet_positions()
+        # Add timestamp if not present
+        if "tracked_at" not in position:
+            position["tracked_at"] = datetime.now().isoformat()
+        # Check if position already exists (by symbol + direction)
+        key = f"{position.get('symbol', '')}_{position.get('direction', '')}"
+        existing_idx = None
+        for i, p in enumerate(positions):
+            p_key = f"{p.get('symbol', '')}_{p.get('direction', '')}"
+            if p_key == key:
+                existing_idx = i
+                break
+        if existing_idx is not None:
+            positions[existing_idx] = position
+        else:
+            positions.append(position)
+        with open(TESTNET_POSITIONS_FILE, "w") as f:
+            json.dump(positions, f, indent=2, default=str)
+        print(f"[Testnet] Position gespeichert: {position.get('symbol')} {position.get('direction')}")
+    except Exception as e:
+        print(f"[Testnet] Fehler beim Speichern der Position: {e}")
+
+
+def load_testnet_positions() -> List[Dict]:
+    """Load Crypto9 testnet positions from local file."""
+    try:
+        if os.path.exists(TESTNET_POSITIONS_FILE):
+            with open(TESTNET_POSITIONS_FILE, "r") as f:
+                return json.load(f)
+    except Exception as e:
+        print(f"[Testnet] Fehler beim Laden der Positionen: {e}")
+    return []
+
+
+def remove_testnet_position(symbol: str, direction: str) -> None:
+    """Remove a closed position from testnet tracking."""
+    try:
+        positions = load_testnet_positions()
+        key = f"{symbol}_{direction}"
+        positions = [p for p in positions if f"{p.get('symbol', '')}_{p.get('direction', '')}" != key]
+        with open(TESTNET_POSITIONS_FILE, "w") as f:
+            json.dump(positions, f, indent=2, default=str)
+    except Exception as e:
+        print(f"[Testnet] Fehler beim Entfernen der Position: {e}")
+
+
+def save_testnet_closed_trade(trade: Dict) -> None:
+    """Save a closed trade to the Crypto9 testnet closed trades file."""
+    try:
+        trades = []
+        if os.path.exists(TESTNET_CLOSED_TRADES_FILE):
+            with open(TESTNET_CLOSED_TRADES_FILE, "r") as f:
+                trades = json.load(f)
+        trade["closed_at"] = datetime.now().isoformat()
+        trades.append(trade)
+        with open(TESTNET_CLOSED_TRADES_FILE, "w") as f:
+            json.dump(trades, f, indent=2, default=str)
+    except Exception as e:
+        print(f"[Testnet] Fehler beim Speichern des geschlossenen Trades: {e}")
 
 
 def set_max_open_positions(value: int) -> None:
@@ -2931,6 +2999,9 @@ def force_entry_position(
                 entry_record["entry_price"] = fill_price
                 entry_record["size_units"] = entry_record["stake"] / fill_price if fill_price else entry_record["size_units"]
                 save_state(state)
+            # Save to Crypto9 testnet tracking file
+            if use_testnet:
+                save_testnet_position(entry_record, use_testnet=True)
         except Exception as exc:
             print(f"[Force] Orderausführung fehlgeschlagen: {exc}")
             # Remove the paper position if live order failed
