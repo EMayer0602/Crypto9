@@ -213,6 +213,14 @@ def load_crypto9_closed_trades() -> list:
         if os.path.exists(CRYPTO9_CLOSED_TRADES_FILE):
             with open(CRYPTO9_CLOSED_TRADES_FILE, "r") as f:
                 trades = json.load(f)
+                # Handle double-encoded JSON (string instead of list)
+                if isinstance(trades, str):
+                    try:
+                        trades = json.loads(trades)
+                    except:
+                        trades = []
+                if not isinstance(trades, list):
+                    trades = []
                 print(f"  Loaded {len(trades)} Crypto9 closed trades from local file")
                 return trades
     except Exception as e:
