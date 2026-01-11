@@ -444,8 +444,27 @@ def generate_dashboard():
     print("  Loading simulation trades...")
     simulation_trades = load_simulation_trades(days_back=2)
 
-    # Combine all closed trades (crypto9 + simulation)
-    all_closed_trades = crypto9_closed_trades + simulation_trades
+    # Combine all closed trades (crypto9 + simulation) and remove duplicates
+    all_closed_trades_raw = crypto9_closed_trades + simulation_trades
+
+    # Deduplicate trades by unique key (symbol + entry_time + exit_time + indicator)
+    seen_trades = set()
+    all_closed_trades = []
+    for trade in all_closed_trades_raw:
+        # Create unique key from trade details
+        trade_key = (
+            trade.get("symbol", ""),
+            trade.get("entry_time", ""),
+            trade.get("exit_time", ""),
+            trade.get("indicator", ""),
+            trade.get("htf", ""),
+        )
+        if trade_key not in seen_trades:
+            seen_trades.add(trade_key)
+            all_closed_trades.append(trade)
+
+    if len(all_closed_trades_raw) != len(all_closed_trades):
+        print(f"  Removed {len(all_closed_trades_raw) - len(all_closed_trades)} duplicate trades")
 
     # ========== PROCESS POSITIONS (Long only) ==========
     all_open_positions = []
