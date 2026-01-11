@@ -19,6 +19,7 @@ CRYPTO9_POSITIONS_FILE = "crypto9_testnet_positions.json"
 CRYPTO9_CLOSED_TRADES_FILE = "crypto9_testnet_closed_trades.json"
 PAPER_TRADING_STATE_FILE = "paper_trading_state.json"
 PAPER_TRADING_SIMULATION_LOG = "paper_trading_simulation_log.json"
+PAPER_TRADING_OPEN_POSITIONS = "paper_trading_actual_trades.json"
 
 # Spot Testnet API keys
 SPOT_API_KEY = os.getenv("BINANCE_API_KEY_SPOT")
@@ -232,6 +233,19 @@ def load_paper_trading_state() -> dict:
     return {"total_capital": 0, "positions": [], "symbol_trade_counts": {}}
 
 
+def load_simulation_open_positions() -> list:
+    """Load open positions from simulation (paper_trading_actual_trades.json)."""
+    try:
+        if os.path.exists(PAPER_TRADING_OPEN_POSITIONS):
+            with open(PAPER_TRADING_OPEN_POSITIONS, "r") as f:
+                positions = json.load(f)
+                print(f"  Loaded {len(positions)} simulation open positions")
+                return positions
+    except Exception as e:
+        print(f"Error loading simulation open positions: {e}")
+    return []
+
+
 def load_simulation_trades(days_back: int = 2) -> list:
     """Load trades from simulation log, filtered to recent days."""
     try:
@@ -398,12 +412,29 @@ def generate_dashboard():
     paper_positions = paper_state.get("positions", [])
     print(f"  Found {len(paper_positions)} positions in paper trading state")
 
+    # ========== SIMULATION OPEN POSITIONS ==========
+    print("  Loading simulation open positions...")
+    simulation_positions = load_simulation_open_positions()
+
     # ========== LOCAL CRYPTO9 POSITIONS (fallback) ==========
     print("  Loading Crypto9 local positions...")
     crypto9_positions = load_crypto9_positions()
 
-    # Use paper trading positions if available, otherwise fallback to crypto9 file
-    source_positions = paper_positions if paper_positions else crypto9_positions
+    # Combine all position sources (prefer paper state, add simulation, fallback to crypto9)
+    # Use a dict to deduplicate by key
+    positions_by_key = {}
+    for pos in crypto9_positions:
+        key = f"{pos.get('symbol', '')}|{pos.get('direction', '')}"
+        positions_by_key[key] = pos
+    for pos in simulation_positions:
+        key = f"{pos.get('symbol', '')}|{pos.get('direction', '')}"
+        if key not in positions_by_key:
+            positions_by_key[key] = pos
+    for pos in paper_positions:
+        key = f"{pos.get('symbol', '')}|{pos.get('direction', '')}"
+        positions_by_key[key] = pos  # Paper positions override
+
+    source_positions = list(positions_by_key.values())
 
     # ========== LOCAL CRYPTO9 CLOSED TRADES ==========
     print("  Loading Crypto9 closed trades...")

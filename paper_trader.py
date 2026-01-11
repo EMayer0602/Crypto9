@@ -918,6 +918,50 @@ def save_state(state: Dict) -> None:
         json.dump(state, fh, indent=2)
 
 
+def sync_simulation_positions(state: Dict, use_testnet: bool = False) -> int:
+    """Sync simulation open positions to paper trading state.
+
+    If simulation shows a position that isn't in paper trading state, add it.
+    This ensures the monitor catches up with positions from the last backtest.
+    Returns the number of positions synced.
+    """
+    sim_file = SIMULATION_OPEN_POSITIONS_JSON
+    if not os.path.exists(sim_file):
+        return 0
+
+    try:
+        with open(sim_file, "r", encoding="utf-8") as fh:
+            sim_positions = json.load(fh)
+    except Exception as e:
+        print(f"[Sync] Could not load simulation positions: {e}")
+        return 0
+
+    if not sim_positions:
+        return 0
+
+    # Get existing position keys
+    existing_keys = set()
+    for pos in state.get("positions", []):
+        key = f"{pos.get('symbol', '')}|{pos.get('direction', '')}|{pos.get('indicator', '')}|{pos.get('htf', '')}"
+        existing_keys.add(key)
+
+    synced = 0
+    for sim_pos in sim_positions:
+        sim_key = f"{sim_pos.get('symbol', '')}|{sim_pos.get('direction', '')}|{sim_pos.get('indicator', '')}|{sim_pos.get('htf', '')}"
+        if sim_key not in existing_keys:
+            # Add simulation position to state
+            state.setdefault("positions", []).append(sim_pos)
+            existing_keys.add(sim_key)
+            synced += 1
+            print(f"[Sync] Added position from simulation: {sim_pos.get('symbol')} {sim_pos.get('direction')} {sim_pos.get('indicator')}/{sim_pos.get('htf')}")
+
+    if synced > 0:
+        save_state(state)
+        print(f"[Sync] Synced {synced} positions from simulation to paper trading state")
+
+    return synced
+
+
 def clone_state(use_saved_state: bool = False) -> Dict:
     base = load_state() if use_saved_state else default_state()
     return json.loads(json.dumps(base))
@@ -3261,6 +3305,8 @@ def main(
         print("[Skip] best_params_overall.csv enthält keine Daten.")
         return
     state = load_state()
+    # Sync positions from simulation (catch up with backtest)
+    sync_simulation_positions(state, use_testnet=use_testnet)
     prune_state_for_indicators(state, allowed_indicators)
     # Pass stake through: None = dynamic sizing, value = fixed stake
     stake_value = fixed_stake
