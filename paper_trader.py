@@ -2863,6 +2863,34 @@ def run_signal_cycle(
     trade_notifier: Optional[TradeNotifier],
 ) -> None:
     print(f"[{_now_str()}] Running scheduled trading cycle (symbols={symbols or 'ALL'})")
+
+    # First, run a mini-simulation to get current simulated positions
+    # This updates paper_trading_actual_trades.json with current state
+    now = pd.Timestamp.now(tz=st.BERLIN_TZ)
+    sim_start = now - pd.Timedelta(days=7)  # 7-day lookback for simulation
+    print(f"[{_now_str()}] Running simulation from {sim_start.strftime('%Y-%m-%d')} to update positions...")
+    try:
+        trades, sim_state = run_simulation(
+            sim_start,
+            now,
+            use_saved_state=False,
+            emit_entry_log=False,
+            allowed_symbols=list(symbols) if symbols else None,
+            allowed_indicators=list(indicators) if indicators else None,
+            fixed_stake=stake,
+            use_testnet=use_testnet,
+            refresh_params=False,
+            reset_state=False,
+            clear_outputs=False,
+        )
+        # Write simulated open positions to file
+        sim_positions = sim_state.get("positions", [])
+        write_open_positions_report(sim_positions, SIMULATION_OPEN_POSITIONS_FILE, SIMULATION_OPEN_POSITIONS_JSON)
+        print(f"[{_now_str()}] Simulation complete: {len(trades)} trades, {len(sim_positions)} open positions")
+    except Exception as e:
+        print(f"[{_now_str()}] Simulation failed: {e}")
+
+    # Now run the regular signal check (paper trading)
     main(
         allowed_symbols=list(symbols) if symbols else None,
         allowed_indicators=list(indicators) if indicators else None,
