@@ -194,6 +194,28 @@ def get_futures_trades(symbol: str) -> list:
 # LOCAL CRYPTO9 TRACKING
 # ============================================================================
 
+def fetch_current_prices(symbols: list) -> dict:
+    """Fetch current prices for given symbols from Binance public API."""
+    prices = {}
+    try:
+        # Use production API for prices (testnet prices are unrealistic)
+        url = "https://api.binance.com/api/v3/ticker/price"
+        response = requests.get(url, timeout=10)
+        if response.status_code == 200:
+            all_prices = {item["symbol"]: float(item["price"]) for item in response.json()}
+            for sym in symbols:
+                # Normalize symbol (remove /)
+                clean_sym = sym.replace("/", "")
+                if clean_sym in all_prices:
+                    prices[clean_sym] = all_prices[clean_sym]
+                # Try USDT variant if USDC
+                elif clean_sym.replace("USDC", "USDT") in all_prices:
+                    prices[clean_sym] = all_prices[clean_sym.replace("USDC", "USDT")]
+    except Exception as e:
+        print(f"  Warning: Could not fetch prices: {e}")
+    return prices
+
+
 def load_crypto9_positions() -> list:
     """Load Crypto9's open positions from local tracking file."""
     try:
@@ -455,17 +477,30 @@ def generate_dashboard():
     # Combine all closed trades (crypto9 + simulation) and remove duplicates
     all_closed_trades_raw = crypto9_closed_trades + simulation_trades
 
+    def normalize_time(t):
+        """Normalize timestamp to comparable format (first 16 chars: YYYY-MM-DDTHH:MM)."""
+        if not t:
+            return ""
+        t_str = str(t).replace(" ", "T")[:16]  # "2026-01-11 13:00" -> "2026-01-11T13:00"
+        return t_str
+
+    def normalize_symbol(s):
+        """Normalize symbol to comparable format."""
+        if not s:
+            return ""
+        return str(s).replace("/", "").replace("USDC", "USDT").upper()
+
     # Deduplicate trades by unique key (symbol + entry_time + exit_time + indicator)
     seen_trades = set()
     all_closed_trades = []
     for trade in all_closed_trades_raw:
-        # Create unique key from trade details
+        # Create unique key from trade details (normalized)
         trade_key = (
-            trade.get("symbol", ""),
-            trade.get("entry_time", ""),
-            trade.get("exit_time", ""),
-            trade.get("indicator", ""),
-            trade.get("htf", ""),
+            normalize_symbol(trade.get("symbol", "")),
+            normalize_time(trade.get("entry_time", "")),
+            normalize_time(trade.get("exit_time", "")),
+            str(trade.get("indicator", "")).lower(),
+            str(trade.get("htf", "")).lower(),
         )
         if trade_key not in seen_trades:
             seen_trades.add(trade_key)
@@ -475,6 +510,17 @@ def generate_dashboard():
         print(f"  Removed {len(all_closed_trades_raw) - len(all_closed_trades)} duplicate trades")
 
     # ========== PROCESS POSITIONS (Long only) ==========
+    # First collect all symbols to fetch prices
+    position_symbols = []
+    for pos in source_positions:
+        symbol = pos.get("symbol", "").replace("/", "")
+        if symbol:
+            position_symbols.append(symbol)
+
+    # Fetch current prices for all position symbols
+    print("  Fetching current prices...")
+    current_prices = fetch_current_prices(position_symbols)
+
     all_open_positions = []
     for pos in source_positions:
         symbol = pos.get("symbol", "").replace("/", "")
@@ -486,6 +532,13 @@ def generate_dashboard():
         stake = pos.get("stake", 0)
         size_units = pos.get("size_units", 0)
 
+        # Calculate unrealized PnL using current price
+        current_price = current_prices.get(symbol, 0)
+        if current_price and entry_price and size_units:
+            unrealized_pnl = (current_price - entry_price) * size_units
+        else:
+            unrealized_pnl = pos.get("unrealized_pnl", 0)
+
         all_open_positions.append({
             "asset": symbol.replace("USDT", "").replace("USDC", "").replace("EUR", ""),
             "symbol": symbol,
@@ -493,8 +546,9 @@ def generate_dashboard():
             "source": "SPOT",
             "side": "LONG",
             "entry_price": entry_price,
+            "current_price": current_price,
             "stake": stake,
-            "unrealized_pnl": pos.get("unrealized_pnl", 0),
+            "unrealized_pnl": unrealized_pnl,
             "entry_time": pos.get("entry_time", ""),
         })
 
