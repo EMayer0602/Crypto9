@@ -59,6 +59,10 @@ def sign_request(params: dict, secret: str) -> str:
 
 def get_spot_balances() -> list:
     """Get all spot account balances."""
+    # Check if Spot API credentials are available
+    if not SPOT_API_KEY or not SPOT_API_SECRET:
+        print("  Spot API keys not configured, skipping spot balances")
+        return []
     endpoint = "/api/v3/account"
     url = SPOT_BASE_URL + endpoint
     params = {
@@ -78,6 +82,9 @@ def get_spot_balances() -> list:
 
 def get_spot_orders(symbol: str) -> list:
     """Get all spot orders for a symbol."""
+    # Check if Spot API credentials are available
+    if not SPOT_API_KEY or not SPOT_API_SECRET:
+        return []
     endpoint = "/api/v3/allOrders"
     url = SPOT_BASE_URL + endpoint
     params = {

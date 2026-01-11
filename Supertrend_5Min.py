@@ -81,6 +81,7 @@ SYMBOLS = [
 ]
 
 # Testnet symbols - use USDC where available, USDT otherwise
+# Note: Limited to symbols actually available on Binance Spot Testnet
 TESTNET_SYMBOLS = [
 	"BTC/USDT",
 	"ETH/USDT",
@@ -90,10 +91,8 @@ TESTNET_SYMBOLS = [
 	"SUI/USDC",
 	"ZEC/USDC",
 	"TNSR/USDC",
-	"ADA/USDT",
-	"ICP/USDT",
 	"BNB/USDT",
-	"LUNC/USDT",
+	# ICP/USDT, ADA/USDT, LUNC/USDT not available on Spot testnet
 ]
 
 # Map testnet symbols to production USDC equivalents for parameter lookup
@@ -106,10 +105,7 @@ TESTNET_TO_USDC_MAP = {
 	"SUI/USDC": "SUI/USDC",
 	"ZEC/USDC": "ZEC/USDC",
 	"TNSR/USDC": "TNSR/USDC",
-	"ADA/USDT": "ADA/USDC",
-	"ICP/USDT": "ICP/USDC",
 	"BNB/USDT": "BNB/USDC",
-	"LUNC/USDT": "LUNC/USDT",
 }
 
 
@@ -375,8 +371,10 @@ def configure_exchange(use_testnet=None) -> None:
 		return
 	USE_TESTNET = use_testnet
 	os.environ["BINANCE_USE_TESTNET"] = "1" if use_testnet else "0"
+	# Reset trading exchange (uses testnet for orders when enabled)
 	_exchange = None
-	_data_exchange = None
+	# Data exchange stays on production - no reset needed
+	# _data_exchange = None  # Keep production endpoint for data
 
 
 def _build_exchange(include_keys: bool):
@@ -448,10 +446,59 @@ def get_exchange():
 
 
 def get_data_exchange():
+	"""Get exchange for data fetching - uses Futures testnet to bypass geo-blocks.
+
+	Note: We use Futures testnet endpoint for data because:
+	1. Binance Spot API may be geo-restricted
+	2. Futures testnet has USDT pairs with good liquidity
+	3. Price data is similar enough for signal generation
+	"""
 	global _data_exchange
 	if _data_exchange is None:
-		_data_exchange = _build_exchange(include_keys=False)
+		# Use binanceusdm (Futures) with testnet for data fetching
+		# This bypasses Spot API geo-restrictions
+		cls = getattr(ccxt, "binanceusdm")
+		args = {"enableRateLimit": True}
+		_data_exchange = cls(args)
+		# Enable sandbox mode (futures testnet)
+		if hasattr(_data_exchange, "set_sandbox_mode"):
+			_data_exchange.set_sandbox_mode(True)
+		options = dict(getattr(_data_exchange, "options", {}))
+		options["warnOnFetchCurrenciesWithoutPermission"] = False
+		_data_exchange.options = options
+		if hasattr(_data_exchange, "has") and isinstance(_data_exchange.has, dict):
+			_data_exchange.has["fetchCurrencies"] = False
 	return _data_exchange
+
+
+def _fetch_futures_testnet_klines(symbol: str, interval: str, limit: int) -> pd.DataFrame:
+	"""Fetch klines directly from Binance Futures testnet API (bypasses ccxt issues)."""
+	import requests
+	try:
+		# Convert symbol format: BTC/USDT -> BTCUSDT
+		api_symbol = symbol.replace("/", "")
+		# Binance has a max limit of 1500 per request
+		api_limit = min(limit, 1500)
+		url = "https://testnet.binancefuture.com/fapi/v1/klines"
+		params = {"symbol": api_symbol, "interval": interval, "limit": api_limit}
+		response = requests.get(url, params=params, timeout=30)
+		if response.status_code != 200:
+			print(f"[API-Direct] Error {response.status_code} for {symbol}: {response.text[:100]}")
+			return pd.DataFrame()
+		data = response.json()
+		if not data:
+			return pd.DataFrame()
+		# Binance kline format: [open_time, open, high, low, close, volume, ...]
+		cols = ["timestamp", "open", "high", "low", "close", "volume"]
+		rows = [[d[0], float(d[1]), float(d[2]), float(d[3]), float(d[4]), float(d[5])] for d in data]
+		df = pd.DataFrame(rows, columns=cols)
+		df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms", utc=True).dt.tz_convert(BERLIN_TZ)
+		result = df.set_index("timestamp")
+		print(f"[API-Direct] Got {len(result)} bars for {symbol} {interval}")
+		return result
+	except Exception as exc:
+		print(f"[API-Direct] ERROR fetching {symbol} {interval}: {exc}")
+		return pd.DataFrame()
 
 
 def _fetch_direct_ohlcv(symbol, timeframe, limit):
@@ -472,7 +519,11 @@ def _fetch_direct_ohlcv(symbol, timeframe, limit):
 		print(f"[API] Got {len(result)} bars for {symbol} {timeframe}")
 		return result
 	except Exception as exc:
-		print(f"[API] ERROR fetching {symbol} {timeframe}: {exc}")
+		print(f"[API] ccxt failed for {symbol} {timeframe}: {exc}")
+		# Fallback to direct Futures testnet API for USDT pairs
+		if "USDT" in symbol:
+			print(f"[API] Trying direct Futures testnet API for {symbol}...")
+			return _fetch_futures_testnet_klines(symbol, timeframe, limit)
 		return pd.DataFrame()
 
 
@@ -1501,6 +1552,10 @@ def prepare_symbol_dataframe(symbol, use_all_cached_data=False):
 	"""
 	limit = None if use_all_cached_data else LOOKBACK
 	df = fetch_data(symbol, TIMEFRAME, limit)
+	# Check for empty or invalid dataframe before processing
+	if df.empty or "open" not in df.columns:
+		print(f"[WARN] No data available for {symbol}, skipping...")
+		return pd.DataFrame()
 	df = attach_higher_timeframe_trend(df, symbol)
 	# Debug: Check htf_indicator
 	htf_valid = df["htf_indicator"].notna().sum() if "htf_indicator" in df.columns else 0

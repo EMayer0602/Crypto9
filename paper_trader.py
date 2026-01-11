@@ -1226,6 +1226,10 @@ def build_indicator_dataframe(symbol: str, indicator_key: str, htf_value: str, p
     st.apply_higher_timeframe(htf_value)
     df_raw = st.prepare_symbol_dataframe(symbol, use_all_cached_data=use_all_data)
 
+    # Return empty DataFrame if no data available for this symbol
+    if df_raw.empty:
+        return pd.DataFrame()
+
     # Option 1: Use futures data for signal generation (futures lead analysis)
     if USE_FUTURES_SIGNALS:
         # Fetch futures data for the same time period
