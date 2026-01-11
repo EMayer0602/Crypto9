@@ -29,7 +29,13 @@ report_testnet/
 # Generated data files
 ohlcv_cache/
 report_html/
-paper_trading_*.csv
-paper_trading_*.json
-paper_trading_*.html
+paper_trading_state.json
+paper_trading_log.csv
+paper_trading_simulation_*.csv
+paper_trading_simulation_*.json
+paper_trading_actual_*.csv
+paper_trading_actual_*.json
 *.log
+
+# Testnet tracking files
+crypto9_testnet_*.json
