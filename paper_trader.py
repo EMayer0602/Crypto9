@@ -2869,6 +2869,14 @@ def run_signal_cycle(
     now = pd.Timestamp.now(tz=st.BERLIN_TZ)
     sim_start = now - pd.Timedelta(days=7)  # 7-day lookback for simulation
     print(f"[{_now_str()}] Running simulation from {sim_start.strftime('%Y-%m-%d')} to update positions...")
+
+    # Temporarily enable synthetic bars for the simulation
+    # This ensures we get current price data even if the current hour isn't complete
+    original_skip_synthetic = st.SKIP_SYNTHETIC_BARS
+    st.SKIP_SYNTHETIC_BARS = False
+    # Clear data cache to ensure fresh synthetic bars are fetched
+    st.DATA_CACHE.clear()
+
     try:
         trades, sim_state = run_simulation(
             sim_start,
@@ -2889,6 +2897,9 @@ def run_signal_cycle(
         print(f"[{_now_str()}] Simulation complete: {len(trades)} trades, {len(sim_positions)} open positions")
     except Exception as e:
         print(f"[{_now_str()}] Simulation failed: {e}")
+    finally:
+        # Restore original setting
+        st.SKIP_SYNTHETIC_BARS = original_skip_synthetic
 
     # Now run the regular signal check (paper trading)
     main(
