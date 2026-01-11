@@ -7,6 +7,7 @@ import time
 import hmac
 import hashlib
 import requests
+import pandas as pd
 from datetime import datetime, timezone
 from pathlib import Path
 from dotenv import load_dotenv
@@ -17,6 +18,7 @@ load_dotenv()
 CRYPTO9_POSITIONS_FILE = "crypto9_testnet_positions.json"
 CRYPTO9_CLOSED_TRADES_FILE = "crypto9_testnet_closed_trades.json"
 PAPER_TRADING_STATE_FILE = "paper_trading_state.json"
+PAPER_TRADING_SIMULATION_LOG = "paper_trading_simulation_log.json"
 
 # Spot Testnet API keys
 SPOT_API_KEY = os.getenv("BINANCE_API_KEY_SPOT")
@@ -230,6 +232,33 @@ def load_paper_trading_state() -> dict:
     return {"total_capital": 0, "positions": [], "symbol_trade_counts": {}}
 
 
+def load_simulation_trades(days_back: int = 2) -> list:
+    """Load trades from simulation log, filtered to recent days."""
+    try:
+        if os.path.exists(PAPER_TRADING_SIMULATION_LOG):
+            with open(PAPER_TRADING_SIMULATION_LOG, "r") as f:
+                all_trades = json.load(f)
+                # Filter for recent trades
+                cutoff = datetime.now(timezone.utc) - pd.Timedelta(days=days_back)
+                recent_trades = []
+                for trade in all_trades:
+                    exit_time_str = trade.get("exit_time") or trade.get("ExitZeit")
+                    if exit_time_str:
+                        try:
+                            exit_time = pd.to_datetime(exit_time_str)
+                            if exit_time.tzinfo is None:
+                                exit_time = exit_time.tz_localize('Europe/Berlin')
+                            if exit_time >= cutoff:
+                                recent_trades.append(trade)
+                        except:
+                            pass
+                print(f"  Loaded {len(recent_trades)} simulation trades from last {days_back} days (of {len(all_trades)} total)")
+                return recent_trades
+    except Exception as e:
+        print(f"Error loading simulation trades: {e}")
+    return []
+
+
 # ============================================================================
 # TRADE MATCHING
 # ============================================================================
@@ -380,6 +409,13 @@ def generate_dashboard():
     print("  Loading Crypto9 closed trades...")
     crypto9_closed_trades = load_crypto9_closed_trades()
 
+    # ========== SIMULATION TRADES (last 2 days) ==========
+    print("  Loading simulation trades...")
+    simulation_trades = load_simulation_trades(days_back=2)
+
+    # Combine all closed trades (crypto9 + simulation)
+    all_closed_trades = crypto9_closed_trades + simulation_trades
+
     # ========== PROCESS POSITIONS (Long only) ==========
     all_open_positions = []
     for pos in source_positions:
@@ -404,9 +440,9 @@ def generate_dashboard():
             "entry_time": pos.get("entry_time", ""),
         })
 
-    # ========== PROCESS CRYPTO9 CLOSED TRADES (Long only) ==========
+    # ========== PROCESS ALL CLOSED TRADES (Long only) ==========
     long_trades = []
-    for trade in crypto9_closed_trades:
+    for trade in all_closed_trades:
         direction = trade.get("direction", "long").upper()
         # Long-only mode: skip short trades
         if direction == "SHORT":
@@ -415,18 +451,25 @@ def generate_dashboard():
         pnl = trade.get("pnl", 0)
         # Calculate exit_value: stake + pnl
         exit_value = trade.get("exit_value") or (stake + pnl)
+        # Calculate pnl_pct if not provided
+        pnl_pct = trade.get("pnl_pct") or ((pnl / stake * 100) if stake else 0)
         trade_data = {
             "symbol": trade.get("symbol", "").replace("/", ""),
             "direction": "LONG",
             "source": "SPOT",
-            "entry_time": trade.get("entry_time"),
-            "exit_time": trade.get("exit_time") or trade.get("closed_at"),
+            "entry_time": trade.get("entry_time") or trade.get("Zeit"),
+            "exit_time": trade.get("exit_time") or trade.get("ExitZeit") or trade.get("closed_at"),
             "entry_value": stake,
             "exit_value": exit_value,
             "pnl": pnl,
-            "pnl_pct": trade.get("pnl_pct", 0),
+            "pnl_pct": pnl_pct,
+            "indicator": trade.get("indicator", ""),
+            "htf": trade.get("htf", ""),
         }
         long_trades.append(trade_data)
+
+    # Sort by exit time (most recent first)
+    long_trades.sort(key=lambda t: t.get("exit_time") or "", reverse=True)
 
     total_volume = sum(t["entry_value"] for t in long_trades) if long_trades else 1
     total_realized_pnl = sum(t["pnl"] for t in long_trades)
@@ -553,24 +596,23 @@ def generate_dashboard():
 
     def trade_table_rows(trades):
         if not trades:
-            return "<tr><td colspan='9'>No trades</td></tr>\n"
+            return "<tr><td colspan='8'>No trades</td></tr>\n"
         rows = ""
         for t in trades:
             pnl_class = "positive" if t["pnl"] >= 0 else "negative"
             entry_str = format_time(t.get("entry_time"))
             exit_str = format_time(t.get("exit_time")) if t.get("exit_time") else "Open"
-            source_class = "badge-spot" if t["source"] == "SPOT" else "badge-futures"
-            share = (t["entry_value"] / total_volume * 100) if total_volume > 0 else 0
+            indicator = t.get("indicator", "-")
+            htf = t.get("htf", "-")
             rows += f"""        <tr>
-            <td><span class='badge {source_class}'>{t['source']}</span></td>
             <td>{t['symbol']}</td>
+            <td>{indicator}/{htf}</td>
             <td>{entry_str}</td>
             <td>{exit_str}</td>
             <td>${t['entry_value']:,.2f}</td>
             <td>${t['exit_value']:,.2f}</td>
             <td class="{pnl_class}">${t['pnl']:,.2f}</td>
             <td class="{pnl_class}">{t['pnl_pct']:+.2f}%</td>
-            <td>{share:.1f}%</td>
         </tr>\n"""
         return rows
 
@@ -579,7 +621,7 @@ def generate_dashboard():
     <div class="section">
     <h2>Closed Trades ({len(long_trades)} trades, PnL: <span class="{'positive' if long_pnl >= 0 else 'negative'}">${long_pnl:,.2f}</span>)</h2>
     <table>
-        <tr class="long-header"><th>Source</th><th>Symbol</th><th>Entry</th><th>Exit</th><th>Entry $</th><th>Exit $</th><th>PnL</th><th>PnL %</th><th>Share</th></tr>
+        <tr class="long-header"><th>Symbol</th><th>Strategy</th><th>Entry</th><th>Exit</th><th>Stake</th><th>Exit $</th><th>PnL</th><th>PnL %</th></tr>
 """
     html += trade_table_rows(long_trades)
 
