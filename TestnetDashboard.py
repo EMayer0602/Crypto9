@@ -16,6 +16,7 @@ load_dotenv()
 # Local Crypto9 tracking files
 CRYPTO9_POSITIONS_FILE = "crypto9_testnet_positions.json"
 CRYPTO9_CLOSED_TRADES_FILE = "crypto9_testnet_closed_trades.json"
+PAPER_TRADING_STATE_FILE = "paper_trading_state.json"
 
 # Spot Testnet API keys
 SPOT_API_KEY = os.getenv("BINANCE_API_KEY_SPOT")
@@ -216,6 +217,19 @@ def load_crypto9_closed_trades() -> list:
     return []
 
 
+def load_paper_trading_state() -> dict:
+    """Load paper trading state (capital, positions) from local file."""
+    try:
+        if os.path.exists(PAPER_TRADING_STATE_FILE):
+            with open(PAPER_TRADING_STATE_FILE, "r") as f:
+                state = json.load(f)
+                print(f"  Loaded paper trading state: {state.get('total_capital', 0):.2f} USDT capital")
+                return state
+    except Exception as e:
+        print(f"Error loading paper trading state: {e}")
+    return {"total_capital": 0, "positions": [], "symbol_trade_counts": {}}
+
+
 # ============================================================================
 # TRADE MATCHING
 # ============================================================================
@@ -345,8 +359,13 @@ def match_futures_trades(trades: list, symbol: str) -> list:
 # ============================================================================
 
 def generate_dashboard():
-    """Generate HTML dashboard with Crypto9 local tracking + API balances."""
-    print("Fetching Crypto9 testnet data...")
+    """Generate HTML dashboard with Crypto9 local tracking - Long-only SPOT mode."""
+    print("Fetching Crypto9 testnet data (Long-only SPOT mode)...")
+
+    # ========== PAPER TRADING STATE (CAPITAL) ==========
+    print("  Loading paper trading state...")
+    paper_state = load_paper_trading_state()
+    paper_capital = paper_state.get("total_capital", 0)
 
     # ========== LOCAL CRYPTO9 POSITIONS ==========
     print("  Loading Crypto9 local positions...")
@@ -356,57 +375,45 @@ def generate_dashboard():
     print("  Loading Crypto9 closed trades...")
     crypto9_closed_trades = load_crypto9_closed_trades()
 
-    # ========== API: BALANCES ONLY ==========
-    print("  Fetching Spot balances (API)...")
-    spot_balances = get_spot_balances()
-    spot_base_balances = []
-    for bal in spot_balances:
-        asset = bal["asset"]
-        free = float(bal["free"])
-        locked = float(bal["locked"])
-        total = free + locked
-        if total > 0 and asset in BASE_CURRENCIES:
-            spot_base_balances.append({"asset": asset, "amount": total, "source": "SPOT"})
-
-    print("  Fetching Futures balance (API)...")
-    futures_usdt = get_futures_balance()
-
-    # ========== PROCESS CRYPTO9 POSITIONS ==========
+    # ========== PROCESS CRYPTO9 POSITIONS (Long only) ==========
     all_open_positions = []
     for pos in crypto9_positions:
         symbol = pos.get("symbol", "").replace("/", "")
         direction = pos.get("direction", "long").upper()
-        source = "FUTURES" if direction == "SHORT" else "SPOT"
+        # Long-only mode: skip any short positions
+        if direction == "SHORT":
+            continue
         entry_price = pos.get("entry_price", 0) or pos.get("entry_price_live", 0)
         stake = pos.get("stake", 0)
         size_units = pos.get("size_units", 0)
 
         all_open_positions.append({
-            "asset": symbol.replace("USDT", "").replace("EUR", ""),
+            "asset": symbol.replace("USDT", "").replace("USDC", "").replace("EUR", ""),
             "symbol": symbol,
             "amount": size_units,
-            "source": source,
-            "side": direction,
+            "source": "SPOT",
+            "side": "LONG",
             "entry_price": entry_price,
             "stake": stake,
             "unrealized_pnl": pos.get("unrealized_pnl", 0),
             "entry_time": pos.get("entry_time", ""),
         })
 
-    # ========== PROCESS CRYPTO9 CLOSED TRADES ==========
+    # ========== PROCESS CRYPTO9 CLOSED TRADES (Long only) ==========
     long_trades = []
-    short_trades = []
     for trade in crypto9_closed_trades:
         direction = trade.get("direction", "long").upper()
-        source = "FUTURES" if direction == "SHORT" else "SPOT"
+        # Long-only mode: skip short trades
+        if direction == "SHORT":
+            continue
         stake = trade.get("stake", 0)
         pnl = trade.get("pnl", 0)
         # Calculate exit_value: stake + pnl
         exit_value = trade.get("exit_value") or (stake + pnl)
         trade_data = {
             "symbol": trade.get("symbol", "").replace("/", ""),
-            "direction": direction,
-            "source": source,
+            "direction": "LONG",
+            "source": "SPOT",
             "entry_time": trade.get("entry_time"),
             "exit_time": trade.get("exit_time") or trade.get("closed_at"),
             "entry_value": stake,
@@ -414,26 +421,19 @@ def generate_dashboard():
             "pnl": pnl,
             "pnl_pct": trade.get("pnl_pct", 0),
         }
-        if direction == "LONG":
-            long_trades.append(trade_data)
-        else:
-            short_trades.append(trade_data)
+        long_trades.append(trade_data)
 
-    all_matched_trades = long_trades + short_trades
-    total_volume = sum(t["entry_value"] for t in all_matched_trades) if all_matched_trades else 1
-    total_realized_pnl = sum(t["pnl"] for t in all_matched_trades)
-    total_closed_trades = len(all_matched_trades)
-    long_pnl = sum(t["pnl"] for t in long_trades)
-    short_pnl = sum(t["pnl"] for t in short_trades)
+    total_volume = sum(t["entry_value"] for t in long_trades) if long_trades else 1
+    total_realized_pnl = sum(t["pnl"] for t in long_trades)
+    total_closed_trades = len(long_trades)
+    long_pnl = total_realized_pnl
     long_wins = sum(1 for t in long_trades if t["pnl"] > 0)
-    short_wins = sum(1 for t in short_trades if t["pnl"] > 0)
 
-    # Calculate total unrealized PnL from Crypto9 positions
+    # Calculate total unrealized PnL from open positions
     total_unrealized_pnl = sum(p.get("unrealized_pnl", 0) for p in all_open_positions)
 
-    # Total USDT (Spot + Futures)
-    spot_usdt = sum(b["amount"] for b in spot_base_balances if b["asset"] == "USDT")
-    total_usdt = spot_usdt + futures_usdt
+    # Capital from paper trading state
+    total_usdt = paper_capital
 
     # ========== GENERATE HTML ==========
     html = f"""<!DOCTYPE html>
@@ -473,20 +473,12 @@ def generate_dashboard():
 <body>
 <div class="container">
     <h1>Crypto9 Testnet Dashboard</h1>
-    <p style="color:#666;">Spot (Longs) + Futures (Shorts) | Auto-refresh: 60s</p>
+    <p style="color:#666;">SPOT Only - Long-only Mode | Auto-refresh: 60s</p>
 
     <div class="summary-boxes">
         <div class="summary-box">
-            <h3>Total USDT</h3>
+            <h3>Paper Trading Capital</h3>
             <div class="value">${total_usdt:,.2f}</div>
-        </div>
-        <div class="summary-box">
-            <h3>Spot USDT</h3>
-            <div class="value">${spot_usdt:,.2f}</div>
-        </div>
-        <div class="summary-box">
-            <h3>Futures USDT</h3>
-            <div class="value">${futures_usdt:,.2f}</div>
         </div>
         <div class="summary-box">
             <h3>Open Positions</h3>
@@ -505,36 +497,14 @@ def generate_dashboard():
             <div class="value {'positive' if total_realized_pnl >= 0 else 'negative'}">${total_realized_pnl:,.2f}</div>
         </div>
         <div class="summary-box">
-            <h3>Long ({len(long_trades)})</h3>
-            <div class="value {'positive' if long_pnl >= 0 else 'negative'}">${long_pnl:,.2f}</div>
-        </div>
-        <div class="summary-box">
-            <h3>Short ({len(short_trades)})</h3>
-            <div class="value {'positive' if short_pnl >= 0 else 'negative'}">${short_pnl:,.2f}</div>
+            <h3>Win Rate</h3>
+            <div class="value">{(long_wins / len(long_trades) * 100) if long_trades else 0:.1f}%</div>
         </div>
     </div>
 
-    <h2>Base Currency Balances</h2>
-    <table>
-        <tr><th>Source</th><th>Currency</th><th>Amount</th></tr>
 """
-    # Add Spot base balances
-    for bal in sorted(spot_base_balances, key=lambda x: x["amount"], reverse=True):
-        html += f"        <tr><td><span class='badge badge-spot'>SPOT</span></td><td>{bal['asset']}</td><td>{bal['amount']:,.2f}</td></tr>\n"
-    # Add Futures USDT balance
-    if futures_usdt > 0:
-        html += f"        <tr><td><span class='badge badge-futures'>FUTURES</span></td><td>USDT</td><td>{futures_usdt:,.2f}</td></tr>\n"
-    if not spot_base_balances and futures_usdt == 0:
-        html += "        <tr><td colspan='3'>No balances</td></tr>\n"
-
-    html += """    </table>
-"""
-
-    # Separate open positions into Long and Short
-    open_longs = [p for p in all_open_positions if p["side"] == "LONG"]
-    open_shorts = [p for p in all_open_positions if p["side"] == "SHORT"]
-    open_long_pnl = sum(p.get("unrealized_pnl", 0) for p in open_longs)
-    open_short_pnl = sum(p.get("unrealized_pnl", 0) for p in open_shorts)
+    # Calculate open position PnL
+    open_long_pnl = sum(p.get("unrealized_pnl", 0) for p in all_open_positions)
 
     def position_table_rows(positions):
         if not positions:
@@ -556,22 +526,13 @@ def generate_dashboard():
         </tr>\n"""
         return rows
 
-    # Open Long Positions table
+    # Open Positions table (Long only)
     html += f"""
-    <h2>Open Long Positions ({len(open_longs)}, PnL: <span class="{'positive' if open_long_pnl >= 0 else 'negative'}">${open_long_pnl:,.2f}</span>)</h2>
+    <h2>Open Positions ({len(all_open_positions)}, PnL: <span class="{'positive' if open_long_pnl >= 0 else 'negative'}">${open_long_pnl:,.2f}</span>)</h2>
     <table>
         <tr class="long-header"><th>Source</th><th>Asset</th><th>Amount</th><th>Entry Price</th><th>Unrealized PnL</th></tr>
 """
-    html += position_table_rows(open_longs)
-
-    # Open Short Positions table
-    html += f"""    </table>
-
-    <h2>Open Short Positions ({len(open_shorts)}, PnL: <span class="{'positive' if open_short_pnl >= 0 else 'negative'}">${open_short_pnl:,.2f}</span>)</h2>
-    <table>
-        <tr class="short-header"><th>Source</th><th>Asset</th><th>Amount</th><th>Entry Price</th><th>Unrealized PnL</th></tr>
-"""
-    html += position_table_rows(open_shorts)
+    html += position_table_rows(all_open_positions)
     html += "    </table>\n"
 
     # Trade table helper
@@ -608,32 +569,20 @@ def generate_dashboard():
         </tr>\n"""
         return rows
 
-    # Long Trades section
-    html += f"""    </table>
-
+    # Closed Trades section (Long only)
+    html += f"""
     <div class="section">
-    <h2>Long Trades ({len(long_trades)} closed, PnL: <span class="{'positive' if long_pnl >= 0 else 'negative'}">${long_pnl:,.2f}</span>)</h2>
+    <h2>Closed Trades ({len(long_trades)} trades, PnL: <span class="{'positive' if long_pnl >= 0 else 'negative'}">${long_pnl:,.2f}</span>)</h2>
     <table>
         <tr class="long-header"><th>Source</th><th>Symbol</th><th>Entry</th><th>Exit</th><th>Entry $</th><th>Exit $</th><th>PnL</th><th>PnL %</th><th>Share</th></tr>
 """
     html += trade_table_rows(long_trades)
 
-    # Short Trades section
-    html += f"""    </table>
-    </div>
-
-    <div class="section">
-    <h2>Short Trades ({len(short_trades)} closed, PnL: <span class="{'positive' if short_pnl >= 0 else 'negative'}">${short_pnl:,.2f}</span>)</h2>
-    <table>
-        <tr class="short-header"><th>Source</th><th>Symbol</th><th>Entry</th><th>Exit</th><th>Entry $</th><th>Exit $</th><th>PnL</th><th>PnL %</th><th>Share</th></tr>
-"""
-    html += trade_table_rows(short_trades)
-
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     html += f"""    </table>
     </div>
 
-    <p class="timestamp">Generated: {timestamp} | Spot: testnet.binance.vision | Futures: testnet.binancefuture.com</p>
+    <p class="timestamp">Generated: {timestamp} | Paper Trading Mode (Long-only SPOT)</p>
 </div>
 </body>
 </html>"""
