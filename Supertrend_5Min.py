@@ -446,23 +446,20 @@ def get_exchange():
 
 
 def get_data_exchange():
-	"""Get exchange for data fetching - uses Futures testnet to bypass geo-blocks.
+	"""Get exchange for data fetching - always uses production Binance.
 
-	Note: We use Futures testnet endpoint for data because:
-	1. Binance Spot API may be geo-restricted
-	2. Futures testnet has USDT pairs with good liquidity
-	3. Price data is similar enough for signal generation
+	Note: We always use production endpoint for data because:
+	1. Simulations need real historical data
+	2. Testnet has limited/different price data
+	3. Only order execution should use testnet
 	"""
 	global _data_exchange
 	if _data_exchange is None:
-		# Use binanceusdm (Futures) with testnet for data fetching
-		# This bypasses Spot API geo-restrictions
-		cls = getattr(ccxt, "binanceusdm")
+		# Always use production Binance for data (NOT testnet)
+		cls = getattr(ccxt, EXCHANGE_ID)
 		args = {"enableRateLimit": True}
 		_data_exchange = cls(args)
-		# Enable sandbox mode (futures testnet)
-		if hasattr(_data_exchange, "set_sandbox_mode"):
-			_data_exchange.set_sandbox_mode(True)
+		# Do NOT enable sandbox mode - we want production data
 		options = dict(getattr(_data_exchange, "options", {}))
 		options["warnOnFetchCurrenciesWithoutPermission"] = False
 		_data_exchange.options = options
