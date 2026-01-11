@@ -1,7 +1,22 @@
 {
   "total_capital": 13765.681084910255,
   "positions": [],
-  "last_processed_bar": {},
+  "last_processed_bar": {
+    "TNSR/USDC|supertrend|6h|short": "2026-01-05T14:00:00+01:00",
+    "SUI/USDC|supertrend|6h|long": "2026-01-05T14:00:00+01:00",
+    "SUI/USDC|supertrend|6h|short": "2026-01-05T14:00:00+01:00",
+    "TNSR/USDC|supertrend|6h|long": "2026-01-05T14:00:00+01:00",
+    "XRP/USDT|supertrend|6h|long": "2026-01-11T08:00:00+01:00",
+    "XRP/USDT|supertrend|6h|short": "2026-01-11T08:00:00+01:00",
+    "ETH/USDT|supertrend|6h|short": "2026-01-11T08:00:00+01:00",
+    "LINK/USDT|supertrend|6h|short": "2026-01-11T08:00:00+01:00",
+    "LINK/USDT|supertrend|6h|long": "2026-01-11T08:00:00+01:00",
+    "ETH/USDT|supertrend|6h|long": "2026-01-11T08:00:00+01:00",
+    "SOL/USDT|supertrend|6h|short": "2026-01-11T07:00:00+01:00",
+    "SOL/USDT|supertrend|6h|long": "2026-01-11T07:00:00+01:00",
+    "BTC/USDT|supertrend|6h|short": "2026-01-11T08:00:00+01:00",
+    "BTC/USDT|supertrend|6h|long": "2026-01-11T08:00:00+01:00"
+  },
   "symbol_trade_counts": {
     "BTC/EUR": 3,
     "ETH/EUR": 2,
