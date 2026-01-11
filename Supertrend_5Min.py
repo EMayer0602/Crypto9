@@ -469,18 +469,22 @@ def get_data_exchange():
 
 
 def _fetch_futures_testnet_klines(symbol: str, interval: str, limit: int) -> pd.DataFrame:
-	"""Fetch klines directly from Binance Futures testnet API (bypasses ccxt issues)."""
+	"""Fetch klines directly from Binance Futures testnet API (bypasses ccxt issues).
+
+	Handles both USDT and USDC pairs by converting USDC to USDT for the API call.
+	Futures testnet has more symbols available than Spot testnet.
+	"""
 	import requests
 	try:
-		# Convert symbol format: BTC/USDT -> BTCUSDT
-		api_symbol = symbol.replace("/", "")
+		# Convert symbol format: BTC/USDT -> BTCUSDT, BTC/USDC -> BTCUSDT
+		api_symbol = symbol.replace("/", "").replace("USDC", "USDT")
 		# Binance has a max limit of 1500 per request
 		api_limit = min(limit, 1500)
 		url = "https://testnet.binancefuture.com/fapi/v1/klines"
 		params = {"symbol": api_symbol, "interval": interval, "limit": api_limit}
 		response = requests.get(url, params=params, timeout=30)
 		if response.status_code != 200:
-			print(f"[API-Direct] Error {response.status_code} for {symbol}: {response.text[:100]}")
+			print(f"[API-Direct] Error {response.status_code} for {symbol} (as {api_symbol}): {response.text[:100]}")
 			return pd.DataFrame()
 		data = response.json()
 		if not data:
@@ -491,7 +495,7 @@ def _fetch_futures_testnet_klines(symbol: str, interval: str, limit: int) -> pd.
 		df = pd.DataFrame(rows, columns=cols)
 		df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms", utc=True).dt.tz_convert(BERLIN_TZ)
 		result = df.set_index("timestamp")
-		print(f"[API-Direct] Got {len(result)} bars for {symbol} {interval}")
+		print(f"[API-Direct] Got {len(result)} bars for {symbol} {interval} (via Futures testnet as {api_symbol})")
 		return result
 	except Exception as exc:
 		print(f"[API-Direct] ERROR fetching {symbol} {interval}: {exc}")
@@ -517,8 +521,9 @@ def _fetch_direct_ohlcv(symbol, timeframe, limit):
 		return result
 	except Exception as exc:
 		print(f"[API] ccxt failed for {symbol} {timeframe}: {exc}")
-		# Fallback to direct Futures testnet API for USDT pairs
-		if "USDT" in symbol:
+		# Fallback to direct Futures testnet API for USDT and USDC pairs
+		# Futures testnet works from EU and has more symbols
+		if "USDT" in symbol or "USDC" in symbol:
 			print(f"[API] Trying direct Futures testnet API for {symbol}...")
 			return _fetch_futures_testnet_klines(symbol, timeframe, limit)
 		return pd.DataFrame()
