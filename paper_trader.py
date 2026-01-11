@@ -1606,6 +1606,7 @@ def process_snapshot(
                     print(f"[Notify] Exit alert failed for {context.symbol}: {exc}")
             trades.append(trade)
             remove_position(state, context.key)
+            save_state(state)  # Always save state after closing position
             # Save closed trade to testnet tracking file
             if use_testnet:
                 closed_trade_data = {
@@ -1695,6 +1696,7 @@ def process_snapshot(
     entry_record = dict(entry.__dict__)
     state.setdefault("positions", []).append(entry_record)
     record_symbol_trade(state, context.symbol)
+    save_state(state)  # Always save state after opening position
     _signal_log(f"{context.symbol} {context.direction} entry triggered at {entry_price:.4f} (stake={stake:.2f})")
     if order_executor is not None:
         try:
