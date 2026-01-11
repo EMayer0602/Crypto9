@@ -1,44 +1,6 @@
 {
   "total_capital": 16500.0,
-  "positions": [
-    {
-      "key": "ETH/USDT|supertrend|6h|short",
-      "symbol": "ETH/USDT",
-      "direction": "short",
-      "indicator": "supertrend",
-      "htf": "6h",
-      "param_a": 7.0,
-      "param_b": 3.0,
-      "atr_mult": null,
-      "min_hold_bars": 0,
-      "entry_price": 3090.13,
-      "entry_time": "2026-01-10T08:00:00+01:00",
-      "entry_atr": 100.91107653011318,
-      "stake": 200.0,
-      "size_units": 0.06472219615355988
-    }
-  ],
-  "last_processed_bar": {
-    "ETH/USDT|supertrend|6h|short": "2026-01-10T08:00:00+01:00",
-    "TNSR/USDC|supertrend|6h|short": "2026-01-11T08:00:00+01:00",
-    "ICP/USDT|supertrend|6h|short": "2026-01-10T13:00:00+01:00",
-    "XRP/USDT|supertrend|6h|long": "2026-01-10T13:00:00+01:00",
-    "ADA/USDT|supertrend|6h|short": "2026-01-10T13:00:00+01:00",
-    "XRP/USDT|supertrend|6h|short": "2026-01-10T13:00:00+01:00",
-    "LINK/USDT|supertrend|6h|short": "2026-01-10T13:00:00+01:00",
-    "LINK/USDT|supertrend|6h|long": "2026-01-10T13:00:00+01:00",
-    "ETH/USDT|supertrend|6h|long": "2026-01-10T08:00:00+01:00",
-    "SUI/USDC|supertrend|6h|long": "2026-01-11T08:00:00+01:00",
-    "SUI/USDC|supertrend|6h|short": "2026-01-11T08:00:00+01:00",
-    "ADA/USDT|supertrend|6h|long": "2026-01-10T13:00:00+01:00",
-    "SOL/USDT|supertrend|6h|short": "2026-01-10T13:00:00+01:00",
-    "ICP/USDT|supertrend|6h|long": "2026-01-10T13:00:00+01:00",
-    "SOL/USDT|supertrend|6h|long": "2026-01-10T13:00:00+01:00",
-    "BTC/USDT|supertrend|6h|short": "2026-01-10T08:00:00+01:00",
-    "TNSR/USDC|supertrend|6h|long": "2026-01-11T08:00:00+01:00",
-    "BTC/USDT|supertrend|6h|long": "2026-01-10T08:00:00+01:00"
-  },
-  "symbol_trade_counts": {
-    "ETH/USDT": 1
-  }
+  "positions": [],
+  "last_processed_bar": {},
+  "symbol_trade_counts": {}
 }

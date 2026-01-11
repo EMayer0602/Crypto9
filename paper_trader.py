@@ -1606,6 +1606,23 @@ def process_snapshot(
                     print(f"[Notify] Exit alert failed for {context.symbol}: {exc}")
             trades.append(trade)
             remove_position(state, context.key)
+            # Save closed trade to testnet tracking file
+            if use_testnet:
+                closed_trade_data = {
+                    "symbol": context.symbol,
+                    "direction": context.direction,
+                    "indicator": context.indicator,
+                    "htf": context.htf,
+                    "entry_time": existing_entry_time if 'existing_entry_time' in dir() else trade.entry_time,
+                    "entry_price": trade.entry_price,
+                    "exit_time": trade.exit_time,
+                    "exit_price": trade.exit_price,
+                    "stake": trade.stake,
+                    "pnl": trade.pnl,
+                    "pnl_pct": (trade.pnl / trade.stake * 100) if trade.stake else 0,
+                }
+                save_testnet_closed_trade(closed_trade_data)
+                remove_testnet_position(context.symbol, context.direction)
             existing = None
 
     if existing is None:
