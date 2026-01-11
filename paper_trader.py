@@ -167,12 +167,31 @@ def remove_testnet_position(symbol: str, direction: str) -> None:
 
 
 def save_testnet_closed_trade(trade: Dict) -> None:
-    """Save a closed trade to the Crypto9 testnet closed trades file."""
+    """Save a closed trade to the Crypto9 testnet closed trades file (with duplicate check)."""
     try:
         trades = []
         if os.path.exists(TESTNET_CLOSED_TRADES_FILE):
             with open(TESTNET_CLOSED_TRADES_FILE, "r") as f:
                 trades = json.load(f)
+
+        # Check for duplicate before adding
+        trade_key = (
+            trade.get("symbol", ""),
+            trade.get("entry_time", ""),
+            trade.get("exit_time", ""),
+            trade.get("indicator", ""),
+        )
+        for existing in trades:
+            existing_key = (
+                existing.get("symbol", ""),
+                existing.get("entry_time", ""),
+                existing.get("exit_time", ""),
+                existing.get("indicator", ""),
+            )
+            if trade_key == existing_key:
+                print(f"[Testnet] Trade already exists, skipping duplicate: {trade.get('symbol')}")
+                return
+
         trade["closed_at"] = datetime.now().isoformat()
         trades.append(trade)
         with open(TESTNET_CLOSED_TRADES_FILE, "w") as f:
