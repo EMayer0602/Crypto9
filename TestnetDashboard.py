@@ -362,22 +362,27 @@ def generate_dashboard():
     """Generate HTML dashboard with Crypto9 local tracking - Long-only SPOT mode."""
     print("Fetching Crypto9 testnet data (Long-only SPOT mode)...")
 
-    # ========== PAPER TRADING STATE (CAPITAL) ==========
+    # ========== PAPER TRADING STATE (CAPITAL + POSITIONS) ==========
     print("  Loading paper trading state...")
     paper_state = load_paper_trading_state()
     paper_capital = paper_state.get("total_capital", 0)
+    paper_positions = paper_state.get("positions", [])
+    print(f"  Found {len(paper_positions)} positions in paper trading state")
 
-    # ========== LOCAL CRYPTO9 POSITIONS ==========
+    # ========== LOCAL CRYPTO9 POSITIONS (fallback) ==========
     print("  Loading Crypto9 local positions...")
     crypto9_positions = load_crypto9_positions()
+
+    # Use paper trading positions if available, otherwise fallback to crypto9 file
+    source_positions = paper_positions if paper_positions else crypto9_positions
 
     # ========== LOCAL CRYPTO9 CLOSED TRADES ==========
     print("  Loading Crypto9 closed trades...")
     crypto9_closed_trades = load_crypto9_closed_trades()
 
-    # ========== PROCESS CRYPTO9 POSITIONS (Long only) ==========
+    # ========== PROCESS POSITIONS (Long only) ==========
     all_open_positions = []
-    for pos in crypto9_positions:
+    for pos in source_positions:
         symbol = pos.get("symbol", "").replace("/", "")
         direction = pos.get("direction", "long").upper()
         # Long-only mode: skip any short positions
