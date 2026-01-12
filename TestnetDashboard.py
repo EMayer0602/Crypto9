@@ -565,6 +565,10 @@ def generate_dashboard():
         exit_value = trade.get("exit_value") or (stake + pnl)
         # Calculate pnl_pct if not provided
         pnl_pct = trade.get("pnl_pct") or ((pnl / stake * 100) if stake else 0)
+        # Get reason with multiple fallbacks
+        reason = trade.get("reason") or trade.get("Reason") or trade.get("exit_reason") or "-"
+        if not reason or reason == "":
+            reason = "-"
         trade_data = {
             "symbol": trade.get("symbol", "").replace("/", ""),
             "direction": "LONG",
@@ -577,9 +581,13 @@ def generate_dashboard():
             "pnl_pct": pnl_pct,
             "indicator": trade.get("indicator", ""),
             "htf": trade.get("htf", ""),
-            "reason": trade.get("reason", "-"),
+            "reason": reason,
         }
         long_trades.append(trade_data)
+
+    # Debug: count trades with/without reason
+    with_reason = sum(1 for t in long_trades if t["reason"] != "-")
+    print(f"  Processed {len(long_trades)} closed trades ({with_reason} with exit reason)")
 
     # Sort by exit time (most recent first)
     long_trades.sort(key=lambda t: t.get("exit_time") or "", reverse=True)
