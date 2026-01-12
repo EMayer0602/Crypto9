@@ -1821,6 +1821,8 @@ def process_snapshot(
                     "exit_time": trade.exit_time,
                     "exit_price": trade.exit_price,
                     "stake": trade.stake,
+                    "size_units": trade.size_units,
+                    "fees": trade.fees,
                     "pnl": trade.pnl,
                     "pnl_pct": (trade.pnl / trade.stake * 100) if trade.stake else 0,
                     "reason": trade.reason,

@@ -119,15 +119,28 @@ def correct_trades(json_path: str) -> int:
 if __name__ == "__main__":
     import sys
 
-    # Default file
-    json_file = "paper_trading_simulation_log.json"
+    print("=== PnL Correction Script ===")
+    print()
+
+    # Default files to correct
+    files_to_correct = [
+        "paper_trading_simulation_log.json",
+        "crypto9_testnet_closed_trades.json",
+    ]
 
     # Allow custom file as argument
     if len(sys.argv) > 1:
-        json_file = sys.argv[1]
+        files_to_correct = sys.argv[1:]
 
-    print(f"=== PnL Correction Script ===")
-    print(f"File: {json_file}")
-    print()
+    total_corrected = 0
+    for json_file in files_to_correct:
+        if os.path.exists(json_file):
+            print(f"Processing: {json_file}")
+            corrected = correct_trades(json_file)
+            total_corrected += corrected
+            print()
+        else:
+            print(f"[Skip] File not found: {json_file}")
+            print()
 
-    correct_trades(json_file)
+    print(f"=== Done! Total corrected: {total_corrected} trades ===")
