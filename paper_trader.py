@@ -1574,9 +1574,15 @@ def evaluate_exit(position: Dict, df: pd.DataFrame, atr_mult: Optional[float], m
     if exit_price is None:
         return None
 
-    gross_pnl = (exit_price - entry_price) / entry_price * stake if long_mode else (entry_price - exit_price) / entry_price * stake
-    fees = stake * st.FEE_RATE * 2.0
-    pnl = gross_pnl - fees
+    # Correct PnL calculation using amount (size_units)
+    size_units = float(position.get("size_units", 0.0) or (stake / entry_price if entry_price else 0.0))
+    # Fees based on total traded volume (entry + exit)
+    fees = (entry_price + exit_price) * size_units * st.FEE_RATE
+    # PnL = amount * price_diff - fees
+    if long_mode:
+        pnl = size_units * (exit_price - entry_price) - fees
+    else:
+        pnl = size_units * (entry_price - exit_price) - fees
     return {
         "exit_price": exit_price,
         "reason": reason,
@@ -1653,10 +1659,13 @@ def process_snapshot(
                     fill_price = derive_fill_price(order) if order else 0.0
                     if fill_price > 0:
                         trade.exit_price = fill_price
-                        gross_pnl = (fill_price - entry_price_val) / entry_price_val * stake_val if context.direction == "long" else (entry_price_val - fill_price) / entry_price_val * stake_val
-                        fees = stake_val * st.FEE_RATE * 2.0
+                        # Correct PnL calculation using amount (size_units)
+                        fees = (entry_price_val + fill_price) * size_units * st.FEE_RATE
                         trade.fees = fees
-                        trade.pnl = gross_pnl - fees
+                        if context.direction == "long":
+                            trade.pnl = size_units * (fill_price - entry_price_val) - fees
+                        else:
+                            trade.pnl = size_units * (entry_price_val - fill_price) - fees
                         trade.equity_after = prior_total + trade.pnl
                 except Exception as exc:
                     print(f"[Order] Exit submission failed for {context.symbol}: {exc}")
