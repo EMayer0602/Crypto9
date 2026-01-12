@@ -3640,6 +3640,16 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
         open_path = args.open_log or SIMULATION_OPEN_POSITIONS_FILE
         open_json_path = args.open_json or SIMULATION_OPEN_POSITIONS_JSON
         write_open_positions_report(open_positions, open_path, open_json_path)
+
+        # Auto-sync simulation positions to paper trading state
+        paper_state = load_state()
+        synced = sync_simulation_positions(paper_state, use_testnet=use_testnet)
+        if synced > 0:
+            save_state(paper_state)
+            print(f"[Sync] Added {synced} simulation positions to paper trading state")
+        else:
+            print(f"[Sync] Paper trading state already up to date ({len(paper_state.get('positions', []))} positions)")
+
         open_df = open_positions_to_dataframe(open_positions)
         summary_data = build_summary_payload(trades_df, open_df, final_state, start_ts, end_ts)
         summary_html_path = args.summary_html or SIMULATION_SUMMARY_HTML
