@@ -233,7 +233,7 @@ DIVERGENCE_RSI_PERIOD = 14  # RSI period for divergence detection
 START_EQUITY = 14000.0
 RISK_FRACTION = 1
 STAKE_DIVISOR = 8  # Kapital / 8 pro Trade
-FEE_RATE = 0.001
+FEE_RATE = 0.00075  # VIP Level 1
 ATR_WINDOW = 14
 ATR_STOP_MULTS = [None, 1.0, 1.5, 2.0]
 

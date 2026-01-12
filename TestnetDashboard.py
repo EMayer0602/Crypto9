@@ -584,7 +584,7 @@ def generate_dashboard():
         # Calculate unrealized PnL using current price
         current_price = current_prices.get(symbol, 0)
         # Calculate fees: (entry_price + current_price) * size_units * fee_rate
-        fee_rate = 0.001
+        fee_rate = 0.00075  # VIP Level 1
         fees = (entry_price + current_price) * size_units * fee_rate if entry_price and current_price and size_units else 0
         if current_price and entry_price and size_units:
             unrealized_pnl = (current_price - entry_price) * size_units - fees
@@ -626,7 +626,7 @@ def generate_dashboard():
         entry_price_val = trade.get("entry_price", 0) or 0
         exit_price_val = trade.get("exit_price", 0) or 0
         amount_val = trade.get("size_units") or trade.get("amount") or (stake / entry_price_val if entry_price_val else 0)
-        fees = trade.get("fees") or trade.get("Fees") or ((entry_price_val + exit_price_val) * amount_val * 0.001 if entry_price_val and exit_price_val and amount_val else 0)
+        fees = trade.get("fees") or trade.get("Fees") or ((entry_price_val + exit_price_val) * amount_val * 0.00075 if entry_price_val and exit_price_val and amount_val else 0)
         trade_data = {
             "symbol": trade.get("symbol", "").replace("/", ""),
             "direction": "LONG",

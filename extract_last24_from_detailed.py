@@ -9,7 +9,7 @@ from io import StringIO
 
 START_CAPITAL = 14_000.0
 STAKE_DIVISOR = 14
-FEE_RATE = 0.001  # same as Supertrend_5Min.py
+FEE_RATE = 0.00075  # VIP Level 1
 
 def main():
     parser = argparse.ArgumentParser(description="Extract trades from overall_best_detailed.html and recompute PnL/capital.")
