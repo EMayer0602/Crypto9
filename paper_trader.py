@@ -140,12 +140,15 @@ def round_to_lot_size(amount: float, symbol: str) -> float:
 def correct_historical_trades_pnl(json_path: str = None) -> int:
     """
     Correct PnL for all historical trades using the correct formula:
-    - size_units = stake / entry_price
+    - size_units = round_to_lot_size(stake / entry_price)
     - fees = (entry_price + exit_price) * size_units * fee_rate
     - pnl = size_units * (exit_price - entry_price) - fees
 
     Returns number of trades corrected.
     """
+    # Pre-fetch lot sizes from Binance API
+    fetch_lot_sizes_from_binance()
+
     if json_path is None:
         json_path = SIMULATION_LOG_JSON
 
@@ -166,9 +169,11 @@ def correct_historical_trades_pnl(json_path: str = None) -> int:
             entry_price = float(t.get('entry_price', 0) or 0)
             exit_price = float(t.get('exit_price', 0) or 0)
             stake = float(t.get('stake', 0) or 0)
+            symbol = str(t.get('symbol', '')).replace('/', '')  # Convert "TNSR/USDT" to "TNSRUSDT"
 
             if entry_price > 0 and exit_price > 0 and stake > 0:
-                size_units = stake / entry_price
+                raw_size = stake / entry_price
+                size_units = round_to_lot_size(raw_size, symbol) if symbol else raw_size
                 fees = (entry_price + exit_price) * size_units * fee_rate
                 direction = str(t.get('direction', 'Long')).lower()
 
