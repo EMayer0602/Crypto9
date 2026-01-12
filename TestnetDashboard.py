@@ -28,13 +28,17 @@ FEE_RATE = 0.00075
 def correct_trades_pnl(json_path: str) -> int:
     """Correct PnL for trades using: size_units = stake/entry, pnl = size_units * diff - fees."""
     import math
+    print(f"[PnL-Fix] Checking {json_path}...")
     if not os.path.exists(json_path):
+        print(f"[PnL-Fix] File not found: {json_path}")
         return 0
     try:
         with open(json_path, 'r') as f:
             trades = json.load(f)
         if not isinstance(trades, list):
+            print(f"[PnL-Fix] Not a list in {json_path}")
             return 0
+        print(f"[PnL-Fix] Found {len(trades)} trades in {json_path}")
         corrected = 0
         for t in trades:
             entry_price = float(t.get('entry_price', 0) or 0)
@@ -58,6 +62,8 @@ def correct_trades_pnl(json_path: str) -> int:
             with open(json_path, 'w') as f:
                 json.dump(trades, f, indent=2, default=str)
             print(f"[PnL-Fix] Corrected {corrected} trades in {json_path}")
+        else:
+            print(f"[PnL-Fix] No corrections needed in {json_path}")
         return corrected
     except Exception as e:
         print(f"[PnL-Fix] Error: {e}")
