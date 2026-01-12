@@ -1878,9 +1878,8 @@ def process_snapshot(
         return trades
 
     entry_price = float(df_slice.iloc[-1]["close"])
-    # Use small fixed stake on testnet to avoid insufficient balance
-    stake_override = fixed_stake if fixed_stake is not None else (TESTNET_DEFAULT_STAKE if use_testnet else None)
-    stake = determine_position_size(context.symbol, state, stake_override, context.direction)
+    # Dynamic stake: total_capital / 10 (or fixed if explicitly provided)
+    stake = determine_position_size(context.symbol, state, fixed_stake, context.direction)
     # Round to valid lot size for the symbol
     size_units = round_to_lot_size(stake / entry_price, context.symbol) if entry_price else 0.0
     entry = Position(
