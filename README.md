@@ -289,6 +289,18 @@ python paper_trader.py --testnet --place-orders --stake 50 \
 
 ## Helper Scripts
 
+### Add/Remove Single Symbol (without full sweep)
+```bash
+# Add a new symbol (runs sweep only for that symbol)
+python sweep_single_symbol.py --add "DOGE/USDT"
+
+# Remove a symbol from all files
+python sweep_single_symbol.py --remove "DOGE/USDT"
+
+# List all current symbols
+python sweep_single_symbol.py --list
+```
+
 ### Download OHLCV Data
 ```bash
 python download_ohlcv.py
