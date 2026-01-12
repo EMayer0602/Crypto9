@@ -218,7 +218,7 @@ def get_report_dir(use_testnet: bool = False) -> str:
     """Return the appropriate report directory based on testnet mode."""
     return "report_testnet" if use_testnet else "report_html"
 BEST_PARAMS_CSV = st.OVERALL_PARAMS_CSV
-START_TOTAL_CAPITAL = 16_500.0
+START_TOTAL_CAPITAL = 16_000.0
 MAX_OPEN_POSITIONS = 10
 STAKE_DIVISOR = 10  # stake = current total_capital / STAKE_DIVISOR = 16500/10 = 1650
 # Separate limits for Long (Spot) vs Short (Margin)
