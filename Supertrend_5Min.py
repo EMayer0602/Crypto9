@@ -230,7 +230,7 @@ USE_DIVERGENCE_FILTER = True  # Detect price/RSI divergence (bull traps)
 DIVERGENCE_LOOKBACK = 10  # How many bars to look back for divergence
 DIVERGENCE_RSI_PERIOD = 14  # RSI period for divergence detection
 
-START_EQUITY = 16000.0
+START_EQUITY = 14000.0
 RISK_FRACTION = 1
 STAKE_DIVISOR = 8  # Kapital / 8 pro Trade
 FEE_RATE = 0.00075  # VIP Level 1
