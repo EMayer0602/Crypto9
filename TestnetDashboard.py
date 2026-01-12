@@ -470,9 +470,9 @@ def generate_dashboard():
     print("  Loading Crypto9 closed trades...")
     crypto9_closed_trades = load_crypto9_closed_trades()
 
-    # ========== SIMULATION TRADES (last 2 days) ==========
+    # ========== SIMULATION TRADES (last 30 days) ==========
     print("  Loading simulation trades...")
-    simulation_trades = load_simulation_trades(days_back=2)
+    simulation_trades = load_simulation_trades(days_back=30)
 
     # Combine all closed trades (crypto9 + simulation) and remove duplicates
     all_closed_trades_raw = crypto9_closed_trades + simulation_trades
