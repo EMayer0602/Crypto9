@@ -62,13 +62,15 @@ def main():
         direction = str(row.get("Direction", "Long")).lower()
         stake_used = capital / STAKE_DIVISOR if STAKE_DIVISOR else capital
         shares = stake_used / entry if entry else 0.0
-        entry_fee = stake_used * FEE_RATE
-        exit_fee = stake_used * FEE_RATE
+        # Correct fee calculation: fees based on traded volume
+        fees = (entry + exit_price) * shares * FEE_RATE
+        entry_fee = entry * shares * FEE_RATE
+        exit_fee = exit_price * shares * FEE_RATE
         if direction == "short":
             price_diff = entry - exit_price
         else:
             price_diff = exit_price - entry
-        pnl_recalc = shares * price_diff - entry_fee - exit_fee
+        pnl_recalc = shares * price_diff - fees
         capital_after = capital + pnl_recalc
         capital = capital_after
 

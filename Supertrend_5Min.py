@@ -1808,9 +1808,9 @@ def backtest_supertrend(df, atr_stop_mult=None, direction="long", min_hold_bars=
 					# Record partial exit as separate trade
 					price_diff = current_price - entry_price if long_mode else entry_price - current_price
 					partial_stake = stake * exit_amount
-					gross_pnl = price_diff / entry_price * partial_stake
-					fees = partial_stake * FEE_RATE * 2.0
-					pnl_usd = gross_pnl - fees
+					size_units = partial_stake / entry_price
+					fees = (entry_price + current_price) * size_units * FEE_RATE
+					pnl_usd = size_units * price_diff - fees
 					equity += pnl_usd
 					trades.append({
 						"Zeit": entry_ts,
@@ -1874,9 +1874,9 @@ def backtest_supertrend(df, atr_stop_mult=None, direction="long", min_hold_bars=
 
 		# Calculate PnL for remaining position
 		price_diff = exit_price - entry_price if long_mode else entry_price - exit_price
-		gross_pnl = price_diff / entry_price * current_stake
-		fees = current_stake * FEE_RATE * 2.0
-		pnl_usd = gross_pnl - fees
+		size_units = current_stake / entry_price
+		fees = (entry_price + exit_price) * size_units * FEE_RATE
+		pnl_usd = size_units * price_diff - fees
 		equity += pnl_usd
 		trades.append({
 			"Zeit": entry_ts,
@@ -1902,9 +1902,9 @@ def backtest_supertrend(df, atr_stop_mult=None, direction="long", min_hold_bars=
 		exit_price = float(last["close"])
 		stake = entry_capital if entry_capital is not None else equity / STAKE_DIVISOR
 		price_diff = exit_price - entry_price if long_mode else entry_price - exit_price
-		gross_pnl = price_diff / entry_price * stake
-		fees = stake * FEE_RATE * 2.0
-		pnl_usd = gross_pnl - fees
+		size_units = stake / entry_price
+		fees = (entry_price + exit_price) * size_units * FEE_RATE
+		pnl_usd = size_units * price_diff - fees
 		equity += pnl_usd
 		trades.append({
 			"Zeit": entry_ts,
@@ -2092,9 +2092,9 @@ def backtest_htf_crossover(df, atr_stop_mult=None, direction="long", min_hold_ba
 					partial_exits_taken.append(level_idx)
 					price_diff = close_curr - entry_price if long_mode else entry_price - close_curr
 					partial_stake = stake * exit_amount
-					gross_pnl = price_diff / entry_price * partial_stake
-					fees = partial_stake * FEE_RATE * 2.0
-					pnl_usd = gross_pnl - fees
+					size_units = partial_stake / entry_price
+					fees = (entry_price + close_curr) * size_units * FEE_RATE
+					pnl_usd = size_units * price_diff - fees
 					equity += pnl_usd
 					trades.append({
 						"Zeit": entry_ts,
@@ -2160,9 +2160,9 @@ def backtest_htf_crossover(df, atr_stop_mult=None, direction="long", min_hold_ba
 
 		# Calculate PnL for remaining position
 		price_diff = exit_price - entry_price if long_mode else entry_price - exit_price
-		gross_pnl = price_diff / entry_price * current_stake
-		fees = current_stake * FEE_RATE * 2.0
-		pnl_usd = gross_pnl - fees
+		size_units = current_stake / entry_price
+		fees = (entry_price + exit_price) * size_units * FEE_RATE
+		pnl_usd = size_units * price_diff - fees
 		equity += pnl_usd
 		trades.append({
 			"Zeit": entry_ts,
@@ -2189,9 +2189,9 @@ def backtest_htf_crossover(df, atr_stop_mult=None, direction="long", min_hold_ba
 		exit_price = float(last["close"])
 		stake = entry_capital if entry_capital is not None else equity / STAKE_DIVISOR
 		price_diff = exit_price - entry_price if long_mode else entry_price - exit_price
-		gross_pnl = price_diff / entry_price * stake
-		fees = stake * FEE_RATE * 2.0
-		pnl_usd = gross_pnl - fees
+		size_units = stake / entry_price
+		fees = (entry_price + exit_price) * size_units * FEE_RATE
+		pnl_usd = size_units * price_diff - fees
 		equity += pnl_usd
 		trades.append({
 			"Zeit": entry_ts,
