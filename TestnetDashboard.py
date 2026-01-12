@@ -838,8 +838,10 @@ def generate_dashboard():
                     return f"${p:,.2f}"
                 elif p >= 1:
                     return f"${p:.4f}"
-                else:
+                elif p >= 0.0001:
                     return f"${p:.6f}"
+                else:
+                    return f"${p:.8f}"  # For very small prices like LUNC
             # Format amount based on magnitude
             def fmt_amount(a):
                 if a >= 1:
