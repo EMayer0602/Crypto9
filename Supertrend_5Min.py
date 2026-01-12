@@ -12,6 +12,7 @@ from plotly.subplots import make_subplots
 from ta.volatility import AverageTrueRange
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
+import requests
 
 
 def _load_env_file(path: str = ".env") -> None:
@@ -47,6 +48,56 @@ def _truthy(value) -> bool:
 
 
 USE_TESTNET = _truthy(os.getenv("BINANCE_USE_TESTNET", "false"))
+
+# ========== LOT SIZE / STEP SIZE HANDLING ==========
+_LOT_SIZE_CACHE = {}
+_LOT_SIZE_CACHE_LOADED = False
+
+
+def fetch_lot_sizes_from_binance():
+    """Fetch lot sizes (stepSize) for all symbols from Binance API."""
+    global _LOT_SIZE_CACHE, _LOT_SIZE_CACHE_LOADED
+    if _LOT_SIZE_CACHE_LOADED:
+        return _LOT_SIZE_CACHE
+    try:
+        url = "https://api.binance.com/api/v3/exchangeInfo"
+        response = requests.get(url, timeout=30)
+        if response.status_code == 200:
+            data = response.json()
+            for symbol_info in data.get("symbols", []):
+                symbol = symbol_info.get("symbol", "")
+                for filter_info in symbol_info.get("filters", []):
+                    if filter_info.get("filterType") == "LOT_SIZE":
+                        step_size = float(filter_info.get("stepSize", 1))
+                        _LOT_SIZE_CACHE[symbol] = step_size
+                        break
+            _LOT_SIZE_CACHE_LOADED = True
+            print(f"[LotSize] Loaded {len(_LOT_SIZE_CACHE)} lot sizes from Binance API")
+    except Exception as e:
+        print(f"[LotSize] Error fetching lot sizes: {e}")
+    return _LOT_SIZE_CACHE
+
+
+def get_lot_size(symbol: str) -> float:
+    """Get the lot size (stepSize) for a symbol."""
+    clean_symbol = symbol.replace("/", "").upper()
+    if not _LOT_SIZE_CACHE_LOADED:
+        fetch_lot_sizes_from_binance()
+    if clean_symbol in _LOT_SIZE_CACHE:
+        return _LOT_SIZE_CACHE[clean_symbol]
+    usdt_symbol = clean_symbol.replace("USDC", "USDT")
+    if usdt_symbol in _LOT_SIZE_CACHE:
+        return _LOT_SIZE_CACHE[usdt_symbol]
+    return 1e-8
+
+
+def round_to_lot_size(amount: float, symbol: str) -> float:
+    """Round amount DOWN to the nearest valid lot size for the symbol."""
+    lot_size = get_lot_size(symbol)
+    if lot_size <= 0:
+        return amount
+    return math.floor(amount / lot_size) * lot_size
+
 
 def timeframe_to_minutes(tf_str: str) -> int:
 	unit = tf_str[-1].lower()
@@ -1656,11 +1707,13 @@ def calculate_dynamic_min_min_hold_bars(
 		return min_days
 
 
-def backtest_supertrend(df, atr_stop_mult=None, direction="long", min_hold_bars=0):
+def backtest_supertrend(df, atr_stop_mult=None, direction="long", min_hold_bars=0, symbol=None):
 	direction = direction.lower()
 	if direction not in {"long", "short"}:
 		raise ValueError("direction must be 'long' or 'short'")
 	min_hold_bars = 0 if min_hold_bars is None else max(0, int(min_hold_bars))
+	# Symbol for lot size rounding (optional)
+	_symbol = symbol or "BTCUSDT"  # Fallback
 
 	long_mode = direction == "long"
 	equity = START_EQUITY
@@ -1808,7 +1861,7 @@ def backtest_supertrend(df, atr_stop_mult=None, direction="long", min_hold_bars=
 					# Record partial exit as separate trade
 					price_diff = current_price - entry_price if long_mode else entry_price - current_price
 					partial_stake = stake * exit_amount
-					size_units = partial_stake / entry_price
+					size_units = round_to_lot_size(partial_stake / entry_price, _symbol)
 					fees = (entry_price + current_price) * size_units * FEE_RATE
 					pnl_usd = size_units * price_diff - fees
 					equity += pnl_usd
@@ -1874,7 +1927,7 @@ def backtest_supertrend(df, atr_stop_mult=None, direction="long", min_hold_bars=
 
 		# Calculate PnL for remaining position
 		price_diff = exit_price - entry_price if long_mode else entry_price - exit_price
-		size_units = current_stake / entry_price
+		size_units = round_to_lot_size(current_stake / entry_price, _symbol)
 		fees = (entry_price + exit_price) * size_units * FEE_RATE
 		pnl_usd = size_units * price_diff - fees
 		equity += pnl_usd
@@ -1902,7 +1955,7 @@ def backtest_supertrend(df, atr_stop_mult=None, direction="long", min_hold_bars=
 		exit_price = float(last["close"])
 		stake = entry_capital if entry_capital is not None else equity / STAKE_DIVISOR
 		price_diff = exit_price - entry_price if long_mode else entry_price - exit_price
-		size_units = stake / entry_price
+		size_units = round_to_lot_size(stake / entry_price, _symbol)
 		fees = (entry_price + exit_price) * size_units * FEE_RATE
 		pnl_usd = size_units * price_diff - fees
 		equity += pnl_usd
@@ -2092,7 +2145,7 @@ def backtest_htf_crossover(df, atr_stop_mult=None, direction="long", min_hold_ba
 					partial_exits_taken.append(level_idx)
 					price_diff = close_curr - entry_price if long_mode else entry_price - close_curr
 					partial_stake = stake * exit_amount
-					size_units = partial_stake / entry_price
+					size_units = round_to_lot_size(partial_stake / entry_price, _symbol)
 					fees = (entry_price + close_curr) * size_units * FEE_RATE
 					pnl_usd = size_units * price_diff - fees
 					equity += pnl_usd
@@ -2160,7 +2213,7 @@ def backtest_htf_crossover(df, atr_stop_mult=None, direction="long", min_hold_ba
 
 		# Calculate PnL for remaining position
 		price_diff = exit_price - entry_price if long_mode else entry_price - exit_price
-		size_units = current_stake / entry_price
+		size_units = round_to_lot_size(current_stake / entry_price, _symbol)
 		fees = (entry_price + exit_price) * size_units * FEE_RATE
 		pnl_usd = size_units * price_diff - fees
 		equity += pnl_usd
@@ -2189,7 +2242,7 @@ def backtest_htf_crossover(df, atr_stop_mult=None, direction="long", min_hold_ba
 		exit_price = float(last["close"])
 		stake = entry_capital if entry_capital is not None else equity / STAKE_DIVISOR
 		price_diff = exit_price - entry_price if long_mode else entry_price - exit_price
-		size_units = stake / entry_price
+		size_units = round_to_lot_size(stake / entry_price, _symbol)
 		fees = (entry_price + exit_price) * size_units * FEE_RATE
 		pnl_usd = size_units * price_diff - fees
 		equity += pnl_usd

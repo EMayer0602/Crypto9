@@ -71,6 +71,72 @@ except ImportError:
     def should_filter_entry_by_ema_slope(symbol: str, direction: str, slope: float) -> bool:
         return False
 
+# ========== LOT SIZE / STEP SIZE HANDLING ==========
+# Cache for lot sizes fetched from Binance API
+_LOT_SIZE_CACHE: Dict[str, float] = {}
+_LOT_SIZE_CACHE_LOADED = False
+
+
+def fetch_lot_sizes_from_binance() -> Dict[str, float]:
+    """Fetch lot sizes (stepSize) for all symbols from Binance API."""
+    global _LOT_SIZE_CACHE, _LOT_SIZE_CACHE_LOADED
+    if _LOT_SIZE_CACHE_LOADED:
+        return _LOT_SIZE_CACHE
+
+    try:
+        url = "https://api.binance.com/api/v3/exchangeInfo"
+        response = requests.get(url, timeout=30)
+        if response.status_code == 200:
+            data = response.json()
+            for symbol_info in data.get("symbols", []):
+                symbol = symbol_info.get("symbol", "")
+                for filter_info in symbol_info.get("filters", []):
+                    if filter_info.get("filterType") == "LOT_SIZE":
+                        step_size = float(filter_info.get("stepSize", 1))
+                        _LOT_SIZE_CACHE[symbol] = step_size
+                        break
+            _LOT_SIZE_CACHE_LOADED = True
+            print(f"[LotSize] Loaded {len(_LOT_SIZE_CACHE)} lot sizes from Binance API")
+        else:
+            print(f"[LotSize] Failed to fetch exchange info: HTTP {response.status_code}")
+    except Exception as e:
+        print(f"[LotSize] Error fetching lot sizes: {e}")
+
+    return _LOT_SIZE_CACHE
+
+
+def get_lot_size(symbol: str) -> float:
+    """Get the lot size (stepSize) for a symbol. Returns 1e-8 as fallback."""
+    # Normalize symbol (remove / and handle USDC->USDT)
+    clean_symbol = symbol.replace("/", "").upper()
+
+    # Ensure cache is loaded
+    if not _LOT_SIZE_CACHE_LOADED:
+        fetch_lot_sizes_from_binance()
+
+    # Try exact match
+    if clean_symbol in _LOT_SIZE_CACHE:
+        return _LOT_SIZE_CACHE[clean_symbol]
+
+    # Try USDC -> USDT variant
+    usdt_symbol = clean_symbol.replace("USDC", "USDT")
+    if usdt_symbol in _LOT_SIZE_CACHE:
+        return _LOT_SIZE_CACHE[usdt_symbol]
+
+    # Fallback to very small step size (effectively no rounding)
+    return 1e-8
+
+
+def round_to_lot_size(amount: float, symbol: str) -> float:
+    """Round amount DOWN to the nearest valid lot size for the symbol."""
+    lot_size = get_lot_size(symbol)
+    if lot_size <= 0:
+        return amount
+    # Floor to nearest lot size
+    import math
+    return math.floor(amount / lot_size) * lot_size
+
+
 CONFIG_FILE = "paper_trading_config.csv"
 STATE_FILE = "paper_trading_state.json"
 TRADE_LOG_FILE = "paper_trading_log.csv"
@@ -1749,7 +1815,8 @@ def process_snapshot(
     # Use small fixed stake on testnet to avoid insufficient balance
     stake_override = fixed_stake if fixed_stake is not None else (TESTNET_DEFAULT_STAKE if use_testnet else None)
     stake = determine_position_size(context.symbol, state, stake_override, context.direction)
-    size_units = stake / entry_price if entry_price else 0.0
+    # Round to valid lot size for the symbol
+    size_units = round_to_lot_size(stake / entry_price, context.symbol) if entry_price else 0.0
     entry = Position(
         key=context.key,
         symbol=context.symbol,
@@ -1778,7 +1845,7 @@ def process_snapshot(
             if fill_price > 0:
                 entry_record["entry_price_live"] = fill_price
                 entry_record["entry_price"] = fill_price
-                entry_record["size_units"] = entry_record["stake"] / fill_price if fill_price else entry_record["size_units"]
+                entry_record["size_units"] = round_to_lot_size(entry_record["stake"] / fill_price, context.symbol) if fill_price else entry_record["size_units"]
                 save_state(state)
         except Exception as exc:
             print(f"[Order] Entry submission failed for {context.symbol}: {exc}")
@@ -3113,7 +3180,7 @@ def force_entry_position(
         entry_time=entry_iso,
         entry_atr=entry_atr_val,
         stake=stake_value,
-        size_units=stake_value / entry_price,
+        size_units=round_to_lot_size(stake_value / entry_price, context.symbol),
     )
     entry_record = dict(entry.__dict__)
     positions.append(entry_record)
@@ -3132,7 +3199,7 @@ def force_entry_position(
             if fill_price > 0:
                 entry_record["entry_price_live"] = fill_price
                 entry_record["entry_price"] = fill_price
-                entry_record["size_units"] = entry_record["stake"] / fill_price if fill_price else entry_record["size_units"]
+                entry_record["size_units"] = round_to_lot_size(entry_record["stake"] / fill_price, context.symbol) if fill_price else entry_record["size_units"]
                 save_state(state)
             # Save to Crypto9 testnet tracking file
             if use_testnet:
