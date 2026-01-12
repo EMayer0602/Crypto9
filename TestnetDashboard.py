@@ -576,6 +576,9 @@ def generate_dashboard():
             "source": "SPOT",
             "entry_time": trade.get("entry_time") or trade.get("Zeit"),
             "exit_time": trade.get("exit_time") or trade.get("ExitZeit") or trade.get("closed_at"),
+            "entry_price": trade.get("entry_price", 0),
+            "exit_price": trade.get("exit_price", 0),
+            "amount": trade.get("size_units") or trade.get("amount") or (stake / trade.get("entry_price", 1) if trade.get("entry_price") else 0),
             "entry_value": stake,
             "exit_value": exit_value,
             "pnl": pnl,
@@ -739,7 +742,7 @@ def generate_dashboard():
 
     def trade_table_rows(trades):
         if not trades:
-            return "<tr><td colspan='7'>No trades</td></tr>\n"
+            return "<tr><td colspan='10'>No trades</td></tr>\n"
         rows = ""
         for t in trades:
             pnl_class = "positive" if t["pnl"] >= 0 else "negative"
@@ -748,14 +751,34 @@ def generate_dashboard():
             indicator = t.get("indicator", "-")
             htf = t.get("htf", "-")
             reason = t.get("reason", "-")
+            entry_price = t.get("entry_price", 0)
+            exit_price = t.get("exit_price", 0)
+            amount = t.get("amount", 0)
             # Shorten reason for display
             if reason and len(reason) > 25:
                 reason = reason[:22] + "..."
+            # Format prices based on magnitude
+            def fmt_price(p):
+                if p >= 1000:
+                    return f"${p:,.2f}"
+                elif p >= 1:
+                    return f"${p:.4f}"
+                else:
+                    return f"${p:.6f}"
+            # Format amount based on magnitude
+            def fmt_amount(a):
+                if a >= 1:
+                    return f"{a:.4f}"
+                else:
+                    return f"{a:.6f}"
             rows += f"""        <tr>
             <td>{t['symbol']}</td>
             <td>{indicator}/{htf}</td>
             <td>{entry_str}</td>
+            <td>{fmt_price(entry_price)}</td>
             <td>{exit_str}</td>
+            <td>{fmt_price(exit_price)}</td>
+            <td>{fmt_amount(amount)}</td>
             <td class="{pnl_class}">${t['pnl']:,.2f}</td>
             <td class="{pnl_class}">{t['pnl_pct']:+.2f}%</td>
             <td>{reason}</td>
@@ -767,7 +790,7 @@ def generate_dashboard():
     <div class="section">
     <h2>Closed Trades ({len(long_trades)} trades, PnL: <span class="{'positive' if long_pnl >= 0 else 'negative'}">${long_pnl:,.2f}</span>)</h2>
     <table>
-        <tr class="long-header"><th>Symbol</th><th>Strategy</th><th>Entry</th><th>Exit</th><th>PnL</th><th>PnL %</th><th>Reason</th></tr>
+        <tr class="long-header"><th>Symbol</th><th>Strategy</th><th>Entry Time</th><th>Entry Price</th><th>Exit Time</th><th>Exit Price</th><th>Amount</th><th>PnL</th><th>PnL %</th><th>Reason</th></tr>
 """
     html += trade_table_rows(long_trades)
 
