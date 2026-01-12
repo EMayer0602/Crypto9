@@ -21,6 +21,48 @@ PAPER_TRADING_STATE_FILE = "paper_trading_state.json"
 PAPER_TRADING_SIMULATION_LOG = "paper_trading_simulation_log.json"
 PAPER_TRADING_OPEN_POSITIONS = "paper_trading_actual_trades.json"
 
+# Fee rate for PnL correction
+FEE_RATE = 0.00075
+
+
+def correct_trades_pnl(json_path: str) -> int:
+    """Correct PnL for trades using: size_units = stake/entry, pnl = size_units * diff - fees."""
+    import math
+    if not os.path.exists(json_path):
+        return 0
+    try:
+        with open(json_path, 'r') as f:
+            trades = json.load(f)
+        if not isinstance(trades, list):
+            return 0
+        corrected = 0
+        for t in trades:
+            entry_price = float(t.get('entry_price', 0) or 0)
+            exit_price = float(t.get('exit_price', 0) or 0)
+            stake = float(t.get('stake', 0) or 0)
+            if entry_price > 0 and exit_price > 0 and stake > 0:
+                size_units = stake / entry_price
+                fees = (entry_price + exit_price) * size_units * FEE_RATE
+                direction = str(t.get('direction', 'Long')).lower()
+                if direction == 'long':
+                    new_pnl = size_units * (exit_price - entry_price) - fees
+                else:
+                    new_pnl = size_units * (entry_price - exit_price) - fees
+                old_pnl = float(t.get('pnl', 0) or 0)
+                if abs(new_pnl - old_pnl) > 0.001:
+                    t['pnl'] = round(new_pnl, 8)
+                    t['fees'] = round(fees, 8)
+                    t['size_units'] = size_units
+                    corrected += 1
+        if corrected > 0:
+            with open(json_path, 'w') as f:
+                json.dump(trades, f, indent=2, default=str)
+            print(f"[PnL-Fix] Corrected {corrected} trades in {json_path}")
+        return corrected
+    except Exception as e:
+        print(f"[PnL-Fix] Error: {e}")
+        return 0
+
 # Spot Testnet API keys
 SPOT_API_KEY = os.getenv("BINANCE_API_KEY_SPOT")
 SPOT_API_SECRET = os.getenv("BINANCE_API_SECRET_SPOT")
@@ -841,6 +883,10 @@ def generate_dashboard():
 
 
 if __name__ == "__main__":
+    # Auto-correct old trades with wrong PnL formula
+    correct_trades_pnl(PAPER_TRADING_SIMULATION_LOG)
+    correct_trades_pnl(CRYPTO9_CLOSED_TRADES_FILE)
+
     missing = []
     if not SPOT_API_KEY or not SPOT_API_SECRET:
         missing.append("BINANCE_API_KEY_SPOT / BINANCE_API_SECRET_SPOT (Spot)")
