@@ -666,14 +666,34 @@ def generate_dashboard():
     # Calculate open position PnL
     open_long_pnl = sum(p.get("unrealized_pnl", 0) for p in all_open_positions)
 
+    def format_entry_time(t):
+        """Format entry time for display."""
+        if not t:
+            return "-"
+        t_str = str(t)
+        # Handle ISO format: 2026-01-10T14:00:00+01:00 -> 01-10 14:00
+        if "T" in t_str:
+            try:
+                return t_str[5:16].replace("T", " ")  # "01-10 14:00"
+            except:
+                return t_str[:16]
+        # Handle space format: 2026-01-10 14:00:00 -> 01-10 14:00
+        if " " in t_str:
+            try:
+                return t_str[5:16]  # "01-10 14:00"
+            except:
+                return t_str[:16]
+        return t_str[:16]
+
     def position_table_rows(positions):
         if not positions:
-            return "<tr><td colspan='5'>No positions</td></tr>\n"
+            return "<tr><td colspan='6'>No positions</td></tr>\n"
         rows = ""
         for pos in positions:
             source_class = "badge-spot" if pos["source"] == "SPOT" else "badge-futures"
             entry_price = pos.get("entry_price", "-")
             entry_str = f"${entry_price:,.2f}" if isinstance(entry_price, (int, float)) else entry_price
+            entry_time = format_entry_time(pos.get("entry_time", ""))
             upnl = pos.get("unrealized_pnl", 0)
             upnl_class = "positive" if upnl >= 0 else "negative"
             upnl_str = f"${upnl:,.2f}" if upnl != 0 else "-"
@@ -681,6 +701,7 @@ def generate_dashboard():
             <td><span class='badge {source_class}'>{pos['source']}</span></td>
             <td>{pos['asset']}</td>
             <td>{pos['amount']:,.6f}</td>
+            <td>{entry_time}</td>
             <td>{entry_str}</td>
             <td class='{upnl_class}'>{upnl_str}</td>
         </tr>\n"""
@@ -690,7 +711,7 @@ def generate_dashboard():
     html += f"""
     <h2>Open Positions ({len(all_open_positions)}, PnL: <span class="{'positive' if open_long_pnl >= 0 else 'negative'}">${open_long_pnl:,.2f}</span>)</h2>
     <table>
-        <tr class="long-header"><th>Source</th><th>Asset</th><th>Amount</th><th>Entry Price</th><th>Unrealized PnL</th></tr>
+        <tr class="long-header"><th>Source</th><th>Asset</th><th>Amount</th><th>Entry Time</th><th>Entry Price</th><th>Unrealized PnL</th></tr>
 """
     html += position_table_rows(all_open_positions)
     html += "    </table>\n"
