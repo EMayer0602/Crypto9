@@ -577,6 +577,7 @@ def generate_dashboard():
             "pnl_pct": pnl_pct,
             "indicator": trade.get("indicator", ""),
             "htf": trade.get("htf", ""),
+            "reason": trade.get("reason", "-"),
         }
         long_trades.append(trade_data)
 
@@ -729,7 +730,7 @@ def generate_dashboard():
 
     def trade_table_rows(trades):
         if not trades:
-            return "<tr><td colspan='8'>No trades</td></tr>\n"
+            return "<tr><td colspan='7'>No trades</td></tr>\n"
         rows = ""
         for t in trades:
             pnl_class = "positive" if t["pnl"] >= 0 else "negative"
@@ -737,15 +738,18 @@ def generate_dashboard():
             exit_str = format_time(t.get("exit_time")) if t.get("exit_time") else "Open"
             indicator = t.get("indicator", "-")
             htf = t.get("htf", "-")
+            reason = t.get("reason", "-")
+            # Shorten reason for display
+            if reason and len(reason) > 25:
+                reason = reason[:22] + "..."
             rows += f"""        <tr>
             <td>{t['symbol']}</td>
             <td>{indicator}/{htf}</td>
             <td>{entry_str}</td>
             <td>{exit_str}</td>
-            <td>${t['entry_value']:,.2f}</td>
-            <td>${t['exit_value']:,.2f}</td>
             <td class="{pnl_class}">${t['pnl']:,.2f}</td>
             <td class="{pnl_class}">{t['pnl_pct']:+.2f}%</td>
+            <td>{reason}</td>
         </tr>\n"""
         return rows
 
@@ -754,7 +758,7 @@ def generate_dashboard():
     <div class="section">
     <h2>Closed Trades ({len(long_trades)} trades, PnL: <span class="{'positive' if long_pnl >= 0 else 'negative'}">${long_pnl:,.2f}</span>)</h2>
     <table>
-        <tr class="long-header"><th>Symbol</th><th>Strategy</th><th>Entry</th><th>Exit</th><th>Stake</th><th>Exit $</th><th>PnL</th><th>PnL %</th></tr>
+        <tr class="long-header"><th>Symbol</th><th>Strategy</th><th>Entry</th><th>Exit</th><th>PnL</th><th>PnL %</th><th>Reason</th></tr>
 """
     html += trade_table_rows(long_trades)
 
