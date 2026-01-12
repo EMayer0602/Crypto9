@@ -1684,6 +1684,7 @@ def process_snapshot(
                     "stake": trade.stake,
                     "pnl": trade.pnl,
                     "pnl_pct": (trade.pnl / trade.stake * 100) if trade.stake else 0,
+                    "reason": trade.reason,
                 }
                 save_testnet_closed_trade(closed_trade_data)
                 remove_testnet_position(context.symbol, context.direction)

@@ -474,8 +474,9 @@ def generate_dashboard():
     print("  Loading simulation trades...")
     simulation_trades = load_simulation_trades(days_back=30)
 
-    # Combine all closed trades (crypto9 + simulation) and remove duplicates
-    all_closed_trades_raw = crypto9_closed_trades + simulation_trades
+    # Combine all closed trades - simulation FIRST (has reason field), then crypto9
+    # This way, simulation trades with reason are kept, duplicates from crypto9 (no reason) are skipped
+    all_closed_trades_raw = simulation_trades + crypto9_closed_trades
 
     def normalize_time(t):
         """Normalize timestamp to comparable format (first 16 chars: YYYY-MM-DDTHH:MM)."""
