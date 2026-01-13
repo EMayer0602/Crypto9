@@ -1976,7 +1976,7 @@ def backtest_supertrend(df, atr_stop_mult=None, direction="long", min_hold_bars=
 	return pd.DataFrame(trades)
 
 
-def backtest_htf_crossover(df, atr_stop_mult=None, direction="long", min_hold_bars=0):
+def backtest_htf_crossover(df, atr_stop_mult=None, direction="long", min_hold_bars=0, symbol=""):
 	"""
 	Backtest HTF Crossover Strategy
 	Entry: Close crosses HTF indicator (upward for long, downward for short)
@@ -1986,6 +1986,7 @@ def backtest_htf_crossover(df, atr_stop_mult=None, direction="long", min_hold_ba
 	if direction not in {"long", "short"}:
 		raise ValueError("direction must be 'long' or 'short'")
 	min_hold_bars = 0 if min_hold_bars is None else max(0, int(min_hold_bars))
+	_symbol = symbol or "BTCUSDT"  # Fallback for lot size lookup
 
 	long_mode = direction == "long"
 	equity = START_EQUITY
@@ -2773,6 +2774,7 @@ def _run_saved_rows(rows_df, table_title, save_path=None, aggregate_sections=Non
 				atr_stop_mult=atr_mult,
 				direction=direction,
 				min_hold_bars=min_hold_bars,
+				symbol=symbol,
 			)
 		else:  # Default: trend_flip for all other indicators
 			trades = backtest_supertrend(
@@ -2962,6 +2964,7 @@ def run_parameter_sweep():
 									atr_stop_mult=atr_mult,
 									direction=direction,
 									min_hold_bars=min_hold_bars,
+									symbol=symbol,
 								)
 							else:  # Default: trend_flip for all other indicators
 								trades = backtest_supertrend(
