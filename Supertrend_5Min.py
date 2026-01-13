@@ -129,6 +129,7 @@ SYMBOLS = [
 	"ICP/USDC",
 	"BNB/USDC",
 	"LUNC/USDT",  # nur USDT verfügbar
+	"TAO/USDT",   # nur USDT verfügbar
 ]
 
 # Testnet symbols - use USDC where available, USDT otherwise
