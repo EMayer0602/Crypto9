@@ -24,6 +24,9 @@ PAPER_TRADING_OPEN_POSITIONS = "paper_trading_actual_trades.json"
 # Fee rate for PnL correction
 FEE_RATE = 0.00075
 
+# Start capital for equity calculation (must match paper_trader.py)
+START_TOTAL_CAPITAL = 16_500.0
+
 
 def correct_trades_pnl(json_path: str) -> int:
     """Correct PnL for trades using: size_units = stake/entry, pnl = size_units * diff - fees."""
@@ -663,8 +666,9 @@ def generate_dashboard():
     # Calculate total unrealized PnL from open positions
     total_unrealized_pnl = sum(p.get("unrealized_pnl", 0) for p in all_open_positions)
 
-    # Capital from paper trading state
-    total_usdt = paper_capital
+    # Calculate total equity: START_TOTAL_CAPITAL + realized PnL
+    # This ensures dashboard shows correct value even if state file is out of sync
+    total_usdt = START_TOTAL_CAPITAL + total_realized_pnl
 
     # ========== GENERATE HTML ==========
     html = f"""<!DOCTYPE html>
