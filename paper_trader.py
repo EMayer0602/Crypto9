@@ -236,6 +236,8 @@ USE_TIME_BASED_EXIT = True  # Enable time-based exits based on optimal hold time
 DISABLE_TREND_FLIP_EXIT = True  # Only use time-based exits
 SIGNAL_DEBUG = False
 USE_FUTURES_SIGNALS = False  # Use futures data for signal generation (Option 1 from futures lead analysis)
+USE_TREND_STRENGTH_FILTER = False  # Only enter if price is far enough from HTF indicator
+TREND_STRENGTH_MIN_PCT = 0.5  # Minimum distance from HTF indicator in % (0.5 = 0.5%)
 _TESTNET_ACTIVE = False  # Track if testnet mode is active for dashboard updates
 DEFAULT_SIGNAL_INTERVAL_MIN = 15
 DEFAULT_SPIKE_INTERVAL_MIN = 5
@@ -1606,6 +1608,18 @@ def evaluate_entry(df: pd.DataFrame, direction: str) -> tuple[bool, str]:
         signal = trend_prev == 1 and trend_curr == -1
     if not signal:
         return False, "Trend did not flip"
+
+    # Trend strength filter: only enter if price is far enough from HTF indicator
+    if USE_TREND_STRENGTH_FILTER and "htf_indicator" in curr.index:
+        close_price = float(curr["close"])
+        htf_ind = float(curr["htf_indicator"])
+        if htf_ind > 0:
+            distance_pct = ((close_price - htf_ind) / htf_ind) * 100
+            if direction == "long" and distance_pct < TREND_STRENGTH_MIN_PCT:
+                return False, f"Trend strength too weak: {distance_pct:.2f}% < {TREND_STRENGTH_MIN_PCT}%"
+            if direction == "short" and distance_pct > -TREND_STRENGTH_MIN_PCT:
+                return False, f"Trend strength too weak: {distance_pct:.2f}% > -{TREND_STRENGTH_MIN_PCT}%"
+
     allows, reason = filters_allow_entry(direction, df)
     if not allows:
         return False, reason
