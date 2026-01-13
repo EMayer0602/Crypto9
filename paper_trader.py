@@ -220,7 +220,7 @@ def get_report_dir(use_testnet: bool = False) -> str:
 BEST_PARAMS_CSV = st.OVERALL_PARAMS_CSV
 START_TOTAL_CAPITAL = 16_500.0
 MAX_OPEN_POSITIONS = 12
-STAKE_DIVISOR = 10  # stake = current total_capital / STAKE_DIVISOR = 16500/10 = 1650
+STAKE_DIVISOR = 12  # stake = current total_capital / STAKE_DIVISOR = 16500/12 = 1375
 # Separate limits for Long (Spot) vs Short (Margin)
 MAX_LONG_POSITIONS = 12
 MAX_SHORT_POSITIONS = 0  # Shorts disabled
