@@ -3210,3 +3210,4 @@ if __name__ == "__main__":
 				summary_rows = run_current_configuration()
 				record_global_best(indicator_name, summary_rows)
 		write_overall_result_tables()
+
