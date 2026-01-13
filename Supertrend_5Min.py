@@ -144,6 +144,7 @@ TESTNET_SYMBOLS = [
 	"ZEC/USDC",
 	"TNSR/USDC",
 	"BNB/USDT",
+	"TAO/USDC",
 	# ICP/USDT, ADA/USDT, LUNC/USDT not available on Spot testnet
 ]
 
@@ -158,6 +159,7 @@ TESTNET_TO_USDC_MAP = {
 	"ZEC/USDC": "ZEC/USDC",
 	"TNSR/USDC": "TNSR/USDC",
 	"BNB/USDT": "BNB/USDC",
+	"TAO/USDC": "TAO/USDC",
 }
 
 
