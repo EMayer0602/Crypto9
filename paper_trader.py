@@ -233,6 +233,7 @@ DEFAULT_FIXED_STAKE = 2000.0  # Fixed stake per trade
 DEFAULT_ALLOWED_DIRECTIONS = ["long", "short"]  # Enable both long and short trades
 DEFAULT_USE_TESTNET = False  # Testnet should be opt-in with --testnet flag
 USE_TIME_BASED_EXIT = True  # Enable time-based exits based on optimal hold times
+DISABLE_TREND_FLIP_EXIT = True  # Disable trend flip exits (only use time-based exits)
 SIGNAL_DEBUG = False
 USE_FUTURES_SIGNALS = False  # Use futures data for signal generation (Option 1 from futures lead analysis)
 _TESTNET_ACTIVE = False  # Track if testnet mode is active for dashboard updates
@@ -1697,7 +1698,7 @@ def evaluate_exit(position: Dict, df: pd.DataFrame, atr_mult: Optional[float], m
     # If time-based exits disabled: use traditional min_hold_bars
     min_bars_for_trend_flip = max(optimal_hold_bars, min_hold_bars) if USE_TIME_BASED_EXIT else max(0, min_hold_bars)
 
-    if exit_price is None and trend_flipped and bars_held >= min_bars_for_trend_flip:
+    if not DISABLE_TREND_FLIP_EXIT and exit_price is None and trend_flipped and bars_held >= min_bars_for_trend_flip:
         exit_price = float(curr["close"])
         reason = "Trend flip"
 
