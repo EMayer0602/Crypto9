@@ -236,7 +236,7 @@ USE_TIME_BASED_EXIT = True  # Enable time-based exits based on optimal hold time
 DISABLE_TREND_FLIP_EXIT = True  # Only use time-based exits
 SIGNAL_DEBUG = False
 USE_FUTURES_SIGNALS = False  # Use futures data for signal generation (Option 1 from futures lead analysis)
-USE_TREND_STRENGTH_FILTER = False  # Only enter if price is far enough from HTF indicator
+USE_TREND_STRENGTH_FILTER = True  # Only enter if price is far enough from HTF indicator
 TREND_STRENGTH_MIN_PCT = 0.5  # Minimum distance from HTF indicator in % (0.5 = 0.5%)
 _TESTNET_ACTIVE = False  # Track if testnet mode is active for dashboard updates
 DEFAULT_SIGNAL_INTERVAL_MIN = 15
