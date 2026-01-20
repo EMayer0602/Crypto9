@@ -223,7 +223,7 @@ MAX_OPEN_POSITIONS = 10
 STAKE_DIVISOR = 10  # stake = current total_capital / STAKE_DIVISOR = 16500/10 = 1650
 # Separate limits for Long (Spot) vs Short (Margin)
 MAX_LONG_POSITIONS = 10
-MAX_SHORT_POSITIONS = 5
+MAX_SHORT_POSITIONS = 0  # Shorts disabled
 LONG_STAKE = 1500.0  # 15000 / 10 positions
 SHORT_STAKE = 200.0  # 1000 / 5 positions
 DEFAULT_DIRECTION_CAPITAL = 2_800.0
