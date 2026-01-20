@@ -895,6 +895,12 @@ def generate_dashboard():
 
 
 if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--loop", action="store_true", help="Run in continuous loop mode")
+    parser.add_argument("--interval", type=int, default=30, help="Refresh interval in seconds (default: 30)")
+    args = parser.parse_args()
+
     # Auto-correct old trades with wrong PnL formula
     correct_trades_pnl(PAPER_TRADING_SIMULATION_LOG)
     correct_trades_pnl(CRYPTO9_CLOSED_TRADES_FILE)
@@ -908,5 +914,17 @@ if __name__ == "__main__":
         print("Warning: Missing API keys in .env:")
         for m in missing:
             print(f"  - {m}")
-    path = generate_dashboard()
-    print(f"Open with: start {path}")
+
+    if args.loop:
+        print(f"Running dashboard loop (refresh every {args.interval}s). Press Ctrl+C to stop.")
+        while True:
+            try:
+                path = generate_dashboard()
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] Dashboard updated: {path}")
+                time.sleep(args.interval)
+            except KeyboardInterrupt:
+                print("\nStopped.")
+                break
+    else:
+        path = generate_dashboard()
+        print(f"Open with: start {path}")
