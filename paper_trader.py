@@ -1495,13 +1495,13 @@ def position_key(symbol: str, indicator: str, htf: str, direction: str) -> str:
 
 def find_position(state: Dict, key: str) -> Optional[Dict]:
     for pos in state["positions"]:
-        if pos["key"] == key:
+        if pos.get("key") == key:
             return pos
     return None
 
 
 def remove_position(state: Dict, key: str) -> None:
-    state["positions"] = [pos for pos in state["positions"] if pos["key"] != key]
+    state["positions"] = [pos for pos in state["positions"] if pos.get("key") != key]
 
 
 def bars_in_position(entry_iso: str, latest_ts: pd.Timestamp, htf_timeframe: Optional[str] = None) -> int:
