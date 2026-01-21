@@ -1254,8 +1254,8 @@ def build_strategy_context(row: pd.Series) -> StrategyContext:
     htf_value = str(row.get("HTF", st.HIGHER_TIMEFRAME) or st.HIGHER_TIMEFRAME).strip()
     param_a, param_b = normalize_params(row, indicator_key)
     atr_mult = parse_float(row.get("ATRStopMultValue", row.get("ATRStopMult")))
-    min_hold_days = int(parse_float(row.get("MinHoldDays")) or 0)
-    min_hold_bars = int(min_hold_days * st.BARS_PER_DAY)
+    # MinHoldBars from CSV - number of HTF bars before forced exit
+    min_hold_bars = int(parse_float(row.get("MinHoldBars")) or 0)
     return StrategyContext(
         symbol=symbol,
         direction=direction,
@@ -1679,42 +1679,22 @@ def evaluate_exit(position: Dict, df: pd.DataFrame, atr_mult: Optional[float], m
             exit_price = stop_price
             reason = f"ATR stop x{atr_mult:.2f}"
 
-    # Time-based exit: Exit after optimal hold time based on peak profit analysis
-    # Analysis showed peak profit occurs at ~65% of trade duration on average
-    # Long trades especially need tighter exits (gave back 22,733% on average)
-
-    # Get symbol-specific optimal hold time from configuration
-    symbol = position.get("symbol", "")
-    direction_str = "long" if long_mode else "short"
-    optimal_hold_bars = get_optimal_hold_bars(symbol, direction_str) if USE_TIME_BASED_EXIT else 0
-
-    if USE_TIME_BASED_EXIT and exit_price is None:
-        # Check if we've reached optimal hold time AND have some profit
-        if bars_held >= optimal_hold_bars:
-            current_price = float(curr["close"])
-            unrealized_pnl_pct = ((current_price - entry_price) / entry_price) if long_mode else ((entry_price - current_price) / entry_price)
-
-            # Exit if we have profit (or close to breakeven within 1%)
-            if unrealized_pnl_pct >= -0.01:  # -1% or better
-                exit_price = current_price
-                reason = f"Time-based exit ({bars_held} bars, optimal={optimal_hold_bars})"
-
-    # Trend flip exit - but only AFTER optimal hold time if time-based exits enabled
-    # This prevents premature exits before the optimal time is reached
+    # Trend flip exit - check first, can exit early if trend flips
     trend_curr = int(curr["trend_flag"])
     trend_prev = int(prev["trend_flag"])
     flip_long = long_mode and trend_prev == 1 and trend_curr == -1
     flip_short = (not long_mode) and trend_prev == -1 and trend_curr == 1
     trend_flipped = flip_long or flip_short
 
-    # Determine minimum bars before allowing trend flip exit
-    # If time-based exits enabled: wait for optimal hold time OR traditional min_hold_bars (whichever is higher)
-    # If time-based exits disabled: use traditional min_hold_bars
-    min_bars_for_trend_flip = max(optimal_hold_bars, min_hold_bars) if USE_TIME_BASED_EXIT else max(0, min_hold_bars)
-
-    if not DISABLE_TREND_FLIP_EXIT and exit_price is None and trend_flipped and bars_held >= min_bars_for_trend_flip:
+    if not DISABLE_TREND_FLIP_EXIT and exit_price is None and trend_flipped:
         exit_price = float(curr["close"])
         reason = "Trend flip"
+
+    # FORCED time-based exit after MinHoldBars (from CSV) - exit regardless of profit/loss
+    # MinHoldBars is counted in HTF bars (e.g., 24 bars at 2h HTF = 48 hours)
+    if exit_price is None and min_hold_bars > 0 and bars_held >= min_hold_bars:
+        exit_price = float(curr["close"])
+        reason = f"Time-based exit ({bars_held} >= {min_hold_bars} HTF bars)"
 
     if exit_price is None:
         return None
