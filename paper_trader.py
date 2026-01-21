@@ -233,9 +233,11 @@ DEFAULT_FIXED_STAKE = 2000.0  # Fixed stake per trade
 DEFAULT_ALLOWED_DIRECTIONS = ["long", "short"]  # Enable both long and short trades
 DEFAULT_USE_TESTNET = False  # Testnet should be opt-in with --testnet flag
 USE_TIME_BASED_EXIT = True  # Enable time-based exits based on optimal hold times
-DISABLE_TREND_FLIP_EXIT = False  # Allow trend flip exits
+DISABLE_TREND_FLIP_EXIT = True  # Only use time-based exits
 SIGNAL_DEBUG = False
 USE_FUTURES_SIGNALS = False  # Use futures data for signal generation (Option 1 from futures lead analysis)
+USE_TREND_STRENGTH_FILTER = False  # Only enter if price is far enough from HTF indicator
+TREND_STRENGTH_MIN_PCT = 0.5  # Minimum distance from HTF indicator in % (0.5 = 0.5%)
 _TESTNET_ACTIVE = False  # Track if testnet mode is active for dashboard updates
 DEFAULT_SIGNAL_INTERVAL_MIN = 15
 DEFAULT_SPIKE_INTERVAL_MIN = 5
@@ -1321,17 +1323,13 @@ def load_best_rows(active_indicators: Optional[List[str]] = None) -> pd.DataFram
         raise FileNotFoundError(
             f"Overall summary file {BEST_PARAMS_CSV} not found. Run a parameter sweep first."
         )
-    # Try semicolon (European) first since that's what sweeps produce, then comma
-    df = None
-    for sep, decimal in [(";", ","), (",", ".")]:
-        try:
-            df = pd.read_csv(BEST_PARAMS_CSV, sep=sep, decimal=decimal)
-            if "Symbol" in df.columns:
-                break
-        except Exception:
-            continue
-    if df is None or "Symbol" not in df.columns:
-        raise ValueError(f"Could not parse {BEST_PARAMS_CSV} - 'Symbol' column not found")
+    # Try American format first (comma separator), fall back to European (semicolon)
+    try:
+        df = pd.read_csv(BEST_PARAMS_CSV)
+        if "Symbol" not in df.columns:
+            raise ValueError("Symbol column not found")
+    except (ValueError, pd.errors.ParserError):
+        df = pd.read_csv(BEST_PARAMS_CSV, sep=";", decimal=",")
     if df.empty:
         return df
     if active_indicators:
@@ -1495,13 +1493,13 @@ def position_key(symbol: str, indicator: str, htf: str, direction: str) -> str:
 
 def find_position(state: Dict, key: str) -> Optional[Dict]:
     for pos in state["positions"]:
-        if pos.get("key") == key:
+        if pos["key"] == key:
             return pos
     return None
 
 
 def remove_position(state: Dict, key: str) -> None:
-    state["positions"] = [pos for pos in state["positions"] if pos.get("key") != key]
+    state["positions"] = [pos for pos in state["positions"] if pos["key"] != key]
 
 
 def bars_in_position(entry_iso: str, latest_ts: pd.Timestamp, htf_timeframe: Optional[str] = None) -> int:
@@ -1610,6 +1608,18 @@ def evaluate_entry(df: pd.DataFrame, direction: str) -> tuple[bool, str]:
         signal = trend_prev == 1 and trend_curr == -1
     if not signal:
         return False, "Trend did not flip"
+
+    # Trend strength filter: only enter if price is far enough from HTF indicator
+    if USE_TREND_STRENGTH_FILTER and "htf_indicator" in curr.index:
+        close_price = float(curr["close"])
+        htf_ind = float(curr["htf_indicator"])
+        if htf_ind > 0:
+            distance_pct = ((close_price - htf_ind) / htf_ind) * 100
+            if direction == "long" and distance_pct < TREND_STRENGTH_MIN_PCT:
+                return False, f"Trend strength too weak: {distance_pct:.2f}% < {TREND_STRENGTH_MIN_PCT}%"
+            if direction == "short" and distance_pct > -TREND_STRENGTH_MIN_PCT:
+                return False, f"Trend strength too weak: {distance_pct:.2f}% > -{TREND_STRENGTH_MIN_PCT}%"
+
     allows, reason = filters_allow_entry(direction, df)
     if not allows:
         return False, reason
