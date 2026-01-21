@@ -901,9 +901,9 @@ if __name__ == "__main__":
     parser.add_argument("--interval", type=int, default=30, help="Refresh interval in seconds (default: 30)")
     args = parser.parse_args()
 
-    # Auto-correct old trades with wrong PnL formula
-    correct_trades_pnl(PAPER_TRADING_SIMULATION_LOG)
-    correct_trades_pnl(CRYPTO9_CLOSED_TRADES_FILE)
+    # PnL correction disabled - paper_trader.py already calculates correct PnL with lot sizes
+    # correct_trades_pnl(PAPER_TRADING_SIMULATION_LOG)
+    # correct_trades_pnl(CRYPTO9_CLOSED_TRADES_FILE)
 
     missing = []
     if not SPOT_API_KEY or not SPOT_API_SECRET:
