@@ -3583,6 +3583,11 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         action="store_true",
         help="Delete generated CSV/JSON/HTML outputs before writing new ones",
     )
+    parser.add_argument(
+        "--close-at-end",
+        action="store_true",
+        help="Force close all open positions at simulation end (marks them as 'simulation_end' exit)",
+    )
     parser.add_argument("--monitor", action="store_true", help="Run continuous monitor loop (scheduled cycle + optional ATR spikes)")
     parser.add_argument("--signal-interval", type=float, default=DEFAULT_SIGNAL_INTERVAL_MIN, help="Minutes between scheduled monitor cycles (default 15)")
     parser.add_argument("--spike-interval", type=float, default=DEFAULT_SPIKE_INTERVAL_MIN, help="Minutes between ATR spike scans (default 5)")
@@ -3792,6 +3797,59 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
             )
             trades_df = trades_to_dataframe(trades)
             open_positions = final_state.get("positions", [])
+
+            # Force close all open positions at simulation end if requested
+            if args.close_at_end and open_positions:
+                print(f"[Simulation] Force closing {len(open_positions)} open positions at simulation end...")
+                for pos in open_positions[:]:  # Copy list to allow modification
+                    # Get last price from cache or use entry price as fallback
+                    symbol = pos.get("symbol", "")
+                    try:
+                        df_1h = st.load_ohlcv_from_cache(symbol, "1h")
+                        if df_1h is not None and not df_1h.empty:
+                            last_price = float(df_1h['close'].iloc[-1])
+                        else:
+                            last_price = float(pos.get("entry_price", 0))
+                    except Exception:
+                        last_price = float(pos.get("entry_price", 0))
+
+                    entry_price = float(pos.get("entry_price", 0))
+                    stake = float(pos.get("stake", 0))
+                    direction = pos.get("direction", "long").lower()
+
+                    # Calculate PnL
+                    if direction == "long":
+                        pnl_pct = (last_price - entry_price) / entry_price if entry_price else 0
+                    else:
+                        pnl_pct = (entry_price - last_price) / entry_price if entry_price else 0
+                    pnl_usd = stake * pnl_pct
+
+                    # Create trade result
+                    trade = TradeResult(
+                        symbol=symbol,
+                        direction=pos.get("direction", "Long"),
+                        indicator=pos.get("indicator", ""),
+                        htf=pos.get("htf", ""),
+                        entry_time=pos.get("entry_time", ""),
+                        exit_time=end_ts.isoformat(),
+                        entry_price=entry_price,
+                        exit_price=last_price,
+                        stake=stake,
+                        pnl_pct=pnl_pct * 100,
+                        pnl_usd=pnl_usd,
+                        exit_reason="simulation_end",
+                        equity_after=final_state["total_capital"] + pnl_usd,
+                    )
+                    trades.append(trade)
+                    final_state["total_capital"] += pnl_usd
+                    print(f"  Closed {symbol} {direction}: PnL {pnl_usd:+.2f} USDT ({pnl_pct*100:+.1f}%)")
+
+                # Clear positions after force close
+                final_state["positions"] = []
+                open_positions = []
+                trades_df = trades_to_dataframe(trades)
+                print(f"[Simulation] All positions closed. New total: {len(trades)} trades")
+
             print(f"[Simulation] Generated {len(trades)} trades during simulation")
         log_path = args.sim_log or SIMULATION_LOG_FILE
         log_json_path = args.sim_json or SIMULATION_LOG_JSON
