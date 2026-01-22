@@ -395,3 +395,56 @@ git tag v1.0-long-only-optimal 15c9747
 2. **Forced Time-based Exit** nach optimal_hold_bars (auch bei Verlust!)
 3. Trend Flip (nach min_bars_for_trend_flip)
 
+---
+
+### v1.1-optimized-bars (2025-01-22)
+**Commit:** `4a4c969`
+
+Optimierte optimal_hold_bars aus echten Simulationsdaten + TAO alle Indikatoren.
+
+**Änderungen gegenüber v1.0:**
+
+| Symbol | Alt | Neu | Grund |
+|--------|-----|-----|-------|
+| ETH | 5 | **2** | Größter Verlierer (-8573 PnL) |
+| BTC | 5 | **3** | Verlierer (-257 PnL) |
+| XRP | 5 | **3** | Verlierer (-208 PnL) |
+| TNSR, LUNC, ZEC, SOL, LINK, SUI | 2-5 | **4** | Beste Win Rate (74.7%) |
+
+**TAO erweitert:**
+- supertrend (existierte bereits)
+- htf_crossover (neu)
+- jma (neu)
+- kama (neu)
+
+**Wiederherstellen:**
+```bash
+git checkout v1.1-optimized-bars
+```
+
+**Tag lokal erstellen (falls nicht vorhanden):**
+```bash
+git tag v1.1-optimized-bars 4a4c969
+```
+
+---
+
+### Rollback Übersicht
+
+| Version | Commit | Beschreibung |
+|---------|--------|--------------|
+| v1.0-long-only-optimal | `15c9747` | Basis Long-Only, verdoppeltes Kapital |
+| v1.1-optimized-bars | `4a4c969` | Optimierte Bars + TAO alle Indikatoren |
+
+**Schnell-Rollback:**
+```bash
+# Zurück zu v1.0
+git checkout v1.0-long-only-optimal
+
+# Zurück zu v1.1
+git checkout v1.1-optimized-bars
+
+# Zurück zum neuesten Stand
+git checkout claude/review-project-0ktcy
+```
+
