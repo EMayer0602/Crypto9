@@ -1679,22 +1679,18 @@ def evaluate_exit(position: Dict, df: pd.DataFrame, atr_mult: Optional[float], m
             exit_price = stop_price
             reason = f"ATR stop x{atr_mult:.2f}"
 
-    # Time-based exit: Exit after optimal hold time based on peak profit analysis
+    # Time-based exit: FORCED exit after optimal hold time (regardless of profit/loss)
     # Get symbol-specific optimal hold time from configuration
     symbol = position.get("symbol", "")
     direction_str = "long" if long_mode else "short"
     optimal_hold_bars = get_optimal_hold_bars(symbol, direction_str) if USE_TIME_BASED_EXIT else 0
 
     if USE_TIME_BASED_EXIT and exit_price is None:
-        # Check if we've reached optimal hold time AND have some profit
+        # FORCED exit after optimal_hold_bars - cuts losses early
         if bars_held >= optimal_hold_bars:
             current_price = float(curr["close"])
-            unrealized_pnl_pct = ((current_price - entry_price) / entry_price) if long_mode else ((entry_price - current_price) / entry_price)
-
-            # Exit if we have profit (or close to breakeven within 1%)
-            if unrealized_pnl_pct >= -0.01:  # -1% or better
-                exit_price = current_price
-                reason = f"Time-based exit ({bars_held} bars, optimal={optimal_hold_bars})"
+            exit_price = current_price
+            reason = f"Time-based exit ({bars_held} bars, optimal={optimal_hold_bars})"
 
     # Trend flip exit - but only AFTER optimal hold time if time-based exits enabled
     trend_curr = int(curr["trend_flag"])
