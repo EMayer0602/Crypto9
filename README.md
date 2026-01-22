@@ -355,3 +355,43 @@ git add .
 git commit -m "Your message"
 git push origin branch-name
 ```
+
+---
+
+## Stable Versions (Tags)
+
+### v1.0-long-only-optimal (2025-01-22)
+**Commit:** `15c9747`
+
+Beste Long-Only Konfiguration mit verdoppeltem Kapital.
+
+| Einstellung | Wert |
+|-------------|------|
+| STAKE_DIVISOR | 10 |
+| MAX_OPEN_POSITIONS | 10 |
+| MAX_SHORT_POSITIONS | 0 (Long only) |
+| Exit-Strategie | Forced nach optimal_hold_bars |
+| Trend flip | aktiv |
+| USE_TIME_BASED_EXIT | True |
+| DISABLE_TREND_FLIP_EXIT | False |
+
+**Wiederherstellen:**
+```bash
+git checkout v1.0-long-only-optimal
+```
+
+**Tag lokal erstellen (falls nicht vorhanden):**
+```bash
+git tag v1.0-long-only-optimal 15c9747
+```
+
+**Wichtige Dateien:**
+- `paper_trader.py` - Hauptlogik mit evaluate_exit
+- `optimal_hold_times_defaults.py` - USDC Symbole mit optimal bars
+- `report_html/best_params_overall.csv` - Parameter für alle Indikatoren
+
+**Exit-Logik:**
+1. ATR Stop (falls konfiguriert)
+2. **Forced Time-based Exit** nach optimal_hold_bars (auch bei Verlust!)
+3. Trend Flip (nach min_bars_for_trend_flip)
+
