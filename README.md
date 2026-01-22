@@ -358,6 +358,58 @@ git push origin branch-name
 
 ---
 
+## Dashboard (TestnetDashboard.py)
+
+Das Dashboard zeigt alle offenen Positionen, geschlossene Trades und Performance-Statistiken in einer HTML-Übersicht.
+
+### Dashboard starten
+
+**Einmalig generieren:**
+```bash
+python TestnetDashboard.py
+```
+
+**Kontinuierlich aktualisieren (alle 30 Sekunden):**
+```bash
+python TestnetDashboard.py --loop
+```
+
+**Mit benutzerdefiniertem Intervall (z.B. 60 Sekunden):**
+```bash
+python TestnetDashboard.py --loop --interval 60
+```
+
+### Dashboard Optionen
+
+| Option | Beschreibung | Standard |
+|--------|--------------|----------|
+| `--loop` | Kontinuierlicher Modus - aktualisiert automatisch | Aus |
+| `--interval N` | Aktualisierungsintervall in Sekunden | 30 |
+
+### Dashboard Ausgabe
+
+Das Dashboard generiert `report_testnet/dashboard.html` mit:
+- **Open Positions**: Aktuelle offene Trades mit Echtzeit-Preisen von Binance
+- **Closed Trades**: Alle geschlossenen Trades mit PnL
+- **Performance Summary**: Win Rate, Total PnL, Equity Curve
+- **Symbol Statistics**: Performance pro Symbol
+
+### Beispiele
+
+```bash
+# Dashboard einmal generieren und im Browser öffnen
+python TestnetDashboard.py
+start report_testnet\dashboard.html
+
+# Dashboard alle 60 Sekunden aktualisieren
+python TestnetDashboard.py --loop --interval 60
+
+# Dashboard alle 5 Minuten aktualisieren
+python TestnetDashboard.py --loop --interval 300
+```
+
+---
+
 ## Stable Versions (Tags)
 
 ### v1.0-long-only-optimal (2025-01-22)
