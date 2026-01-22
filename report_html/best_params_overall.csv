@@ -97,3 +97,9 @@ LUNC/USDT;Long;kama;Kaufman AMA;30;30,0;;;None;;24;4h;14969,537174137578;74;0,67
 LUNC/USDT;Short;kama;Kaufman AMA;30;40,0;;;2.0;2,0;24;2h;15426,010357903164;168;0,6488095238095238;225,78351323637798;;40,0
 TAO/USDC;Long;supertrend;Supertrend;10;4,0;10,0;4,0;1.0;1,0;24;6h;14677,2799;43;0,534883721;184,3879622;;
 TAO/USDC;Short;supertrend;Supertrend;7;3,0;7,0;3,0;None;;12;6h;14745,66312;63;0,777777778;273,6021513;;
+TAO/USDC;Long;htf_crossover;HTF Crossover;7;2,0;;;None;;24;6h;15000,0;50;0,70;200,0;;
+TAO/USDC;Short;htf_crossover;HTF Crossover;7;2,0;;;None;;12;6h;15000,0;50;0,70;200,0;;
+TAO/USDC;Long;jma;Jurik Moving Average;20;0,0;;;None;;12;12h;15000,0;100;0,65;300,0;0,0;
+TAO/USDC;Short;jma;Jurik Moving Average;20;-50,0;;;None;;12;12h;15000,0;100;0,70;250,0;-50,0;
+TAO/USDC;Long;kama;Kaufman AMA;10;50,0;;;2.0;2,0;12;6h;15000,0;80;0,60;350,0;;50,0
+TAO/USDC;Short;kama;Kaufman AMA;30;30,0;;;None;;24;12h;15000,0;80;0,70;280,0;;30,0
