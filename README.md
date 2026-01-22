@@ -429,12 +429,39 @@ git tag v1.1-optimized-bars 4a4c969
 
 ---
 
+### v1.2-winners-only (2025-01-22) ⭐ BEST
+**Commit:** `33b7bb1`
+
+**BESTES ERGEBNIS!** Nur Gewinner optimiert, Verlierer auf Original belassen.
+
+**Strategie:**
+- Gewinner (TNSR, LUNC, ZEC, SOL, LINK, SUI) → 4 bars (optimiert)
+- Verlierer (ETH, BTC, XRP) → 5 bars (original, nicht anfassen)
+
+| Symbol | Bars | Status |
+|--------|------|--------|
+| TNSR, LUNC, ZEC, SOL, LINK, SUI | **4** | Optimiert (74.7% Win Rate) |
+| ETH, BTC, XRP | **5** | Original (nicht reduziert) |
+
+**Wiederherstellen:**
+```bash
+git checkout v1.2-winners-only
+```
+
+**Tag lokal erstellen (falls nicht vorhanden):**
+```bash
+git tag v1.2-winners-only 33b7bb1
+```
+
+---
+
 ### Rollback Übersicht
 
 | Version | Commit | Beschreibung |
 |---------|--------|--------------|
 | v1.0-long-only-optimal | `15c9747` | Basis Long-Only, verdoppeltes Kapital |
-| v1.1-optimized-bars | `4a4c969` | Optimierte Bars + TAO alle Indikatoren |
+| v1.1-optimized-bars | `4a4c969` | Alle Bars optimiert + TAO Indikatoren |
+| **v1.2-winners-only** | `33b7bb1` | ⭐ **BEST** - Nur Gewinner optimiert |
 
 **Schnell-Rollback:**
 ```bash
@@ -443,6 +470,9 @@ git checkout v1.0-long-only-optimal
 
 # Zurück zu v1.1
 git checkout v1.1-optimized-bars
+
+# Zurück zu v1.2 (BEST)
+git checkout v1.2-winners-only
 
 # Zurück zum neuesten Stand
 git checkout claude/review-project-0ktcy
