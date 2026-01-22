@@ -1,10 +1,12 @@
 """
 Optimal hold times based on simulation analysis (2025-01-22).
 
+v1.2: Only optimize winners, keep losers unchanged.
+
 Analysis Results:
 - 4 bars: Best win rate (74.7%)
-- Winners: TNSR, LUNC, ZEC, SOL, LINK, SUI
-- Losers: ETH (-8573), BTC (-257), XRP (-208) -> reduced bars to cut losses faster
+- Winners optimized: TNSR, LUNC, ZEC, SOL, LINK, SUI -> 4 bars
+- Losers unchanged: ETH, BTC, XRP -> 5 bars (original)
 
 Updated for USDC pairs with data-driven values.
 """
@@ -12,39 +14,39 @@ Updated for USDC pairs with data-driven values.
 # Optimal hold times from real simulation data
 # Format: (symbol, direction) -> bars
 OPTIMAL_HOLD_BARS = {
-    # BTC - LOSER: reduced from 5 to 3 to cut losses faster
-    ("BTC/USDC", "long"): 3,
-    ("BTC/USDC", "short"): 3,
+    # BTC - LOSER but keep original 5 bars
+    ("BTC/USDC", "long"): 5,
+    ("BTC/USDC", "short"): 5,
 
-    # ETH - BIGGEST LOSER: reduced from 5 to 2 to cut losses faster
-    ("ETH/USDC", "long"): 2,
+    # ETH - LOSER but keep original 5 bars
+    ("ETH/USDC", "long"): 5,
     ("ETH/USDC", "short"): 2,
 
-    # LINK - small winner, keep at 4
+    # LINK - WINNER: optimized to 4 bars
     ("LINK/USDC", "long"): 4,
     ("LINK/USDC", "short"): 2,
 
-    # LUNC - WINNER: keep at 4 (57% win rate, +4376 PnL)
+    # LUNC - WINNER: optimized to 4 bars (57% win rate, +4376 PnL)
     ("LUNC/USDT", "long"): 4,
     ("LUNC/USDT", "short"): 2,
 
-    # SOL - winner, increase to 4
+    # SOL - WINNER: optimized to 4 bars
     ("SOL/USDC", "long"): 4,
     ("SOL/USDC", "short"): 2,
 
-    # SUI - small winner, keep at 4
+    # SUI - WINNER: optimized to 4 bars
     ("SUI/USDC", "long"): 4,
     ("SUI/USDC", "short"): 2,
 
-    # TNSR - BIGGEST WINNER: keep at 4 (59% win rate, +8552 PnL)
+    # TNSR - BIGGEST WINNER: optimized to 4 bars (59% win rate, +8552 PnL)
     ("TNSR/USDC", "long"): 4,
     ("TNSR/USDC", "short"): 2,
 
-    # XRP - LOSER: reduced from 5 to 3
-    ("XRP/USDC", "long"): 3,
+    # XRP - LOSER but keep original 5 bars
+    ("XRP/USDC", "long"): 5,
     ("XRP/USDC", "short"): 2,
 
-    # ZEC - WINNER: keep at 4 (56% win rate, +1648 PnL)
+    # ZEC - WINNER: optimized to 4 bars (56% win rate, +1648 PnL)
     ("ZEC/USDC", "long"): 4,
     ("ZEC/USDC", "short"): 4,
 
