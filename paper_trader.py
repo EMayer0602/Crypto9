@@ -219,21 +219,21 @@ def get_report_dir(use_testnet: bool = False) -> str:
     return "report_testnet" if use_testnet else "report_html"
 BEST_PARAMS_CSV = st.OVERALL_PARAMS_CSV
 START_TOTAL_CAPITAL = 16_500.0
-MAX_OPEN_POSITIONS = 12
-STAKE_DIVISOR = 12  # stake = current total_capital / STAKE_DIVISOR = 16500/12 = 1375
+MAX_OPEN_POSITIONS = 10
+STAKE_DIVISOR = 10  # stake = current total_capital / STAKE_DIVISOR = 16500/10 = 1650
 # Separate limits for Long (Spot) vs Short (Margin)
-MAX_LONG_POSITIONS = 12
-MAX_SHORT_POSITIONS = 0  # Shorts disabled
-LONG_STAKE = 1500.0  # 15000 / 10 positions
+MAX_LONG_POSITIONS = 10
+MAX_SHORT_POSITIONS = 0  # Shorts disabled for long-only mode
+LONG_STAKE = 1650.0  # 16500 / 10 positions
 SHORT_STAKE = 200.0  # 1000 / 5 positions
 DEFAULT_DIRECTION_CAPITAL = 2_800.0
 BASE_BAR_MINUTES = st.timeframe_to_minutes(st.TIMEFRAME)
 DEFAULT_SYMBOL_ALLOWLIST = [sym.strip() for sym in st.SYMBOLS if sym and sym.strip()]
 DEFAULT_FIXED_STAKE = 2000.0  # Fixed stake per trade
-DEFAULT_ALLOWED_DIRECTIONS = ["long", "short"]  # Enable both long and short trades
+DEFAULT_ALLOWED_DIRECTIONS = ["long"]  # Long only mode
 DEFAULT_USE_TESTNET = False  # Testnet should be opt-in with --testnet flag
 USE_TIME_BASED_EXIT = True  # Enable time-based exits based on optimal hold times
-DISABLE_TREND_FLIP_EXIT = True  # Only use time-based exits
+DISABLE_TREND_FLIP_EXIT = False  # Enable trend flip exits (like original working version)
 SIGNAL_DEBUG = False
 USE_FUTURES_SIGNALS = False  # Use futures data for signal generation (Option 1 from futures lead analysis)
 USE_TREND_STRENGTH_FILTER = False  # Only enter if price is far enough from HTF indicator
@@ -1679,22 +1679,36 @@ def evaluate_exit(position: Dict, df: pd.DataFrame, atr_mult: Optional[float], m
             exit_price = stop_price
             reason = f"ATR stop x{atr_mult:.2f}"
 
-    # Trend flip exit - check first, can exit early if trend flips
+    # Time-based exit: Exit after optimal hold time based on peak profit analysis
+    # Get symbol-specific optimal hold time from configuration
+    symbol = position.get("symbol", "")
+    direction_str = "long" if long_mode else "short"
+    optimal_hold_bars = get_optimal_hold_bars(symbol, direction_str) if USE_TIME_BASED_EXIT else 0
+
+    if USE_TIME_BASED_EXIT and exit_price is None:
+        # Check if we've reached optimal hold time AND have some profit
+        if bars_held >= optimal_hold_bars:
+            current_price = float(curr["close"])
+            unrealized_pnl_pct = ((current_price - entry_price) / entry_price) if long_mode else ((entry_price - current_price) / entry_price)
+
+            # Exit if we have profit (or close to breakeven within 1%)
+            if unrealized_pnl_pct >= -0.01:  # -1% or better
+                exit_price = current_price
+                reason = f"Time-based exit ({bars_held} bars, optimal={optimal_hold_bars})"
+
+    # Trend flip exit - but only AFTER optimal hold time if time-based exits enabled
     trend_curr = int(curr["trend_flag"])
     trend_prev = int(prev["trend_flag"])
     flip_long = long_mode and trend_prev == 1 and trend_curr == -1
     flip_short = (not long_mode) and trend_prev == -1 and trend_curr == 1
     trend_flipped = flip_long or flip_short
 
-    if not DISABLE_TREND_FLIP_EXIT and exit_price is None and trend_flipped:
+    # Determine minimum bars before allowing trend flip exit
+    min_bars_for_trend_flip = max(optimal_hold_bars, min_hold_bars) if USE_TIME_BASED_EXIT else max(0, min_hold_bars)
+
+    if exit_price is None and trend_flipped and bars_held >= min_bars_for_trend_flip:
         exit_price = float(curr["close"])
         reason = "Trend flip"
-
-    # FORCED time-based exit after MinHoldBars (from CSV) - exit regardless of profit/loss
-    # MinHoldBars is counted in HTF bars (e.g., 24 bars at 2h HTF = 48 hours)
-    if exit_price is None and min_hold_bars > 0 and bars_held >= min_hold_bars:
-        exit_price = float(curr["close"])
-        reason = f"Time-based exit ({bars_held} >= {min_hold_bars} HTF bars)"
 
     if exit_price is None:
         return None
