@@ -529,17 +529,18 @@ def generate_dashboard():
     source_positions = list(positions_by_key.values())
 
     # ========== LOCAL CRYPTO9 CLOSED TRADES ==========
-    print("  Loading Crypto9 closed trades...")
-    crypto9_closed_trades = load_crypto9_closed_trades()
+    # DISABLED: crypto9_testnet_closed_trades.json can have trades added retroactively
+    # which causes "ghost trades" appearing in historical data. Only use simulation log.
+    # print("  Loading Crypto9 closed trades...")
+    # crypto9_closed_trades = load_crypto9_closed_trades()
 
-    # ========== SIMULATION TRADES (last 30 days) ==========
+    # ========== SIMULATION TRADES (single source of truth) ==========
     print("  Loading simulation trades...")
-    # Load ALL simulation trades for stable history (no trades disappearing/appearing)
+    # Load ALL simulation trades - this is the ONLY source to ensure stable history
     simulation_trades = load_simulation_trades(days_back=None)
 
-    # Combine all closed trades - simulation FIRST (has reason field), then crypto9
-    # This way, simulation trades with reason are kept, duplicates from crypto9 (no reason) are skipped
-    all_closed_trades_raw = simulation_trades + crypto9_closed_trades
+    # Use ONLY simulation trades - no combining with crypto9 to prevent ghost trades
+    all_closed_trades_raw = simulation_trades
 
     def normalize_time(t):
         """Normalize timestamp to comparable format (first 16 chars: YYYY-MM-DDTHH:MM)."""
