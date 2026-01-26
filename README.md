@@ -289,6 +289,18 @@ python paper_trader.py --testnet --place-orders --stake 50 \
 
 ## Helper Scripts
 
+### Add/Remove Single Symbol (without full sweep)
+```bash
+# Add a new symbol (runs sweep only for that symbol)
+python sweep_single_symbol.py --add "DOGE/USDT"
+
+# Remove a symbol from all files
+python sweep_single_symbol.py --remove "DOGE/USDT"
+
+# List all current symbols
+python sweep_single_symbol.py --list
+```
+
 ### Download OHLCV Data
 ```bash
 python download_ohlcv.py
@@ -343,3 +355,178 @@ git add .
 git commit -m "Your message"
 git push origin branch-name
 ```
+
+---
+
+## Dashboard (TestnetDashboard.py)
+
+Das Dashboard zeigt alle offenen Positionen, geschlossene Trades und Performance-Statistiken in einer HTML-Übersicht.
+
+### Dashboard starten
+
+**Einmalig generieren:**
+```bash
+python TestnetDashboard.py
+```
+
+**Kontinuierlich aktualisieren (alle 30 Sekunden):**
+```bash
+python TestnetDashboard.py --loop
+```
+
+**Mit benutzerdefiniertem Intervall (z.B. 60 Sekunden):**
+```bash
+python TestnetDashboard.py --loop --interval 60
+```
+
+### Dashboard Optionen
+
+| Option | Beschreibung | Standard |
+|--------|--------------|----------|
+| `--loop` | Kontinuierlicher Modus - aktualisiert automatisch | Aus |
+| `--interval N` | Aktualisierungsintervall in Sekunden | 30 |
+
+### Dashboard Ausgabe
+
+Das Dashboard generiert `report_testnet/dashboard.html` mit:
+- **Open Positions**: Aktuelle offene Trades mit Echtzeit-Preisen von Binance
+- **Closed Trades**: Alle geschlossenen Trades mit PnL
+- **Performance Summary**: Win Rate, Total PnL, Equity Curve
+- **Symbol Statistics**: Performance pro Symbol
+
+### Beispiele
+
+```bash
+# Dashboard einmal generieren und im Browser öffnen
+python TestnetDashboard.py
+start report_testnet\dashboard.html
+
+# Dashboard alle 60 Sekunden aktualisieren
+python TestnetDashboard.py --loop --interval 60
+
+# Dashboard alle 5 Minuten aktualisieren
+python TestnetDashboard.py --loop --interval 300
+```
+
+---
+
+## Stable Versions (Tags)
+
+### v1.0-long-only-optimal (2025-01-22)
+**Commit:** `15c9747`
+
+Beste Long-Only Konfiguration mit verdoppeltem Kapital.
+
+| Einstellung | Wert |
+|-------------|------|
+| STAKE_DIVISOR | 10 |
+| MAX_OPEN_POSITIONS | 10 |
+| MAX_SHORT_POSITIONS | 0 (Long only) |
+| Exit-Strategie | Forced nach optimal_hold_bars |
+| Trend flip | aktiv |
+| USE_TIME_BASED_EXIT | True |
+| DISABLE_TREND_FLIP_EXIT | False |
+
+**Wiederherstellen:**
+```bash
+git checkout v1.0-long-only-optimal
+```
+
+**Tag lokal erstellen (falls nicht vorhanden):**
+```bash
+git tag v1.0-long-only-optimal 15c9747
+```
+
+**Wichtige Dateien:**
+- `paper_trader.py` - Hauptlogik mit evaluate_exit
+- `optimal_hold_times_defaults.py` - USDC Symbole mit optimal bars
+- `report_html/best_params_overall.csv` - Parameter für alle Indikatoren
+
+**Exit-Logik:**
+1. ATR Stop (falls konfiguriert)
+2. **Forced Time-based Exit** nach optimal_hold_bars (auch bei Verlust!)
+3. Trend Flip (nach min_bars_for_trend_flip)
+
+---
+
+### v1.1-optimized-bars (2025-01-22)
+**Commit:** `4a4c969`
+
+Optimierte optimal_hold_bars aus echten Simulationsdaten + TAO alle Indikatoren.
+
+**Änderungen gegenüber v1.0:**
+
+| Symbol | Alt | Neu | Grund |
+|--------|-----|-----|-------|
+| ETH | 5 | **2** | Größter Verlierer (-8573 PnL) |
+| BTC | 5 | **3** | Verlierer (-257 PnL) |
+| XRP | 5 | **3** | Verlierer (-208 PnL) |
+| TNSR, LUNC, ZEC, SOL, LINK, SUI | 2-5 | **4** | Beste Win Rate (74.7%) |
+
+**TAO erweitert:**
+- supertrend (existierte bereits)
+- htf_crossover (neu)
+- jma (neu)
+- kama (neu)
+
+**Wiederherstellen:**
+```bash
+git checkout v1.1-optimized-bars
+```
+
+**Tag lokal erstellen (falls nicht vorhanden):**
+```bash
+git tag v1.1-optimized-bars 4a4c969
+```
+
+---
+
+### v1.2-winners-only (2025-01-22) ⭐ BEST
+**Commit:** `33b7bb1`
+
+**BESTES ERGEBNIS!** Nur Gewinner optimiert, Verlierer auf Original belassen.
+
+**Strategie:**
+- Gewinner (TNSR, LUNC, ZEC, SOL, LINK, SUI) → 4 bars (optimiert)
+- Verlierer (ETH, BTC, XRP) → 5 bars (original, nicht anfassen)
+
+| Symbol | Bars | Status |
+|--------|------|--------|
+| TNSR, LUNC, ZEC, SOL, LINK, SUI | **4** | Optimiert (74.7% Win Rate) |
+| ETH, BTC, XRP | **5** | Original (nicht reduziert) |
+
+**Wiederherstellen:**
+```bash
+git checkout v1.2-winners-only
+```
+
+**Tag lokal erstellen (falls nicht vorhanden):**
+```bash
+git tag v1.2-winners-only 33b7bb1
+```
+
+---
+
+### Rollback Übersicht
+
+| Version | Commit | Beschreibung |
+|---------|--------|--------------|
+| v1.0-long-only-optimal | `15c9747` | Basis Long-Only, verdoppeltes Kapital |
+| v1.1-optimized-bars | `4a4c969` | Alle Bars optimiert + TAO Indikatoren |
+| **v1.2-winners-only** | `33b7bb1` | ⭐ **BEST** - Nur Gewinner optimiert |
+
+**Schnell-Rollback:**
+```bash
+# Zurück zu v1.0
+git checkout v1.0-long-only-optimal
+
+# Zurück zu v1.1
+git checkout v1.1-optimized-bars
+
+# Zurück zu v1.2 (BEST)
+git checkout v1.2-winners-only
+
+# Zurück zum neuesten Stand
+git checkout claude/review-project-0ktcy
+```
+

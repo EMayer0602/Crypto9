@@ -12,6 +12,7 @@ from plotly.subplots import make_subplots
 from ta.volatility import AverageTrueRange
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
+import requests
 
 
 def _load_env_file(path: str = ".env") -> None:
@@ -48,6 +49,56 @@ def _truthy(value) -> bool:
 
 USE_TESTNET = _truthy(os.getenv("BINANCE_USE_TESTNET", "false"))
 
+# ========== LOT SIZE / STEP SIZE HANDLING ==========
+_LOT_SIZE_CACHE = {}
+_LOT_SIZE_CACHE_LOADED = False
+
+
+def fetch_lot_sizes_from_binance():
+    """Fetch lot sizes (stepSize) for all symbols from Binance API."""
+    global _LOT_SIZE_CACHE, _LOT_SIZE_CACHE_LOADED
+    if _LOT_SIZE_CACHE_LOADED:
+        return _LOT_SIZE_CACHE
+    try:
+        url = "https://api.binance.com/api/v3/exchangeInfo"
+        response = requests.get(url, timeout=30)
+        if response.status_code == 200:
+            data = response.json()
+            for symbol_info in data.get("symbols", []):
+                symbol = symbol_info.get("symbol", "")
+                for filter_info in symbol_info.get("filters", []):
+                    if filter_info.get("filterType") == "LOT_SIZE":
+                        step_size = float(filter_info.get("stepSize", 1))
+                        _LOT_SIZE_CACHE[symbol] = step_size
+                        break
+            _LOT_SIZE_CACHE_LOADED = True
+            print(f"[LotSize] Loaded {len(_LOT_SIZE_CACHE)} lot sizes from Binance API")
+    except Exception as e:
+        print(f"[LotSize] Error fetching lot sizes: {e}")
+    return _LOT_SIZE_CACHE
+
+
+def get_lot_size(symbol: str) -> float:
+    """Get the lot size (stepSize) for a symbol."""
+    clean_symbol = symbol.replace("/", "").upper()
+    if not _LOT_SIZE_CACHE_LOADED:
+        fetch_lot_sizes_from_binance()
+    if clean_symbol in _LOT_SIZE_CACHE:
+        return _LOT_SIZE_CACHE[clean_symbol]
+    usdt_symbol = clean_symbol.replace("USDC", "USDT")
+    if usdt_symbol in _LOT_SIZE_CACHE:
+        return _LOT_SIZE_CACHE[usdt_symbol]
+    return 1e-8
+
+
+def round_to_lot_size(amount: float, symbol: str) -> float:
+    """Round amount DOWN to the nearest valid lot size for the symbol."""
+    lot_size = get_lot_size(symbol)
+    if lot_size <= 0:
+        return amount
+    return math.floor(amount / lot_size) * lot_size
+
+
 def timeframe_to_minutes(tf_str: str) -> int:
 	unit = tf_str[-1].lower()
 	value = int(tf_str[:-1])
@@ -78,9 +129,11 @@ SYMBOLS = [
 	"ICP/USDC",
 	"BNB/USDC",
 	"LUNC/USDT",  # nur USDT verfügbar
+	"TAO/USDC",
 ]
 
 # Testnet symbols - use USDC where available, USDT otherwise
+# Note: Limited to symbols actually available on Binance Spot Testnet
 TESTNET_SYMBOLS = [
 	"BTC/USDT",
 	"ETH/USDT",
@@ -90,10 +143,9 @@ TESTNET_SYMBOLS = [
 	"SUI/USDC",
 	"ZEC/USDC",
 	"TNSR/USDC",
-	"ADA/USDT",
-	"ICP/USDT",
 	"BNB/USDT",
-	"LUNC/USDT",
+	"TAO/USDC",
+	# ICP/USDT, ADA/USDT, LUNC/USDT not available on Spot testnet
 ]
 
 # Map testnet symbols to production USDC equivalents for parameter lookup
@@ -106,10 +158,8 @@ TESTNET_TO_USDC_MAP = {
 	"SUI/USDC": "SUI/USDC",
 	"ZEC/USDC": "ZEC/USDC",
 	"TNSR/USDC": "TNSR/USDC",
-	"ADA/USDT": "ADA/USDC",
-	"ICP/USDT": "ICP/USDC",
 	"BNB/USDT": "BNB/USDC",
-	"LUNC/USDT": "LUNC/USDT",
+	"TAO/USDC": "TAO/USDC",
 }
 
 
@@ -186,7 +236,7 @@ DIVERGENCE_RSI_PERIOD = 14  # RSI period for divergence detection
 START_EQUITY = 14000.0
 RISK_FRACTION = 1
 STAKE_DIVISOR = 8  # Kapital / 8 pro Trade
-FEE_RATE = 0.001
+FEE_RATE = 0.00075  # VIP Level 1
 ATR_WINDOW = 14
 ATR_STOP_MULTS = [None, 1.0, 1.5, 2.0]
 
@@ -375,8 +425,10 @@ def configure_exchange(use_testnet=None) -> None:
 		return
 	USE_TESTNET = use_testnet
 	os.environ["BINANCE_USE_TESTNET"] = "1" if use_testnet else "0"
+	# Reset trading exchange (uses testnet for orders when enabled)
 	_exchange = None
-	_data_exchange = None
+	# Data exchange stays on production - no reset needed
+	# _data_exchange = None  # Keep production endpoint for data
 
 
 def _build_exchange(include_keys: bool):
@@ -448,10 +500,60 @@ def get_exchange():
 
 
 def get_data_exchange():
+	"""Get exchange for data fetching - always uses production Binance.
+
+	Note: We always use production endpoint for data because:
+	1. Simulations need real historical data
+	2. Testnet has limited/different price data
+	3. Only order execution should use testnet
+	"""
 	global _data_exchange
 	if _data_exchange is None:
-		_data_exchange = _build_exchange(include_keys=False)
+		# Always use production Binance for data (NOT testnet)
+		cls = getattr(ccxt, EXCHANGE_ID)
+		args = {"enableRateLimit": True}
+		_data_exchange = cls(args)
+		# Do NOT enable sandbox mode - we want production data
+		options = dict(getattr(_data_exchange, "options", {}))
+		options["warnOnFetchCurrenciesWithoutPermission"] = False
+		_data_exchange.options = options
+		if hasattr(_data_exchange, "has") and isinstance(_data_exchange.has, dict):
+			_data_exchange.has["fetchCurrencies"] = False
 	return _data_exchange
+
+
+def _fetch_futures_testnet_klines(symbol: str, interval: str, limit: int) -> pd.DataFrame:
+	"""Fetch klines directly from Binance Futures testnet API (bypasses ccxt issues).
+
+	Handles both USDT and USDC pairs by converting USDC to USDT for the API call.
+	Futures testnet has more symbols available than Spot testnet.
+	"""
+	import requests
+	try:
+		# Convert symbol format: BTC/USDT -> BTCUSDT, BTC/USDC -> BTCUSDT
+		api_symbol = symbol.replace("/", "").replace("USDC", "USDT")
+		# Binance has a max limit of 1500 per request
+		api_limit = min(limit, 1500)
+		url = "https://testnet.binancefuture.com/fapi/v1/klines"
+		params = {"symbol": api_symbol, "interval": interval, "limit": api_limit}
+		response = requests.get(url, params=params, timeout=30)
+		if response.status_code != 200:
+			print(f"[API-Direct] Error {response.status_code} for {symbol} (as {api_symbol}): {response.text[:100]}")
+			return pd.DataFrame()
+		data = response.json()
+		if not data:
+			return pd.DataFrame()
+		# Binance kline format: [open_time, open, high, low, close, volume, ...]
+		cols = ["timestamp", "open", "high", "low", "close", "volume"]
+		rows = [[d[0], float(d[1]), float(d[2]), float(d[3]), float(d[4]), float(d[5])] for d in data]
+		df = pd.DataFrame(rows, columns=cols)
+		df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms", utc=True).dt.tz_convert(BERLIN_TZ)
+		result = df.set_index("timestamp")
+		print(f"[API-Direct] Got {len(result)} bars for {symbol} {interval} (via Futures testnet as {api_symbol})")
+		return result
+	except Exception as exc:
+		print(f"[API-Direct] ERROR fetching {symbol} {interval}: {exc}")
+		return pd.DataFrame()
 
 
 def _fetch_direct_ohlcv(symbol, timeframe, limit):
@@ -472,7 +574,12 @@ def _fetch_direct_ohlcv(symbol, timeframe, limit):
 		print(f"[API] Got {len(result)} bars for {symbol} {timeframe}")
 		return result
 	except Exception as exc:
-		print(f"[API] ERROR fetching {symbol} {timeframe}: {exc}")
+		print(f"[API] ccxt failed for {symbol} {timeframe}: {exc}")
+		# Fallback to direct Futures testnet API for USDT and USDC pairs
+		# Futures testnet works from EU and has more symbols
+		if "USDT" in symbol or "USDC" in symbol:
+			print(f"[API] Trying direct Futures testnet API for {symbol}...")
+			return _fetch_futures_testnet_klines(symbol, timeframe, limit)
 		return pd.DataFrame()
 
 
@@ -1501,6 +1608,10 @@ def prepare_symbol_dataframe(symbol, use_all_cached_data=False):
 	"""
 	limit = None if use_all_cached_data else LOOKBACK
 	df = fetch_data(symbol, TIMEFRAME, limit)
+	# Check for empty or invalid dataframe before processing
+	if df.empty or "open" not in df.columns:
+		print(f"[WARN] No data available for {symbol}, skipping...")
+		return pd.DataFrame()
 	df = attach_higher_timeframe_trend(df, symbol)
 	# Debug: Check htf_indicator
 	htf_valid = df["htf_indicator"].notna().sum() if "htf_indicator" in df.columns else 0
@@ -1599,11 +1710,13 @@ def calculate_dynamic_min_min_hold_bars(
 		return min_days
 
 
-def backtest_supertrend(df, atr_stop_mult=None, direction="long", min_hold_bars=0):
+def backtest_supertrend(df, atr_stop_mult=None, direction="long", min_hold_bars=0, symbol=None):
 	direction = direction.lower()
 	if direction not in {"long", "short"}:
 		raise ValueError("direction must be 'long' or 'short'")
 	min_hold_bars = 0 if min_hold_bars is None else max(0, int(min_hold_bars))
+	# Symbol for lot size rounding (optional)
+	_symbol = symbol or "BTCUSDT"  # Fallback
 
 	long_mode = direction == "long"
 	equity = START_EQUITY
@@ -1751,9 +1864,9 @@ def backtest_supertrend(df, atr_stop_mult=None, direction="long", min_hold_bars=
 					# Record partial exit as separate trade
 					price_diff = current_price - entry_price if long_mode else entry_price - current_price
 					partial_stake = stake * exit_amount
-					gross_pnl = price_diff / entry_price * partial_stake
-					fees = partial_stake * FEE_RATE * 2.0
-					pnl_usd = gross_pnl - fees
+					size_units = round_to_lot_size(partial_stake / entry_price, _symbol)
+					fees = (entry_price + current_price) * size_units * FEE_RATE
+					pnl_usd = size_units * price_diff - fees
 					equity += pnl_usd
 					trades.append({
 						"Zeit": entry_ts,
@@ -1817,9 +1930,9 @@ def backtest_supertrend(df, atr_stop_mult=None, direction="long", min_hold_bars=
 
 		# Calculate PnL for remaining position
 		price_diff = exit_price - entry_price if long_mode else entry_price - exit_price
-		gross_pnl = price_diff / entry_price * current_stake
-		fees = current_stake * FEE_RATE * 2.0
-		pnl_usd = gross_pnl - fees
+		size_units = round_to_lot_size(current_stake / entry_price, _symbol)
+		fees = (entry_price + exit_price) * size_units * FEE_RATE
+		pnl_usd = size_units * price_diff - fees
 		equity += pnl_usd
 		trades.append({
 			"Zeit": entry_ts,
@@ -1845,9 +1958,9 @@ def backtest_supertrend(df, atr_stop_mult=None, direction="long", min_hold_bars=
 		exit_price = float(last["close"])
 		stake = entry_capital if entry_capital is not None else equity / STAKE_DIVISOR
 		price_diff = exit_price - entry_price if long_mode else entry_price - exit_price
-		gross_pnl = price_diff / entry_price * stake
-		fees = stake * FEE_RATE * 2.0
-		pnl_usd = gross_pnl - fees
+		size_units = round_to_lot_size(stake / entry_price, _symbol)
+		fees = (entry_price + exit_price) * size_units * FEE_RATE
+		pnl_usd = size_units * price_diff - fees
 		equity += pnl_usd
 		trades.append({
 			"Zeit": entry_ts,
@@ -1866,7 +1979,7 @@ def backtest_supertrend(df, atr_stop_mult=None, direction="long", min_hold_bars=
 	return pd.DataFrame(trades)
 
 
-def backtest_htf_crossover(df, atr_stop_mult=None, direction="long", min_hold_bars=0):
+def backtest_htf_crossover(df, atr_stop_mult=None, direction="long", min_hold_bars=0, symbol=""):
 	"""
 	Backtest HTF Crossover Strategy
 	Entry: Close crosses HTF indicator (upward for long, downward for short)
@@ -1876,6 +1989,7 @@ def backtest_htf_crossover(df, atr_stop_mult=None, direction="long", min_hold_ba
 	if direction not in {"long", "short"}:
 		raise ValueError("direction must be 'long' or 'short'")
 	min_hold_bars = 0 if min_hold_bars is None else max(0, int(min_hold_bars))
+	_symbol = symbol or "BTCUSDT"  # Fallback for lot size lookup
 
 	long_mode = direction == "long"
 	equity = START_EQUITY
@@ -2035,9 +2149,9 @@ def backtest_htf_crossover(df, atr_stop_mult=None, direction="long", min_hold_ba
 					partial_exits_taken.append(level_idx)
 					price_diff = close_curr - entry_price if long_mode else entry_price - close_curr
 					partial_stake = stake * exit_amount
-					gross_pnl = price_diff / entry_price * partial_stake
-					fees = partial_stake * FEE_RATE * 2.0
-					pnl_usd = gross_pnl - fees
+					size_units = round_to_lot_size(partial_stake / entry_price, _symbol)
+					fees = (entry_price + close_curr) * size_units * FEE_RATE
+					pnl_usd = size_units * price_diff - fees
 					equity += pnl_usd
 					trades.append({
 						"Zeit": entry_ts,
@@ -2103,9 +2217,9 @@ def backtest_htf_crossover(df, atr_stop_mult=None, direction="long", min_hold_ba
 
 		# Calculate PnL for remaining position
 		price_diff = exit_price - entry_price if long_mode else entry_price - exit_price
-		gross_pnl = price_diff / entry_price * current_stake
-		fees = current_stake * FEE_RATE * 2.0
-		pnl_usd = gross_pnl - fees
+		size_units = round_to_lot_size(current_stake / entry_price, _symbol)
+		fees = (entry_price + exit_price) * size_units * FEE_RATE
+		pnl_usd = size_units * price_diff - fees
 		equity += pnl_usd
 		trades.append({
 			"Zeit": entry_ts,
@@ -2132,9 +2246,9 @@ def backtest_htf_crossover(df, atr_stop_mult=None, direction="long", min_hold_ba
 		exit_price = float(last["close"])
 		stake = entry_capital if entry_capital is not None else equity / STAKE_DIVISOR
 		price_diff = exit_price - entry_price if long_mode else entry_price - exit_price
-		gross_pnl = price_diff / entry_price * stake
-		fees = stake * FEE_RATE * 2.0
-		pnl_usd = gross_pnl - fees
+		size_units = round_to_lot_size(stake / entry_price, _symbol)
+		fees = (entry_price + exit_price) * size_units * FEE_RATE
+		pnl_usd = size_units * price_diff - fees
 		equity += pnl_usd
 		trades.append({
 			"Zeit": entry_ts,
@@ -2663,6 +2777,7 @@ def _run_saved_rows(rows_df, table_title, save_path=None, aggregate_sections=Non
 				atr_stop_mult=atr_mult,
 				direction=direction,
 				min_hold_bars=min_hold_bars,
+				symbol=symbol,
 			)
 		else:  # Default: trend_flip for all other indicators
 			trades = backtest_supertrend(
@@ -2852,6 +2967,7 @@ def run_parameter_sweep():
 									atr_stop_mult=atr_mult,
 									direction=direction,
 									min_hold_bars=min_hold_bars,
+									symbol=symbol,
 								)
 							else:  # Default: trend_flip for all other indicators
 								trades = backtest_supertrend(
@@ -3094,3 +3210,4 @@ if __name__ == "__main__":
 				summary_rows = run_current_configuration()
 				record_global_best(indicator_name, summary_rows)
 		write_overall_result_tables()
+
