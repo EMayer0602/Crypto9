@@ -247,6 +247,18 @@ def generate_dashboard():
     long_wins = sum(1 for t in long_trades if t["pnl"] > 0)
     short_wins = sum(1 for t in short_trades if t["pnl"] > 0)
 
+    # Debug: verify sums match
+    sum_from_tables = long_pnl + short_pnl
+    print(f"DEBUG: total_realized_pnl = {total_realized_pnl:.2f}")
+    print(f"DEBUG: long_pnl = {long_pnl:.2f}")
+    print(f"DEBUG: short_pnl = {short_pnl:.2f}")
+    print(f"DEBUG: sum_from_tables (long + short) = {sum_from_tables:.2f}")
+    print(f"DEBUG: all_matched_trades count = {len(all_matched_trades)}")
+    print(f"DEBUG: long_trades count = {len(long_trades)}")
+    print(f"DEBUG: short_trades count = {len(short_trades)}")
+    if abs(total_realized_pnl - sum_from_tables) > 0.01:
+        print(f"WARNING: Mismatch! Difference = {total_realized_pnl - sum_from_tables:.2f}")
+
     # Generate HTML
     html = f"""<!DOCTYPE html>
 <html>
@@ -365,6 +377,17 @@ def generate_dashboard():
 
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     html += f"""    </table>
+    </div>
+
+    <div class="section" style="background: #fff3cd; padding: 15px; border-radius: 5px; margin-top: 20px;">
+        <h3 style="margin-top: 0;">PnL Verification</h3>
+        <table style="width: auto;">
+            <tr><td>Sum of Long PnLs:</td><td style="text-align: right;">{long_pnl:,.2f}</td></tr>
+            <tr><td>Sum of Short PnLs:</td><td style="text-align: right;">{short_pnl:,.2f}</td></tr>
+            <tr><td><strong>Total (Long + Short):</strong></td><td style="text-align: right;"><strong>{long_pnl + short_pnl:,.2f}</strong></td></tr>
+            <tr><td>Displayed Total:</td><td style="text-align: right;">{total_realized_pnl:,.2f}</td></tr>
+            <tr><td>Difference:</td><td style="text-align: right; color: {'red' if abs(total_realized_pnl - (long_pnl + short_pnl)) > 0.01 else 'green'};">{total_realized_pnl - (long_pnl + short_pnl):,.2f}</td></tr>
+        </table>
     </div>
 
     <p class="timestamp">Generated: {timestamp}</p>
