@@ -97,7 +97,7 @@ BASE_CURRENCIES = {"USDT", "USDC", "BUSD", "BTC", "TUSD"}
 RELEVANT_ASSETS = {"BTC", "ETH", "SOL", "XRP", "LINK", "BNB", "SUI", "ZEC", "LUNC", "TNSR", "ADA", "ICP"}
 
 # Only show trades from this date onwards (set to None to show all)
-TRADES_SINCE_DATE = datetime(2026, 1, 2, tzinfo=timezone.utc)
+TRADES_SINCE_DATE = datetime(2025, 12, 1, tzinfo=timezone.utc)
 
 OUTPUT_DIR = Path("report_testnet")
 
@@ -541,6 +541,25 @@ def generate_dashboard():
 
     # Use ONLY simulation trades - no combining with crypto9 to prevent ghost trades
     all_closed_trades_raw = simulation_trades
+
+    # Filter trades by TRADES_SINCE_DATE (paper trading start date)
+    if TRADES_SINCE_DATE:
+        filtered_trades = []
+        for trade in all_closed_trades_raw:
+            exit_time_str = trade.get("exit_time") or trade.get("ExitZeit")
+            if exit_time_str:
+                try:
+                    exit_time = pd.to_datetime(exit_time_str)
+                    if exit_time.tzinfo is None:
+                        exit_time = exit_time.tz_localize('Europe/Berlin')
+                    if exit_time >= TRADES_SINCE_DATE:
+                        filtered_trades.append(trade)
+                except:
+                    filtered_trades.append(trade)  # Keep if can't parse
+            else:
+                filtered_trades.append(trade)  # Keep if no exit time
+        print(f"  Filtered to {len(filtered_trades)} trades since {TRADES_SINCE_DATE.strftime('%Y-%m-%d')} (from {len(all_closed_trades_raw)} total)")
+        all_closed_trades_raw = filtered_trades
 
     def normalize_time(t):
         """Normalize timestamp to comparable format (first 16 chars: YYYY-MM-DDTHH:MM)."""
