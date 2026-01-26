@@ -3033,7 +3033,8 @@ def run_signal_cycle(
     # First, run a mini-simulation to get current simulated positions
     # This updates paper_trading_actual_trades.json with current state
     now = pd.Timestamp.now(tz=st.BERLIN_TZ)
-    sim_start = now - pd.Timedelta(days=30)  # 30-day lookback for simulation
+    # Fixed start date for paper trading - ensures stable history (no rolling window)
+    sim_start = pd.Timestamp("2025-12-01", tz=st.BERLIN_TZ)
     print(f"[{_now_str()}] Running simulation from {sim_start.strftime('%Y-%m-%d')} to update positions...")
 
     # Temporarily enable synthetic bars for the simulation
