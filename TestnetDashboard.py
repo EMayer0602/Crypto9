@@ -327,12 +327,23 @@ def load_simulation_open_positions() -> list:
     return []
 
 
-def load_simulation_trades(days_back: int = 2) -> list:
-    """Load trades from simulation log, filtered to recent days."""
+def load_simulation_trades(days_back: int = None) -> list:
+    """Load trades from simulation log.
+
+    Args:
+        days_back: If None, load ALL trades (recommended for stable history).
+                   If set, filter to last N days.
+    """
     try:
         if os.path.exists(PAPER_TRADING_SIMULATION_LOG):
             with open(PAPER_TRADING_SIMULATION_LOG, "r") as f:
                 all_trades = json.load(f)
+
+                # If no filter, return all trades (stable history)
+                if days_back is None:
+                    print(f"  Loaded {len(all_trades)} simulation trades (full history)")
+                    return all_trades
+
                 # Filter for recent trades
                 cutoff = datetime.now(timezone.utc) - pd.Timedelta(days=days_back)
                 recent_trades = []
@@ -523,7 +534,8 @@ def generate_dashboard():
 
     # ========== SIMULATION TRADES (last 30 days) ==========
     print("  Loading simulation trades...")
-    simulation_trades = load_simulation_trades(days_back=30)
+    # Load ALL simulation trades for stable history (no trades disappearing/appearing)
+    simulation_trades = load_simulation_trades(days_back=None)
 
     # Combine all closed trades - simulation FIRST (has reason field), then crypto9
     # This way, simulation trades with reason are kept, duplicates from crypto9 (no reason) are skipped
