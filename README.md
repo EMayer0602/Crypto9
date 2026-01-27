@@ -285,9 +285,54 @@ python paper_trader.py --testnet --place-orders --stake 50 \
   --force-entry "LUNC/USDT:long" --max-open-positions 50
 ```
 
+### Continuous Paper Trading (Empfohlen für Tests)
+
+**Beide Prozesse gleichzeitig in separaten Terminals laufen lassen:**
+
+**Terminal 1 - Paper Trader:**
+```bash
+python paper_trader.py --testnet --place-orders --monitor
+```
+- Führt Trading-Zyklen stündlich aus
+- Öffnet/schließt Positionen basierend auf Signalen
+- Schreibt Trades in `paper_trading_simulation_log.json` und `crypto9_testnet_closed_trades.json`
+
+**Terminal 2 - Dashboard:**
+```bash
+python TestnetDashboard.py --loop --interval 60
+```
+- Aktualisiert Dashboard alle 60 Sekunden
+- Zeigt Open Positions mit Live-Preisen
+- Zeigt Closed Trades mit PnL-Statistiken
+- Output: `report_testnet/dashboard.html`
+
+**Dashboard Features:**
+- **Simulation-Trades**: Stabile History aus Backtest
+- **Crypto9-Trades**: Live-Trades nach dem letzten Simulation-Exit
+- **PnL Verification**: Debug-Box zur Verifizierung der Summen
+- **TRADES_SINCE_DATE**: Filtert Trades ab einem bestimmten Datum (Standard: 2025-12-01)
+
+**Konfiguration in TestnetDashboard.py:**
+```python
+TRADES_SINCE_DATE = datetime(2025, 12, 1, tzinfo=timezone.utc)  # Paper Trading Start
+START_TOTAL_CAPITAL = 16_500.0  # Startkapital für Equity-Berechnung
+```
+
 ---
 
 ## Helper Scripts
+
+### Add/Remove Single Symbol (without full sweep)
+```bash
+# Add a new symbol (runs sweep only for that symbol)
+python sweep_single_symbol.py --add "DOGE/USDT"
+
+# Remove a symbol from all files
+python sweep_single_symbol.py --remove "DOGE/USDT"
+
+# List all current symbols
+python sweep_single_symbol.py --list
+```
 
 ### Download OHLCV Data
 ```bash
@@ -343,3 +388,224 @@ git add .
 git commit -m "Your message"
 git push origin branch-name
 ```
+
+---
+
+## Dashboard (TestnetDashboard.py)
+
+Das Dashboard zeigt alle offenen Positionen, geschlossene Trades und Performance-Statistiken in einer HTML-Übersicht.
+
+### Dashboard starten
+
+**Einmalig generieren:**
+```bash
+python TestnetDashboard.py
+```
+
+**Kontinuierlich aktualisieren (alle 30 Sekunden):**
+```bash
+python TestnetDashboard.py --loop
+```
+
+**Mit benutzerdefiniertem Intervall (z.B. 60 Sekunden):**
+```bash
+python TestnetDashboard.py --loop --interval 60
+```
+
+### Dashboard Optionen
+
+| Option | Beschreibung | Standard |
+|--------|--------------|----------|
+| `--loop` | Kontinuierlicher Modus - aktualisiert automatisch | Aus |
+| `--interval N` | Aktualisierungsintervall in Sekunden | 30 |
+
+### Dashboard Ausgabe
+
+Das Dashboard generiert `report_testnet/dashboard.html` mit:
+- **Open Positions**: Aktuelle offene Trades mit Echtzeit-Preisen von Binance
+- **Closed Trades**: Alle geschlossenen Trades mit PnL
+- **Performance Summary**: Win Rate, Total PnL, Equity Curve
+- **Symbol Statistics**: Performance pro Symbol
+
+### Beispiele
+
+```bash
+# Dashboard einmal generieren und im Browser öffnen
+python TestnetDashboard.py
+start report_testnet\dashboard.html
+
+# Dashboard alle 60 Sekunden aktualisieren
+python TestnetDashboard.py --loop --interval 60
+
+# Dashboard alle 5 Minuten aktualisieren
+python TestnetDashboard.py --loop --interval 300
+```
+
+---
+
+## Stable Versions (Tags)
+
+### v1.0-long-only-optimal (2025-01-22)
+**Commit:** `15c9747`
+
+Beste Long-Only Konfiguration mit verdoppeltem Kapital.
+
+| Einstellung | Wert |
+|-------------|------|
+| STAKE_DIVISOR | 10 |
+| MAX_OPEN_POSITIONS | 10 |
+| MAX_SHORT_POSITIONS | 0 (Long only) |
+| Exit-Strategie | Forced nach optimal_hold_bars |
+| Trend flip | aktiv |
+| USE_TIME_BASED_EXIT | True |
+| DISABLE_TREND_FLIP_EXIT | False |
+
+**Wiederherstellen:**
+```bash
+git checkout v1.0-long-only-optimal
+```
+
+**Tag lokal erstellen (falls nicht vorhanden):**
+```bash
+git tag v1.0-long-only-optimal 15c9747
+```
+
+**Wichtige Dateien:**
+- `paper_trader.py` - Hauptlogik mit evaluate_exit
+- `optimal_hold_times_defaults.py` - USDC Symbole mit optimal bars
+- `report_html/best_params_overall.csv` - Parameter für alle Indikatoren
+
+**Exit-Logik:**
+1. ATR Stop (falls konfiguriert)
+2. **Forced Time-based Exit** nach optimal_hold_bars (auch bei Verlust!)
+3. Trend Flip (nach min_bars_for_trend_flip)
+
+---
+
+### v1.1-optimized-bars (2025-01-22)
+**Commit:** `4a4c969`
+
+Optimierte optimal_hold_bars aus echten Simulationsdaten + TAO alle Indikatoren.
+
+**Änderungen gegenüber v1.0:**
+
+| Symbol | Alt | Neu | Grund |
+|--------|-----|-----|-------|
+| ETH | 5 | **2** | Größter Verlierer (-8573 PnL) |
+| BTC | 5 | **3** | Verlierer (-257 PnL) |
+| XRP | 5 | **3** | Verlierer (-208 PnL) |
+| TNSR, LUNC, ZEC, SOL, LINK, SUI | 2-5 | **4** | Beste Win Rate (74.7%) |
+
+**TAO erweitert:**
+- supertrend (existierte bereits)
+- htf_crossover (neu)
+- jma (neu)
+- kama (neu)
+
+**Wiederherstellen:**
+```bash
+git checkout v1.1-optimized-bars
+```
+
+**Tag lokal erstellen (falls nicht vorhanden):**
+```bash
+git tag v1.1-optimized-bars 4a4c969
+```
+
+---
+
+### v1.2-winners-only (2025-01-22) ⭐ BEST
+**Commit:** `33b7bb1`
+
+**BESTES ERGEBNIS!** Nur Gewinner optimiert, Verlierer auf Original belassen.
+
+**Strategie:**
+- Gewinner (TNSR, LUNC, ZEC, SOL, LINK, SUI) → 4 bars (optimiert)
+- Verlierer (ETH, BTC, XRP) → 5 bars (original, nicht anfassen)
+
+| Symbol | Bars | Status |
+|--------|------|--------|
+| TNSR, LUNC, ZEC, SOL, LINK, SUI | **4** | Optimiert (74.7% Win Rate) |
+| ETH, BTC, XRP | **5** | Original (nicht reduziert) |
+
+**Wiederherstellen:**
+```bash
+git checkout v1.2-winners-only
+```
+
+**Tag lokal erstellen (falls nicht vorhanden):**
+```bash
+git tag v1.2-winners-only 33b7bb1
+```
+
+---
+
+### v2.0-paper-trading-hourly (2026-01-27) ⭐ CURRENT
+**Commit:** `b139235`
+
+**Bestes Paper Trading Setup mit Hourly Bars.**
+
+**Features:**
+- Continuous Paper Trading mit `--monitor` Mode
+- Dashboard mit `--loop` für Echtzeit-Updates
+- Simulation-Trades + Live crypto9-Trades kombiniert
+- TRADES_SINCE_DATE Filter (2025-12-01)
+- PnL Verification Debug-Box
+- Keine Ghost-Trades aus der Vergangenheit
+
+**Usage:**
+```bash
+# Terminal 1 - Paper Trader
+python paper_trader.py --testnet --place-orders --monitor
+
+# Terminal 2 - Dashboard
+python TestnetDashboard.py --loop --interval 60
+```
+
+**Konfiguration:**
+| Einstellung | Wert |
+|-------------|------|
+| START_TOTAL_CAPITAL | 16,500 |
+| Base Timeframe | 1h (Hourly) |
+| HTF Filters | 6h, 8h, 12h |
+| TRADES_SINCE_DATE | 2025-12-01 |
+
+**Wiederherstellen:**
+```bash
+git checkout v2.0-paper-trading-hourly
+```
+
+**Tag lokal erstellen (falls nicht vorhanden):**
+```bash
+git tag v2.0-paper-trading-hourly b139235
+```
+
+---
+
+### Rollback Übersicht
+
+| Version | Commit | Beschreibung |
+|---------|--------|--------------|
+| v1.0-long-only-optimal | `15c9747` | Basis Long-Only, verdoppeltes Kapital |
+| v1.1-optimized-bars | `4a4c969` | Alle Bars optimiert + TAO Indikatoren |
+| v1.2-winners-only | `33b7bb1` | Nur Gewinner optimiert |
+| **v2.0-paper-trading-hourly** | `b139235` | ⭐ **CURRENT** - Paper Trading Hourly |
+
+**Schnell-Rollback:**
+```bash
+# Zurück zu v1.0
+git checkout v1.0-long-only-optimal
+
+# Zurück zu v1.1
+git checkout v1.1-optimized-bars
+
+# Zurück zu v1.2
+git checkout v1.2-winners-only
+
+# Zurück zu v2.0 (CURRENT - Paper Trading Hourly)
+git checkout v2.0-paper-trading-hourly
+
+# Zurück zum neuesten Stand
+git checkout claude/review-project-0ktcy
+```
+
