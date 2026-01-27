@@ -285,6 +285,39 @@ python paper_trader.py --testnet --place-orders --stake 50 \
   --force-entry "LUNC/USDT:long" --max-open-positions 50
 ```
 
+### Continuous Paper Trading (Empfohlen für Tests)
+
+**Beide Prozesse gleichzeitig in separaten Terminals laufen lassen:**
+
+**Terminal 1 - Paper Trader:**
+```bash
+python paper_trader.py --testnet --place-orders --monitor
+```
+- Führt Trading-Zyklen stündlich aus
+- Öffnet/schließt Positionen basierend auf Signalen
+- Schreibt Trades in `paper_trading_simulation_log.json` und `crypto9_testnet_closed_trades.json`
+
+**Terminal 2 - Dashboard:**
+```bash
+python TestnetDashboard.py --loop --interval 60
+```
+- Aktualisiert Dashboard alle 60 Sekunden
+- Zeigt Open Positions mit Live-Preisen
+- Zeigt Closed Trades mit PnL-Statistiken
+- Output: `report_testnet/dashboard.html`
+
+**Dashboard Features:**
+- **Simulation-Trades**: Stabile History aus Backtest
+- **Crypto9-Trades**: Live-Trades nach dem letzten Simulation-Exit
+- **PnL Verification**: Debug-Box zur Verifizierung der Summen
+- **TRADES_SINCE_DATE**: Filtert Trades ab einem bestimmten Datum (Standard: 2025-12-01)
+
+**Konfiguration in TestnetDashboard.py:**
+```python
+TRADES_SINCE_DATE = datetime(2025, 12, 1, tzinfo=timezone.utc)  # Paper Trading Start
+START_TOTAL_CAPITAL = 16_500.0  # Startkapital für Equity-Berechnung
+```
+
 ---
 
 ## Helper Scripts
