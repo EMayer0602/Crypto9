@@ -540,13 +540,56 @@ git tag v1.2-winners-only 33b7bb1
 
 ---
 
+### v2.0-paper-trading-hourly (2026-01-27) ⭐ CURRENT
+**Commit:** `b139235`
+
+**Bestes Paper Trading Setup mit Hourly Bars.**
+
+**Features:**
+- Continuous Paper Trading mit `--monitor` Mode
+- Dashboard mit `--loop` für Echtzeit-Updates
+- Simulation-Trades + Live crypto9-Trades kombiniert
+- TRADES_SINCE_DATE Filter (2025-12-01)
+- PnL Verification Debug-Box
+- Keine Ghost-Trades aus der Vergangenheit
+
+**Usage:**
+```bash
+# Terminal 1 - Paper Trader
+python paper_trader.py --testnet --place-orders --monitor
+
+# Terminal 2 - Dashboard
+python TestnetDashboard.py --loop --interval 60
+```
+
+**Konfiguration:**
+| Einstellung | Wert |
+|-------------|------|
+| START_TOTAL_CAPITAL | 16,500 |
+| Base Timeframe | 1h (Hourly) |
+| HTF Filters | 6h, 8h, 12h |
+| TRADES_SINCE_DATE | 2025-12-01 |
+
+**Wiederherstellen:**
+```bash
+git checkout v2.0-paper-trading-hourly
+```
+
+**Tag lokal erstellen (falls nicht vorhanden):**
+```bash
+git tag v2.0-paper-trading-hourly b139235
+```
+
+---
+
 ### Rollback Übersicht
 
 | Version | Commit | Beschreibung |
 |---------|--------|--------------|
 | v1.0-long-only-optimal | `15c9747` | Basis Long-Only, verdoppeltes Kapital |
 | v1.1-optimized-bars | `4a4c969` | Alle Bars optimiert + TAO Indikatoren |
-| **v1.2-winners-only** | `33b7bb1` | ⭐ **BEST** - Nur Gewinner optimiert |
+| v1.2-winners-only | `33b7bb1` | Nur Gewinner optimiert |
+| **v2.0-paper-trading-hourly** | `b139235` | ⭐ **CURRENT** - Paper Trading Hourly |
 
 **Schnell-Rollback:**
 ```bash
@@ -556,8 +599,11 @@ git checkout v1.0-long-only-optimal
 # Zurück zu v1.1
 git checkout v1.1-optimized-bars
 
-# Zurück zu v1.2 (BEST)
+# Zurück zu v1.2
 git checkout v1.2-winners-only
+
+# Zurück zu v2.0 (CURRENT - Paper Trading Hourly)
+git checkout v2.0-paper-trading-hourly
 
 # Zurück zum neuesten Stand
 git checkout claude/review-project-0ktcy
