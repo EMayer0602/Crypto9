@@ -528,19 +528,47 @@ def generate_dashboard():
 
     source_positions = list(positions_by_key.values())
 
-    # ========== LOCAL CRYPTO9 CLOSED TRADES ==========
-    # DISABLED: crypto9_testnet_closed_trades.json can have trades added retroactively
-    # which causes "ghost trades" appearing in historical data. Only use simulation log.
-    # print("  Loading Crypto9 closed trades...")
-    # crypto9_closed_trades = load_crypto9_closed_trades()
-
-    # ========== SIMULATION TRADES (single source of truth) ==========
+    # ========== SIMULATION TRADES (base history) ==========
     print("  Loading simulation trades...")
-    # Load ALL simulation trades - this is the ONLY source to ensure stable history
     simulation_trades = load_simulation_trades(days_back=None)
 
-    # Use ONLY simulation trades - no combining with crypto9 to prevent ghost trades
-    all_closed_trades_raw = simulation_trades
+    # Find the latest exit time in simulation trades
+    latest_sim_exit = None
+    for trade in simulation_trades:
+        exit_time_str = trade.get("exit_time") or trade.get("ExitZeit")
+        if exit_time_str:
+            try:
+                exit_time = pd.to_datetime(exit_time_str)
+                if latest_sim_exit is None or exit_time > latest_sim_exit:
+                    latest_sim_exit = exit_time
+            except:
+                pass
+    print(f"  Latest simulation exit: {latest_sim_exit}")
+
+    # ========== CRYPTO9 CLOSED TRADES (recent live trades) ==========
+    print("  Loading Crypto9 closed trades...")
+    crypto9_closed_trades = load_crypto9_closed_trades()
+
+    # Only use crypto9 trades that are NEWER than the latest simulation trade
+    # This prevents "ghost trades" from the past while capturing recent live trades
+    recent_crypto9_trades = []
+    if latest_sim_exit and crypto9_closed_trades:
+        for trade in crypto9_closed_trades:
+            exit_time_str = trade.get("exit_time") or trade.get("ExitZeit")
+            if exit_time_str:
+                try:
+                    exit_time = pd.to_datetime(exit_time_str)
+                    if exit_time.tzinfo is None:
+                        exit_time = exit_time.tz_localize('Europe/Berlin')
+                    # Only include if AFTER the last simulation trade
+                    if exit_time > latest_sim_exit:
+                        recent_crypto9_trades.append(trade)
+                except:
+                    pass
+        print(f"  Added {len(recent_crypto9_trades)} recent crypto9 trades (after {latest_sim_exit})")
+
+    # Combine: simulation trades + recent crypto9 trades
+    all_closed_trades_raw = simulation_trades + recent_crypto9_trades
 
     # Filter trades by TRADES_SINCE_DATE (paper trading start date)
     if TRADES_SINCE_DATE:
