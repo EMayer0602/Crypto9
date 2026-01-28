@@ -1067,11 +1067,45 @@ def generate_dashboard():
     return output_path
 
 
+def run_simulation_refresh():
+    """Run paper_trader simulation to sync all closed trades."""
+    import subprocess
+    print("[Refresh] Running simulation to sync closed trades...")
+    try:
+        result = subprocess.run(
+            ["python3", "paper_trader.py", "--simulate", "--testnet", "--close-at-end"],
+            capture_output=True,
+            text=True,
+            timeout=300  # 5 minute timeout
+        )
+        if result.returncode == 0:
+            print("[Refresh] Simulation completed successfully")
+            # Count lines mentioning trades
+            trade_lines = [l for l in result.stdout.split('\n') if 'trade' in l.lower()]
+            if trade_lines:
+                print(f"[Refresh] {len(trade_lines)} trade-related updates")
+        else:
+            print(f"[Refresh] Simulation finished with warnings")
+            if result.stderr:
+                # Only show last few lines of stderr
+                err_lines = result.stderr.strip().split('\n')[-5:]
+                for line in err_lines:
+                    print(f"  {line}")
+    except subprocess.TimeoutExpired:
+        print("[Refresh] Simulation timed out after 5 minutes")
+    except FileNotFoundError:
+        print("[Refresh] paper_trader.py not found - skipping simulation")
+    except Exception as e:
+        print(f"[Refresh] Error running simulation: {e}")
+
+
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--loop", action="store_true", help="Run in continuous loop mode")
     parser.add_argument("--interval", type=int, default=30, help="Refresh interval in seconds (default: 30)")
+    parser.add_argument("--refresh", action="store_true", help="Run simulation to sync closed trades before dashboard")
+    parser.add_argument("--auto-refresh", type=int, default=0, help="Auto-refresh simulation every N dashboard cycles (0=disabled)")
     args = parser.parse_args()
 
     # PnL correction disabled - paper_trader.py already calculates correct PnL with lot sizes
@@ -1088,10 +1122,24 @@ if __name__ == "__main__":
         for m in missing:
             print(f"  - {m}")
 
+    # Initial refresh if requested
+    if args.refresh:
+        run_simulation_refresh()
+
     if args.loop:
         print(f"Running dashboard loop (refresh every {args.interval}s). Press Ctrl+C to stop.")
+        if args.auto_refresh > 0:
+            print(f"Auto-refresh simulation every {args.auto_refresh} cycles")
+        cycle_count = 0
         while True:
             try:
+                # Auto-refresh simulation periodically
+                if args.auto_refresh > 0:
+                    cycle_count += 1
+                    if cycle_count >= args.auto_refresh:
+                        run_simulation_refresh()
+                        cycle_count = 0
+
                 path = generate_dashboard()
                 print(f"[{datetime.now().strftime('%H:%M:%S')}] Dashboard updated: {path}")
                 time.sleep(args.interval)
