@@ -1104,7 +1104,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--loop", action="store_true", help="Run in continuous loop mode")
     parser.add_argument("--interval", type=int, default=30, help="Refresh interval in seconds (default: 30)")
-    parser.add_argument("--refresh", action="store_true", help="Run simulation to sync closed trades before dashboard")
+    parser.add_argument("--sync", action="store_true", help="Run simulation to sync closed trades before dashboard")
     parser.add_argument("--auto-refresh", type=int, default=0, help="Auto-refresh simulation every N dashboard cycles (0=disabled)")
     args = parser.parse_args()
 
@@ -1122,8 +1122,8 @@ if __name__ == "__main__":
         for m in missing:
             print(f"  - {m}")
 
-    # Initial refresh if requested
-    if args.refresh:
+    # Initial sync if requested
+    if args.sync:
         run_simulation_refresh()
 
     if args.loop:
