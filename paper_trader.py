@@ -1884,7 +1884,11 @@ def process_snapshot(
 
     entry_price = float(df_slice.iloc[-1]["close"])
     # Dynamic stake: total_capital / 10 (or fixed if explicitly provided)
+    current_capital = float(state.get("total_capital", START_TOTAL_CAPITAL))
     stake = determine_position_size(context.symbol, state, fixed_stake, context.direction)
+    # Log dynamic sizing info for verification
+    if fixed_stake is None:
+        _signal_log(f"[Dynamic Stake] Capital: ${current_capital:.2f} → Stake: ${stake:.2f} (capital/{MAX_LONG_POSITIONS})")
     # Round to valid lot size for the symbol
     size_units = round_to_lot_size(stake / entry_price, context.symbol) if entry_price else 0.0
     entry = Position(
@@ -3226,7 +3230,11 @@ def force_entry_position(
         print(f"[Force] Position {context.key} ist bereits offen.")
         return False
     # Use direction-specific stake sizes (SHORT_STAKE for shorts, dynamic for longs)
+    current_capital = float(state.get("total_capital", START_TOTAL_CAPITAL))
     stake_value = determine_position_size(context.symbol, state, fixed_stake, context.direction)
+    # Log dynamic sizing info
+    if fixed_stake is None:
+        print(f"[Force] Dynamic sizing: Capital ${current_capital:.2f} → Stake ${stake_value:.2f}")
     if stake_value <= 0:
         print("[Force] Stake-Betrag ist 0 – prüfe Kapital oder --stake.")
         return False

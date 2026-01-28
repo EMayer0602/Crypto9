@@ -27,6 +27,83 @@ FEE_RATE = 0.00075
 # Start capital for equity calculation (must match paper_trader.py)
 START_TOTAL_CAPITAL = 16_500.0
 
+# Number of positions to divide capital by
+MAX_POSITIONS = 10
+
+
+def recalculate_trades_with_dynamic_stake(trades: list) -> list:
+    """
+    Recalculate all trades with dynamic stake based on running capital.
+
+    The stake for each trade is calculated as: current_capital / MAX_POSITIONS
+    As profits accumulate, the stake increases (compounding).
+
+    Args:
+        trades: List of trade dicts with entry_price, exit_price, direction, exit_time
+
+    Returns:
+        List of trades with recalculated stake, size_units, fees, and pnl
+    """
+    if not trades:
+        return trades
+
+    # Sort by exit_time chronologically
+    def get_exit_time(t):
+        exit_time_str = t.get("exit_time") or t.get("ExitZeit") or ""
+        try:
+            return pd.to_datetime(exit_time_str)
+        except:
+            return pd.Timestamp.min
+
+    sorted_trades = sorted(trades, key=get_exit_time)
+
+    # Start with initial capital
+    current_capital = START_TOTAL_CAPITAL
+    recalculated = []
+
+    for trade in sorted_trades:
+        entry_price = float(trade.get('entry_price', 0) or 0)
+        exit_price = float(trade.get('exit_price', 0) or 0)
+        direction = str(trade.get('direction', 'Long')).lower()
+
+        if entry_price <= 0 or exit_price <= 0:
+            # Cannot recalculate without prices, keep original
+            recalculated.append(trade)
+            continue
+
+        # Dynamic stake based on current capital
+        new_stake = current_capital / MAX_POSITIONS
+
+        # Calculate size_units and fees
+        size_units = new_stake / entry_price
+        fees = (entry_price + exit_price) * size_units * FEE_RATE
+
+        # Calculate PnL
+        if direction == 'long':
+            pnl = size_units * (exit_price - entry_price) - fees
+        else:
+            pnl = size_units * (entry_price - exit_price) - fees
+
+        # Update trade with recalculated values
+        updated_trade = trade.copy()
+        updated_trade['stake'] = round(new_stake, 2)
+        updated_trade['size_units'] = size_units
+        updated_trade['fees'] = round(fees, 8)
+        updated_trade['pnl'] = round(pnl, 8)
+        updated_trade['pnl_pct'] = round((pnl / new_stake * 100) if new_stake else 0, 4)
+        updated_trade['equity_after'] = round(current_capital + pnl, 2)
+
+        recalculated.append(updated_trade)
+
+        # Update capital for next trade
+        current_capital += pnl
+
+    print(f"[Dynamic Stake] Recalculated {len(recalculated)} trades")
+    print(f"[Dynamic Stake] Start capital: ${START_TOTAL_CAPITAL:,.2f} -> Final: ${current_capital:,.2f}")
+    print(f"[Dynamic Stake] First stake: ${START_TOTAL_CAPITAL/MAX_POSITIONS:.2f}, Last stake: ${(current_capital/MAX_POSITIONS):.2f}")
+
+    return recalculated
+
 
 def correct_trades_pnl(json_path: str) -> int:
     """Correct PnL for trades using: size_units = stake/entry, pnl = size_units * diff - fees."""
@@ -621,7 +698,20 @@ def generate_dashboard():
     if len(all_closed_trades_raw) != len(all_closed_trades):
         print(f"  Removed {len(all_closed_trades_raw) - len(all_closed_trades)} duplicate trades")
 
+    # ========== RECALCULATE WITH DYNAMIC STAKES ==========
+    # All trades must be recalculated with dynamic stake based on running capital
+    # This ensures compounding: as capital grows, stake grows proportionally
+    print("  Recalculating trades with dynamic stakes...")
+    all_closed_trades = recalculate_trades_with_dynamic_stake(all_closed_trades)
+
     # ========== PROCESS POSITIONS (Long only) ==========
+    # First, determine current capital after all closed trades
+    # This is used to recalculate open position stakes
+    total_realized_pnl_for_positions = sum(t.get("pnl", 0) for t in all_closed_trades)
+    current_capital_for_positions = START_TOTAL_CAPITAL + total_realized_pnl_for_positions
+    current_stake_per_position = current_capital_for_positions / MAX_POSITIONS
+    print(f"  Current capital for positions: ${current_capital_for_positions:,.2f} (stake per position: ${current_stake_per_position:,.2f})")
+
     # First collect all symbols to fetch prices
     position_symbols = []
     for pos in source_positions:
@@ -641,8 +731,11 @@ def generate_dashboard():
         if direction == "SHORT":
             continue
         entry_price = pos.get("entry_price", 0) or pos.get("entry_price_live", 0)
-        stake = pos.get("stake", 0)
-        size_units = pos.get("size_units", 0)
+
+        # Recalculate stake based on current capital (dynamic sizing)
+        stake = current_stake_per_position
+        # Recalculate size_units based on dynamic stake
+        size_units = stake / entry_price if entry_price else 0
 
         # Calculate unrealized PnL using current price
         current_price = current_prices.get(symbol, 0)
