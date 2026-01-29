@@ -28,7 +28,7 @@ FEE_RATE = 0.00075
 START_TOTAL_CAPITAL = 16_500.0
 
 # Number of positions to divide capital by
-MAX_POSITIONS = 10
+MAX_POSITIONS = 8
 
 
 def recalculate_trades_with_dynamic_stake(trades: list) -> list:
