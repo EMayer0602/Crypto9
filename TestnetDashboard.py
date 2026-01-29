@@ -948,13 +948,14 @@ def generate_dashboard():
 
     def position_table_rows(positions):
         if not positions:
-            return "<tr><td colspan='8'>No positions</td></tr>\n"
+            return "<tr><td colspan='9'>No positions</td></tr>\n"
         rows = ""
         for pos in positions:
             source_class = "badge-spot" if pos["source"] == "SPOT" else "badge-futures"
             entry_price = pos.get("entry_price", 0)
             current_price = pos.get("current_price", 0)
             fees = pos.get("fees", 0)
+            stake = pos.get("stake", 0)
             # Format prices based on magnitude
             def fmt_price(p):
                 if not p:
@@ -972,6 +973,7 @@ def generate_dashboard():
             upnl_class = "positive" if upnl >= 0 else "negative"
             upnl_str = f"${upnl:,.2f}" if upnl != 0 else "-"
             fees_str = f"${fees:.2f}" if fees else "-"
+            stake_str = f"${stake:,.0f}" if stake else "-"
             rows += f"""        <tr>
             <td><span class='badge {source_class}'>{pos['source']}</span></td>
             <td>{pos['asset']}</td>
@@ -979,6 +981,7 @@ def generate_dashboard():
             <td>{entry_time}</td>
             <td>{entry_str}</td>
             <td>{current_str}</td>
+            <td>{stake_str}</td>
             <td>{fees_str}</td>
             <td class='{upnl_class}'>{upnl_str}</td>
         </tr>\n"""
@@ -988,7 +991,7 @@ def generate_dashboard():
     html += f"""
     <h2>Open Positions ({len(all_open_positions)}, PnL: <span class="{'positive' if open_long_pnl >= 0 else 'negative'}">${open_long_pnl:,.2f}</span>)</h2>
     <table>
-        <tr class="long-header"><th>Source</th><th>Asset</th><th>Amount</th><th>Entry Time</th><th>Entry Price</th><th>Actual Price</th><th>Fees</th><th>Unrealized PnL</th></tr>
+        <tr class="long-header"><th>Source</th><th>Asset</th><th>Amount</th><th>Entry Time</th><th>Entry Price</th><th>Actual Price</th><th>Stake</th><th>Fees</th><th>Unrealized PnL</th></tr>
 """
     html += position_table_rows(all_open_positions)
     html += "    </table>\n"
@@ -1006,7 +1009,7 @@ def generate_dashboard():
 
     def trade_table_rows(trades):
         if not trades:
-            return "<tr><td colspan='11'>No trades</td></tr>\n"
+            return "<tr><td colspan='12'>No trades</td></tr>\n"
         rows = ""
         for t in trades:
             pnl_class = "positive" if t["pnl"] >= 0 else "negative"
@@ -1019,6 +1022,7 @@ def generate_dashboard():
             exit_price = t.get("exit_price", 0)
             amount = t.get("amount", 0)
             fees = t.get("fees", 0)
+            stake = t.get("entry_value", 0)  # entry_value is the stake
             # Shorten reason for display
             if reason and len(reason) > 25:
                 reason = reason[:22] + "..."
@@ -1039,6 +1043,7 @@ def generate_dashboard():
                 else:
                     return f"{a:.6f}"
             fees_str = f"${fees:.2f}" if fees else "-"
+            stake_str = f"${stake:,.0f}" if stake else "-"
             rows += f"""        <tr>
             <td>{t['symbol']}</td>
             <td>{indicator}/{htf}</td>
@@ -1047,6 +1052,7 @@ def generate_dashboard():
             <td>{exit_str}</td>
             <td>{fmt_price(exit_price)}</td>
             <td>{fmt_amount(amount)}</td>
+            <td>{stake_str}</td>
             <td>{fees_str}</td>
             <td class="{pnl_class}">${t['pnl']:,.2f}</td>
             <td class="{pnl_class}">{t['pnl_pct']:+.2f}%</td>
@@ -1059,7 +1065,7 @@ def generate_dashboard():
     <div class="section">
     <h2>Closed Trades ({len(long_trades)} trades, PnL: <span class="{'positive' if long_pnl >= 0 else 'negative'}">${long_pnl:,.2f}</span>)</h2>
     <table>
-        <tr class="long-header"><th>Symbol</th><th>Strategy</th><th>Entry Time</th><th>Entry Price</th><th>Exit Time</th><th>Exit Price</th><th>Amount</th><th>Fees</th><th>PnL</th><th>PnL %</th><th>Reason</th></tr>
+        <tr class="long-header"><th>Symbol</th><th>Strategy</th><th>Entry Time</th><th>Entry Price</th><th>Exit Time</th><th>Exit Price</th><th>Amount</th><th>Stake</th><th>Fees</th><th>PnL</th><th>PnL %</th><th>Reason</th></tr>
 """
     html += trade_table_rows(long_trades)
 
