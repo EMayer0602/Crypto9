@@ -2966,21 +2966,39 @@ def _derive_summary_window(trades_df: pd.DataFrame) -> Tuple[pd.Timestamp, pd.Ti
     return start_ts, end_ts
 
 
-def write_live_reports(final_state: Dict, closed_trades: List[TradeResult]) -> None:
+def write_live_reports(final_state: Dict, closed_trades: List[TradeResult], filter_start_ts: Optional[pd.Timestamp] = None) -> None:
     # Append new trades to cumulative log FIRST
     for trade in closed_trades:
         append_trade_log(trade)
-    
+
     # Also write to snapshot files
     current_trades_df = trades_to_dataframe(closed_trades)
     write_closed_trades_report(current_trades_df, SIMULATION_LOG_FILE, SIMULATION_LOG_JSON)
-    
+
     # NOW load ALL historical trades from cumulative log for display
     all_trades_df = _load_trade_log_dataframe(TRADE_LOG_FILE)
     if all_trades_df.empty:
         all_trades_df = current_trades_df
-    
-    # Use ALL historical trades for summary and charts
+
+    # Filter trades by start date if specified (--start CLI option)
+    if filter_start_ts is not None and not all_trades_df.empty:
+        entry_col = "entry_time" if "entry_time" in all_trades_df.columns else "Zeit"
+        if entry_col in all_trades_df.columns:
+            all_trades_df[entry_col] = pd.to_datetime(all_trades_df[entry_col])
+            if all_trades_df[entry_col].dt.tz is None:
+                all_trades_df[entry_col] = all_trades_df[entry_col].dt.tz_localize(st.BERLIN_TZ)
+            original_count = len(all_trades_df)
+            all_trades_df = all_trades_df[all_trades_df[entry_col] >= filter_start_ts]
+            filtered_count = len(all_trades_df)
+            if original_count != filtered_count:
+                print(f"[Filter] Filtered trades from {original_count} to {filtered_count} (from {filter_start_ts.strftime('%Y-%m-%d')})")
+                # Recalculate capital based on filtered trades only
+                pnl_col = "pnl" if "pnl" in all_trades_df.columns else "PnL"
+                if pnl_col in all_trades_df.columns:
+                    filtered_pnl = all_trades_df[pnl_col].sum()
+                    final_state["total_capital"] = START_TOTAL_CAPITAL + filtered_pnl
+
+    # Use filtered (or all) historical trades for summary and charts
     open_positions = final_state.get("positions", [])
     write_open_positions_report(open_positions, SIMULATION_OPEN_POSITIONS_FILE, SIMULATION_OPEN_POSITIONS_JSON)
     open_df = open_positions_to_dataframe(open_positions)
@@ -3031,14 +3049,15 @@ def run_signal_cycle(
     use_testnet: bool,
     order_executor: Optional[OrderExecutor],
     trade_notifier: Optional[TradeNotifier],
+    filter_start_ts: Optional[pd.Timestamp] = None,
 ) -> None:
     print(f"[{_now_str()}] Running scheduled trading cycle (symbols={symbols or 'ALL'})")
 
     # First, run a mini-simulation to get current simulated positions
     # This updates paper_trading_actual_trades.json with current state
     now = pd.Timestamp.now(tz=st.BERLIN_TZ)
-    # Fixed start date for paper trading - ensures stable history (no rolling window)
-    sim_start = pd.Timestamp("2025-12-01", tz=st.BERLIN_TZ)
+    # Use provided start date or default for paper trading - ensures stable history (no rolling window)
+    sim_start = filter_start_ts if filter_start_ts is not None else pd.Timestamp("2025-12-01", tz=st.BERLIN_TZ)
     print(f"[{_now_str()}] Running simulation from {sim_start.strftime('%Y-%m-%d')} to update positions...")
 
     # Temporarily enable synthetic bars for the simulation
@@ -3081,6 +3100,7 @@ def run_signal_cycle(
         order_executor=order_executor,
         trade_notifier=trade_notifier,
         configure_exchange=False,
+        filter_start_ts=sim_start,
     )
     print_daily_closed_trades()
 
@@ -3121,6 +3141,7 @@ def monitor_loop(
     poll_seconds: float,
     order_executor: Optional[OrderExecutor],
     trade_notifier: Optional[TradeNotifier],
+    filter_start_ts: Optional[pd.Timestamp] = None,
 ) -> None:
     st.configure_exchange(use_testnet=use_testnet)
     next_signal = 0.0
@@ -3129,13 +3150,13 @@ def monitor_loop(
         while True:
             now = time.time()
             if now >= next_signal:
-                run_signal_cycle(symbols, indicators, stake, use_testnet, order_executor, trade_notifier)
+                run_signal_cycle(symbols, indicators, stake, use_testnet, order_executor, trade_notifier, filter_start_ts)
                 next_signal = now + signal_interval_min * 60.0
             if now >= next_spike:
                 spike_symbols = detect_atr_spikes(symbols, atr_mult, use_testnet)
                 if spike_symbols:
                     print(f"[{_now_str()}] Spike trigger for {', '.join(spike_symbols)}")
-                    run_signal_cycle(spike_symbols, indicators, stake, use_testnet, order_executor, trade_notifier)
+                    run_signal_cycle(spike_symbols, indicators, stake, use_testnet, order_executor, trade_notifier, filter_start_ts)
                 next_spike = now + spike_interval_min * 60.0
             time.sleep(max(1.0, poll_seconds))
     except KeyboardInterrupt:
@@ -3480,6 +3501,7 @@ def main(
     reset_state: bool = False,
     clear_outputs: bool = False,
     configure_exchange: bool = True,
+    filter_start_ts: Optional[pd.Timestamp] = None,
 ) -> None:
     # Auto-correct any historical trades with wrong PnL formula
     correct_historical_trades_pnl()
@@ -3542,14 +3564,14 @@ def main(
             continue
         closed_trades.extend(trades)
     save_state(state)
-    marked_capital = write_live_reports(state, closed_trades)
+    marked_capital = write_live_reports(state, closed_trades, filter_start_ts=filter_start_ts)
     print(f"[Done] Total capital now {marked_capital:.2f} USDT (incl. open PnL - exit fees)")
 
 
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Paper trading runner for overall-best strategies")
     parser.add_argument("--simulate", action="store_true", help="Run a historical simulation instead of a single live tick")
-    parser.add_argument("--start", type=str, default=None, help="Simulation start timestamp (ISO, default: 24h before end)")
+    parser.add_argument("--start", type=str, default=None, help="Start date filter (ISO format, e.g. 2025-12-01). For --simulate: simulation start. For --monitor: filter trades from this date onwards. Default: 2025-12-01 for monitor, 24h before end for simulate.")
     parser.add_argument("--end", type=str, default=None, help="Simulation end timestamp (ISO, default: now)")
     parser.add_argument("--use-saved-state", action="store_true", help="Seed simulations with the saved JSON state instead of a fresh account")
     parser.add_argument("--sim-log", type=str, default=SIMULATION_LOG_FILE, help="CSV path for simulated trades")
@@ -3714,6 +3736,10 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
         order_executor = None
         if args.place_orders:
             order_executor = create_order_executor(use_testnet)
+        # Parse --start filter for monitor mode (default: 2025-12-01)
+        default_monitor_start = pd.Timestamp("2025-12-01", tz=st.BERLIN_TZ)
+        monitor_start_ts = resolve_timestamp(args.start, default_monitor_start)
+        print(f"[Monitor] Filtering trades from {monitor_start_ts.strftime('%Y-%m-%d')}")
         monitor_loop(
             allowed_symbols,
             allowed_indicators,
@@ -3725,6 +3751,7 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
             poll_seconds=args.poll_seconds,
             order_executor=order_executor,
             trade_notifier=sms_notifier,
+            filter_start_ts=monitor_start_ts,
         )
         return
 
