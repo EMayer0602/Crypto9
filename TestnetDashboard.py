@@ -28,6 +28,49 @@ FEE_RATE = 0.00075
 START_TOTAL_CAPITAL = 16_500.0
 
 
+def fmt_de(n, decimals=2):
+    """Format number in German format (period as thousands sep, comma as decimal).
+
+    Examples:
+        1234.56 → "1.234,56"
+        1234567.89 → "1.234.567,89"
+    """
+    if n is None or n == 0:
+        return "-"
+    # Format with specified decimals
+    formatted = f"{n:,.{decimals}f}"
+    # Swap separators: US (1,234.56) → German (1.234,56)
+    # First replace comma with temp, then period with comma, then temp with period
+    formatted = formatted.replace(",", "X").replace(".", ",").replace("X", ".")
+    return formatted
+
+
+def fmt_de_currency(n, decimals=2):
+    """Format currency in German format with $ prefix."""
+    if n is None:
+        return "-"
+    return f"${fmt_de(n, decimals)}"
+
+
+def fmt_en(n, decimals=2):
+    """Format number in English/US format (comma as thousands sep, period as decimal).
+
+    Examples:
+        1234.56 → "1,234.56"
+        1234567.89 → "1,234,567.89"
+    """
+    if n is None or n == 0:
+        return "-"
+    return f"{n:,.{decimals}f}"
+
+
+def fmt_en_currency(n, decimals=2):
+    """Format currency in English/US format with $ prefix."""
+    if n is None:
+        return "-"
+    return f"${fmt_en(n, decimals)}"
+
+
 def correct_trades_pnl(json_path: str) -> int:
     """Correct PnL for trades using: size_units = stake/entry, pnl = size_units * diff - fees."""
     import math
@@ -494,9 +537,15 @@ def match_futures_trades(trades: list, symbol: str) -> list:
 # DASHBOARD GENERATION
 # ============================================================================
 
-def generate_dashboard():
-    """Generate HTML dashboard with Crypto9 local tracking - Long-only SPOT mode."""
-    print("Fetching Crypto9 testnet data (Long-only SPOT mode)...")
+def generate_dashboard(german_format=False):
+    """Generate HTML dashboard with Crypto9 local tracking - Long-only SPOT mode.
+
+    Args:
+        german_format: If True, use German number formatting (1.234,56)
+                      If False, use English/US formatting (1,234.56)
+    """
+    fmt_suffix = "_de" if german_format else ""
+    print(f"Fetching Crypto9 testnet data (Long-only SPOT mode, {'German' if german_format else 'English'} format)...")
 
     # ========== PAPER TRADING STATE (CAPITAL + POSITIONS) ==========
     print("  Loading paper trading state...")
@@ -778,7 +827,7 @@ def generate_dashboard():
     <div class="summary-boxes">
         <div class="summary-box">
             <h3>Paper Trading Capital</h3>
-            <div class="value">${total_usdt:,.2f}</div>
+            <div class="value">{fmt_de_currency(total_usdt) if german_format else f"${total_usdt:,.2f}"}</div>
         </div>
         <div class="summary-box">
             <h3>Open Positions</h3>
@@ -786,7 +835,7 @@ def generate_dashboard():
         </div>
         <div class="summary-box">
             <h3>Unrealized PnL</h3>
-            <div class="value {'positive' if total_unrealized_pnl >= 0 else 'negative'}">${total_unrealized_pnl:,.2f}</div>
+            <div class="value {'positive' if total_unrealized_pnl >= 0 else 'negative'}">{fmt_de_currency(total_unrealized_pnl) if german_format else f"${total_unrealized_pnl:,.2f}"}</div>
         </div>
         <div class="summary-box">
             <h3>Closed Trades</h3>
@@ -794,11 +843,11 @@ def generate_dashboard():
         </div>
         <div class="summary-box">
             <h3>Realized PnL</h3>
-            <div class="value {'positive' if total_realized_pnl >= 0 else 'negative'}">${total_realized_pnl:,.2f}</div>
+            <div class="value {'positive' if total_realized_pnl >= 0 else 'negative'}">{fmt_de_currency(total_realized_pnl) if german_format else f"${total_realized_pnl:,.2f}"}</div>
         </div>
         <div class="summary-box">
             <h3>Win Rate</h3>
-            <div class="value">{(long_wins / len(all_trades_list) * 100) if all_trades_list else 0:.1f}%</div>
+            <div class="value">{fmt_de((long_wins / len(all_trades_list) * 100), 1) if german_format else f"{(long_wins / len(all_trades_list) * 100):.1f}"}%</div>
         </div>
     </div>
 
@@ -827,37 +876,43 @@ def generate_dashboard():
 
     def position_table_rows(positions):
         if not positions:
-            return "<tr><td colspan='8'>No positions</td></tr>\n"
+            return "<tr><td colspan='9'>No positions</td></tr>\n"
+        # Select formatting functions based on german_format flag
+        fmt_num = fmt_de if german_format else fmt_en
+        fmt_curr = fmt_de_currency if german_format else fmt_en_currency
         rows = ""
         for pos in positions:
             source_class = "badge-spot" if pos["source"] == "SPOT" else "badge-futures"
             entry_price = pos.get("entry_price", 0)
             current_price = pos.get("current_price", 0)
+            stake = pos.get("stake", 0)
             fees = pos.get("fees", 0)
             # Format prices based on magnitude
             def fmt_price(p):
                 if not p:
                     return "-"
                 if p >= 1000:
-                    return f"${p:,.2f}"
+                    return fmt_curr(p, 2)
                 elif p >= 1:
-                    return f"${p:.4f}"
+                    return fmt_curr(p, 4)
                 else:
-                    return f"${p:.6f}"
+                    return fmt_curr(p, 6)
             entry_str = fmt_price(entry_price)
             current_str = fmt_price(current_price)
             entry_time = format_entry_time(pos.get("entry_time", ""))
             upnl = pos.get("unrealized_pnl", 0)
             upnl_class = "positive" if upnl >= 0 else "negative"
-            upnl_str = f"${upnl:,.2f}" if upnl != 0 else "-"
-            fees_str = f"${fees:.2f}" if fees else "-"
+            upnl_str = fmt_curr(upnl, 2) if upnl != 0 else "-"
+            stake_str = fmt_curr(stake, 2) if stake else "-"
+            fees_str = fmt_curr(fees, 2) if fees else "-"
             rows += f"""        <tr>
             <td><span class='badge {source_class}'>{pos['source']}</span></td>
             <td>{pos['asset']}</td>
-            <td>{pos['amount']:,.6f}</td>
+            <td>{fmt_num(pos['amount'], 6)}</td>
             <td>{entry_time}</td>
             <td>{entry_str}</td>
             <td>{current_str}</td>
+            <td>{stake_str}</td>
             <td>{fees_str}</td>
             <td class='{upnl_class}'>{upnl_str}</td>
         </tr>\n"""
@@ -865,9 +920,9 @@ def generate_dashboard():
 
     # Open Positions table (Long only)
     html += f"""
-    <h2>Open Positions ({len(all_open_positions)}, PnL: <span class="{'positive' if open_long_pnl >= 0 else 'negative'}">${open_long_pnl:,.2f}</span>)</h2>
+    <h2>Open Positions ({len(all_open_positions)}, PnL: <span class="{'positive' if open_long_pnl >= 0 else 'negative'}">{fmt_de_currency(open_long_pnl) if german_format else f"${open_long_pnl:,.2f}"}</span>)</h2>
     <table>
-        <tr class="long-header"><th>Source</th><th>Asset</th><th>Amount</th><th>Entry Time</th><th>Entry Price</th><th>Actual Price</th><th>Fees</th><th>Unrealized PnL</th></tr>
+        <tr class="long-header"><th>Source</th><th>Asset</th><th>Amount</th><th>Entry Time</th><th>Entry Price</th><th>Actual Price</th><th>Stake</th><th>Fees</th><th>Unrealized PnL</th></tr>
 """
     html += position_table_rows(all_open_positions)
     html += "    </table>\n"
@@ -885,7 +940,10 @@ def generate_dashboard():
 
     def trade_table_rows(trades):
         if not trades:
-            return "<tr><td colspan='11'>No trades</td></tr>\n"
+            return "<tr><td colspan='12'>No trades</td></tr>\n"
+        # Select formatting functions based on german_format flag
+        fmt_num = fmt_de if german_format else fmt_en
+        fmt_curr = fmt_de_currency if german_format else fmt_en_currency
         rows = ""
         for t in trades:
             pnl_class = "positive" if t["pnl"] >= 0 else "negative"
@@ -897,6 +955,7 @@ def generate_dashboard():
             entry_price = t.get("entry_price", 0)
             exit_price = t.get("exit_price", 0)
             amount = t.get("amount", 0)
+            stake = t.get("entry_value", 0)  # stake is stored as entry_value
             fees = t.get("fees", 0)
             # Shorten reason for display
             if reason and len(reason) > 25:
@@ -904,20 +963,26 @@ def generate_dashboard():
             # Format prices based on magnitude
             def fmt_price(p):
                 if p >= 1000:
-                    return f"${p:,.2f}"
+                    return fmt_curr(p, 2)
                 elif p >= 1:
-                    return f"${p:.4f}"
+                    return fmt_curr(p, 4)
                 elif p >= 0.0001:
-                    return f"${p:.6f}"
+                    return fmt_curr(p, 6)
                 else:
-                    return f"${p:.8f}"  # For very small prices like LUNC
+                    return fmt_curr(p, 8)  # For very small prices like LUNC
             # Format amount based on magnitude
             def fmt_amount(a):
                 if a >= 1:
-                    return f"{a:.4f}"
+                    return fmt_num(a, 4)
                 else:
-                    return f"{a:.6f}"
-            fees_str = f"${fees:.2f}" if fees else "-"
+                    return fmt_num(a, 6)
+            stake_str = fmt_curr(stake, 2) if stake else "-"
+            fees_str = fmt_curr(fees, 2) if fees else "-"
+            pnl_str = fmt_curr(t['pnl'], 2)
+            pnl_pct_str = fmt_num(t['pnl_pct'], 2)
+            # Add + sign for positive pnl_pct
+            if t['pnl_pct'] > 0:
+                pnl_pct_str = "+" + pnl_pct_str
             rows += f"""        <tr>
             <td>{t['symbol']}</td>
             <td>{indicator}/{htf}</td>
@@ -926,9 +991,10 @@ def generate_dashboard():
             <td>{exit_str}</td>
             <td>{fmt_price(exit_price)}</td>
             <td>{fmt_amount(amount)}</td>
+            <td>{stake_str}</td>
             <td>{fees_str}</td>
-            <td class="{pnl_class}">${t['pnl']:,.2f}</td>
-            <td class="{pnl_class}">{t['pnl_pct']:+.2f}%</td>
+            <td class="{pnl_class}">{pnl_str}</td>
+            <td class="{pnl_class}">{pnl_pct_str}%</td>
             <td>{reason}</td>
         </tr>\n"""
         return rows
@@ -936,9 +1002,9 @@ def generate_dashboard():
     # Closed Trades section (Long only)
     html += f"""
     <div class="section">
-    <h2>Closed Trades ({len(all_trades_list)} trades, PnL: <span class="{'positive' if long_pnl >= 0 else 'negative'}">${long_pnl:,.2f}</span>)</h2>
+    <h2>Closed Trades ({len(all_trades_list)} trades, PnL: <span class="{'positive' if long_pnl >= 0 else 'negative'}">{fmt_de_currency(long_pnl) if german_format else f"${long_pnl:,.2f}"}</span>)</h2>
     <table>
-        <tr class="long-header"><th>Symbol</th><th>Strategy</th><th>Entry Time</th><th>Entry Price</th><th>Exit Time</th><th>Exit Price</th><th>Amount</th><th>Fees</th><th>PnL</th><th>PnL %</th><th>Reason</th></tr>
+        <tr class="long-header"><th>Symbol</th><th>Strategy</th><th>Entry Time</th><th>Entry Price</th><th>Exit Time</th><th>Exit Price</th><th>Amount</th><th>Stake</th><th>Fees</th><th>PnL</th><th>PnL %</th><th>Reason</th></tr>
 """
     html += trade_table_rows(all_trades_list)
 
@@ -953,21 +1019,22 @@ def generate_dashboard():
     <div class="section" style="background: #2d2d44; padding: 15px; border-radius: 5px; margin-top: 20px; border: 1px solid #444;">
         <h3 style="margin-top: 0; color: #ffa;">PnL Verification (Debug)</h3>
         <table style="width: auto; background: #1a1a2e;">
-            <tr><td style="text-align: left;">Sum of all PnLs in table:</td><td style="text-align: right;">${table_pnl_sum:,.2f}</td></tr>
-            <tr><td style="text-align: left;">Displayed Total (header):</td><td style="text-align: right;">${total_realized_pnl:,.2f}</td></tr>
-            <tr><td style="text-align: left;">Difference:</td><td style="text-align: right; color: {'#ff4757' if abs(table_pnl_sum - total_realized_pnl) > 0.01 else '#00ff88'};">${table_pnl_sum - total_realized_pnl:,.2f}</td></tr>
+            <tr><td style="text-align: left;">Sum of all PnLs in table:</td><td style="text-align: right;">{fmt_de_currency(table_pnl_sum) if german_format else f"${table_pnl_sum:,.2f}"}</td></tr>
+            <tr><td style="text-align: left;">Displayed Total (header):</td><td style="text-align: right;">{fmt_de_currency(total_realized_pnl) if german_format else f"${total_realized_pnl:,.2f}"}</td></tr>
+            <tr><td style="text-align: left;">Difference:</td><td style="text-align: right; color: {'#ff4757' if abs(table_pnl_sum - total_realized_pnl) > 0.01 else '#00ff88'};">{fmt_de_currency(table_pnl_sum - total_realized_pnl) if german_format else f"${table_pnl_sum - total_realized_pnl:,.2f}"}</td></tr>
             <tr><td style="text-align: left;">Trade count:</td><td style="text-align: right;">{len(all_trades_list)}</td></tr>
         </table>
     </div>
 
-    <p class="timestamp">Generated: {timestamp} | Paper Trading Mode (Long-only SPOT)</p>
+    <p class="timestamp">Generated: {timestamp} | Paper Trading Mode (Long-only SPOT) | {'German' if german_format else 'English'} Number Format</p>
 </div>
 </body>
 </html>"""
 
     # Write to file
     OUTPUT_DIR.mkdir(exist_ok=True)
-    output_path = OUTPUT_DIR / "dashboard.html"
+    output_filename = f"dashboard{fmt_suffix}.html"
+    output_path = OUTPUT_DIR / output_filename
     output_path.write_text(html, encoding="utf-8")
     print(f"\nDashboard saved to: {output_path}")
     return output_path
@@ -998,12 +1065,17 @@ if __name__ == "__main__":
         print(f"Running dashboard loop (refresh every {args.interval}s). Press Ctrl+C to stop.")
         while True:
             try:
-                path = generate_dashboard()
-                print(f"[{datetime.now().strftime('%H:%M:%S')}] Dashboard updated: {path}")
+                # Generate both English and German dashboards
+                path_en = generate_dashboard(german_format=False)
+                path_de = generate_dashboard(german_format=True)
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] Dashboards updated: {path_en}, {path_de}")
                 time.sleep(args.interval)
             except KeyboardInterrupt:
                 print("\nStopped.")
                 break
     else:
-        path = generate_dashboard()
-        print(f"Open with: start {path}")
+        # Generate both English and German dashboards
+        path_en = generate_dashboard(german_format=False)
+        path_de = generate_dashboard(german_format=True)
+        print(f"Open English: start {path_en}")
+        print(f"Open German:  start {path_de}")
