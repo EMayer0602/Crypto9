@@ -3852,6 +3852,26 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
             print(f"[Simulation] Generated {len(trades)} trades during simulation")
         log_path = args.sim_log or SIMULATION_LOG_FILE
         log_json_path = args.sim_json or SIMULATION_LOG_JSON
+
+        # Filter trades to only include those opening from start_ts onwards
+        if not trades_df.empty and start_ts is not None:
+            entry_col = "entry_time" if "entry_time" in trades_df.columns else "Zeit"
+            if entry_col in trades_df.columns:
+                trades_df[entry_col] = pd.to_datetime(trades_df[entry_col])
+                if trades_df[entry_col].dt.tz is None:
+                    trades_df[entry_col] = trades_df[entry_col].dt.tz_localize(st.BERLIN_TZ)
+                original_count = len(trades_df)
+                trades_df = trades_df[trades_df[entry_col] >= start_ts]
+                filtered_count = len(trades_df)
+                if original_count != filtered_count:
+                    print(f"[Filter] Filtered trades from {original_count} to {filtered_count} (opening from {start_ts.strftime('%Y-%m-%d')})")
+                    # Recalculate capital based on filtered trades only
+                    pnl_col = "pnl" if "pnl" in trades_df.columns else "PnL"
+                    if pnl_col in trades_df.columns:
+                        filtered_pnl = trades_df[pnl_col].sum()
+                        final_state["total_capital"] = START_TOTAL_CAPITAL + filtered_pnl
+                        print(f"[Filter] Recalculated capital: ${START_TOTAL_CAPITAL:,.2f} + ${filtered_pnl:,.2f} = ${final_state['total_capital']:,.2f}")
+
         write_closed_trades_report(trades_df, log_path, log_json_path)
         print(f"[Simulation] Final capital: {final_state['total_capital']:.2f} USDT")
         open_path = args.open_log or SIMULATION_OPEN_POSITIONS_FILE
