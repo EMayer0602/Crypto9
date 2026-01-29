@@ -27,83 +27,6 @@ FEE_RATE = 0.00075
 # Start capital for equity calculation (must match paper_trader.py)
 START_TOTAL_CAPITAL = 16_500.0
 
-# Fixed stake per position (do NOT use dynamic compounding - it amplifies losses)
-FIXED_STAKE = 2000.0
-
-
-def recalculate_trades_with_dynamic_stake(trades: list) -> list:
-    """
-    Recalculate all trades with dynamic stake based on running capital.
-
-    The stake for each trade is calculated as: current_capital / MAX_POSITIONS
-    As profits accumulate, the stake increases (compounding).
-
-    Args:
-        trades: List of trade dicts with entry_price, exit_price, direction, exit_time
-
-    Returns:
-        List of trades with recalculated stake, size_units, fees, and pnl
-    """
-    if not trades:
-        return trades
-
-    # Sort by exit_time chronologically
-    def get_exit_time(t):
-        exit_time_str = t.get("exit_time") or t.get("ExitZeit") or ""
-        try:
-            return pd.to_datetime(exit_time_str)
-        except:
-            return pd.Timestamp.min
-
-    sorted_trades = sorted(trades, key=get_exit_time)
-
-    # Start with initial capital
-    current_capital = START_TOTAL_CAPITAL
-    recalculated = []
-
-    for trade in sorted_trades:
-        entry_price = float(trade.get('entry_price', 0) or 0)
-        exit_price = float(trade.get('exit_price', 0) or 0)
-        direction = str(trade.get('direction', 'Long')).lower()
-
-        if entry_price <= 0 or exit_price <= 0:
-            # Cannot recalculate without prices, keep original
-            recalculated.append(trade)
-            continue
-
-        # Dynamic stake based on current capital
-        new_stake = current_capital / MAX_POSITIONS
-
-        # Calculate size_units and fees
-        size_units = new_stake / entry_price
-        fees = (entry_price + exit_price) * size_units * FEE_RATE
-
-        # Calculate PnL
-        if direction == 'long':
-            pnl = size_units * (exit_price - entry_price) - fees
-        else:
-            pnl = size_units * (entry_price - exit_price) - fees
-
-        # Update trade with recalculated values
-        updated_trade = trade.copy()
-        updated_trade['stake'] = round(new_stake, 2)
-        updated_trade['size_units'] = size_units
-        updated_trade['fees'] = round(fees, 8)
-        updated_trade['pnl'] = round(pnl, 8)
-        updated_trade['pnl_pct'] = round((pnl / new_stake * 100) if new_stake else 0, 4)
-        updated_trade['equity_after'] = round(current_capital + pnl, 2)
-
-        recalculated.append(updated_trade)
-
-        # Update capital for next trade
-        current_capital += pnl
-
-    print(f"[Dynamic Stake] Recalculated {len(recalculated)} trades")
-    print(f"[Dynamic Stake] Start capital: ${START_TOTAL_CAPITAL:,.2f} -> Final: ${current_capital:,.2f}")
-    print(f"[Dynamic Stake] First stake: ${START_TOTAL_CAPITAL/MAX_POSITIONS:.2f}, Last stake: ${(current_capital/MAX_POSITIONS):.2f}")
-
-    return recalculated
-
 
 def correct_trades_pnl(json_path: str) -> int:
     """Correct PnL for trades using: size_units = stake/entry, pnl = size_units * diff - fees."""
@@ -174,8 +97,8 @@ BASE_CURRENCIES = {"USDT", "USDC", "BUSD", "BTC", "TUSD"}
 RELEVANT_ASSETS = {"BTC", "ETH", "SOL", "XRP", "LINK", "BNB", "SUI", "ZEC", "LUNC", "TNSR", "ADA", "ICP"}
 
 # Only show trades from this date onwards (set to None to show all)
-# Paper trading started 2025-01-01, showing all trades to capture full profit history
-TRADES_SINCE_DATE = None  # Show ALL trades
+# Show ALL trades to capture full profit history (Long + Short = $6,535 profit)
+TRADES_SINCE_DATE = None
 
 OUTPUT_DIR = Path("report_testnet")
 
@@ -699,18 +622,7 @@ def generate_dashboard():
     if len(all_closed_trades_raw) != len(all_closed_trades):
         print(f"  Removed {len(all_closed_trades_raw) - len(all_closed_trades)} duplicate trades")
 
-    # ========== USE ORIGINAL FIXED STAKES ==========
-    # Dynamic stake recalculation DISABLED - it amplifies losses when trades are mixed
-    # Original fixed stake of ~$2,000 produces better results
-    print(f"  Using original fixed stakes (${FIXED_STAKE:,.0f} per position)")
-
     # ========== PROCESS POSITIONS (Long only) ==========
-    # Use fixed stake for positions (not dynamic compounding)
-    total_realized_pnl_for_positions = sum(t.get("pnl", 0) for t in all_closed_trades)
-    current_capital_for_positions = START_TOTAL_CAPITAL + total_realized_pnl_for_positions
-    current_stake_per_position = FIXED_STAKE  # Fixed stake, not dynamic
-    print(f"  Current capital: ${current_capital_for_positions:,.2f} (fixed stake per position: ${current_stake_per_position:,.2f})")
-
     # First collect all symbols to fetch prices
     position_symbols = []
     for pos in source_positions:
@@ -723,44 +635,27 @@ def generate_dashboard():
     current_prices = fetch_current_prices(position_symbols)
 
     all_open_positions = []
-    # Track positions by symbol to avoid duplicates (keep newest by entry_time)
-    positions_by_symbol = {}
-
     for pos in source_positions:
         symbol = pos.get("symbol", "").replace("/", "")
         direction = pos.get("direction", "long").upper()
         # Long-only mode: skip any short positions
         if direction == "SHORT":
             continue
-
-        # Get entry price - try multiple fields and convert to float
-        entry_price_raw = pos.get("entry_price") or pos.get("entry_price_live") or 0
-        try:
-            entry_price = float(entry_price_raw)
-        except (ValueError, TypeError):
-            entry_price = 0
-
-        # Skip positions with invalid entry price
-        if entry_price <= 0:
-            print(f"  Warning: Skipping {symbol} position with invalid entry_price: {entry_price_raw}")
-            continue
-
-        # Recalculate stake based on current capital (dynamic sizing)
-        stake = current_stake_per_position
-        # Recalculate size_units based on dynamic stake
-        size_units = stake / entry_price
+        entry_price = pos.get("entry_price", 0) or pos.get("entry_price_live", 0)
+        stake = pos.get("stake", 0)
+        size_units = pos.get("size_units", 0)
 
         # Calculate unrealized PnL using current price
         current_price = current_prices.get(symbol, 0)
         # Calculate fees: (entry_price + current_price) * size_units * fee_rate
         fee_rate = 0.00075  # VIP Level 1
-        fees = (entry_price + current_price) * size_units * fee_rate if current_price else 0
-        if current_price:
+        fees = (entry_price + current_price) * size_units * fee_rate if entry_price and current_price and size_units else 0
+        if current_price and entry_price and size_units:
             unrealized_pnl = (current_price - entry_price) * size_units - fees
         else:
             unrealized_pnl = pos.get("unrealized_pnl", 0)
 
-        position_data = {
+        all_open_positions.append({
             "asset": symbol.replace("USDT", "").replace("USDC", "").replace("EUR", ""),
             "symbol": symbol,
             "amount": size_units,
@@ -772,29 +667,14 @@ def generate_dashboard():
             "fees": fees,
             "unrealized_pnl": unrealized_pnl,
             "entry_time": pos.get("entry_time", ""),
-        }
+        })
 
-        # Deduplicate by symbol - keep newest position (by entry_time)
-        if symbol in positions_by_symbol:
-            existing_time = positions_by_symbol[symbol].get("entry_time", "")
-            new_time = position_data.get("entry_time", "")
-            # Keep newer position
-            if new_time > existing_time:
-                positions_by_symbol[symbol] = position_data
-        else:
-            positions_by_symbol[symbol] = position_data
-
-    all_open_positions = list(positions_by_symbol.values())
-    print(f"  {len(all_open_positions)} unique open positions (deduplicated by symbol)")
-
-    # ========== PROCESS ALL CLOSED TRADES (Long only) ==========
-    all_trades_processed = []
+    # ========== PROCESS ALL CLOSED TRADES (Long + Short) ==========
+    all_trades_list = []
     for trade in all_closed_trades:
         direction = trade.get("direction", "long").upper()
-        # Long-only mode: skip short trades
-        if direction == "SHORT":
-            continue
-        stake = trade.get("stake", 0) or FIXED_STAKE
+        # Include both Long and Short trades for full profit
+        stake = trade.get("stake", 0)
         pnl = trade.get("pnl", 0)
         # Calculate exit_value: stake + pnl
         exit_value = trade.get("exit_value") or (stake + pnl)
@@ -827,36 +707,26 @@ def generate_dashboard():
             "htf": trade.get("htf", ""),
             "reason": reason,
         }
-        all_trades_processed.append(trade_data)
-
-    # Separate Long and Short for statistics
-    long_trades = [t for t in all_trades_processed if t["direction"] == "LONG"]
-    short_trades = [t for t in all_trades_processed if t["direction"] == "SHORT"]
+        all_trades_list.append(trade_data)
 
     # Debug: count trades with/without reason
-    with_reason = sum(1 for t in all_trades_processed if t["reason"] != "-")
-    print(f"  Processed {len(all_trades_processed)} closed trades ({len(long_trades)} Long, {len(short_trades)} Short)")
+    with_reason = sum(1 for t in all_trades_list if t["reason"] != "-")
+    print(f"  Processed {len(all_trades_list)} closed trades ({with_reason} with exit reason)")
 
     # Sort by exit time (most recent first)
-    all_trades_processed.sort(key=lambda t: t.get("exit_time") or "", reverse=True)
+    all_trades_list.sort(key=lambda t: t.get("exit_time") or "", reverse=True)
 
-    # Calculate totals from ALL trades (Long + Short)
-    total_volume = sum(t["entry_value"] for t in all_trades_processed) if all_trades_processed else 1
-    total_realized_pnl = sum(t["pnl"] for t in all_trades_processed)
-    total_closed_trades = len(all_trades_processed)
-    total_wins = sum(1 for t in all_trades_processed if t["pnl"] > 0)
-
-    # Separate Long/Short stats
-    long_pnl = sum(t["pnl"] for t in long_trades)
-    short_pnl = sum(t["pnl"] for t in short_trades)
-    long_wins = sum(1 for t in long_trades if t["pnl"] > 0)
-    short_wins = sum(1 for t in short_trades if t["pnl"] > 0)
+    total_volume = sum(t["entry_value"] for t in all_trades_list) if all_trades_list else 1
+    total_realized_pnl = sum(t["pnl"] for t in all_trades_list)
+    total_closed_trades = len(all_trades_list)
+    long_pnl = total_realized_pnl
+    long_wins = sum(1 for t in all_trades_list if t["pnl"] > 0)
 
     # DEBUG: Verify PnL calculation
-    print(f"  DEBUG PnL: total_realized_pnl = ${total_realized_pnl:,.2f} (Long: ${long_pnl:,.2f}, Short: ${short_pnl:,.2f})")
+    print(f"  DEBUG PnL: total_realized_pnl = ${total_realized_pnl:,.2f}")
     print(f"  DEBUG PnL: total_closed_trades = {total_closed_trades}")
-    print(f"  DEBUG PnL: First 5 PnLs = {[round(t['pnl'], 2) for t in all_trades_processed[:5]]}")
-    print(f"  DEBUG PnL: Last 5 PnLs = {[round(t['pnl'], 2) for t in all_trades_processed[-5:]]}")
+    print(f"  DEBUG PnL: First 5 PnLs = {[round(t['pnl'], 2) for t in all_trades_list[:5]]}")
+    print(f"  DEBUG PnL: Last 5 PnLs = {[round(t['pnl'], 2) for t in all_trades_list[-5:]]}")
 
     # Calculate total unrealized PnL from open positions
     total_unrealized_pnl = sum(p.get("unrealized_pnl", 0) for p in all_open_positions)
@@ -903,7 +773,7 @@ def generate_dashboard():
 <body>
 <div class="container">
     <h1>Crypto9 Testnet Dashboard</h1>
-    <p style="color:#666;">SPOT Simulation - Long only | Auto-refresh: 60s</p>
+    <p style="color:#666;">SPOT Only - Long-only Mode | Auto-refresh: 60s</p>
 
     <div class="summary-boxes">
         <div class="summary-box">
@@ -928,15 +798,7 @@ def generate_dashboard():
         </div>
         <div class="summary-box">
             <h3>Win Rate</h3>
-            <div class="value">{(total_wins / total_closed_trades * 100) if total_closed_trades else 0:.1f}%</div>
-        </div>
-        <div class="summary-box">
-            <h3>Long PnL</h3>
-            <div class="value {'positive' if long_pnl >= 0 else 'negative'}">${long_pnl:,.2f}</div>
-        </div>
-        <div class="summary-box">
-            <h3>Short PnL</h3>
-            <div class="value {'positive' if short_pnl >= 0 else 'negative'}">${short_pnl:,.2f}</div>
+            <div class="value">{(long_wins / len(all_trades_list) * 100) if all_trades_list else 0:.1f}%</div>
         </div>
     </div>
 
@@ -965,14 +827,13 @@ def generate_dashboard():
 
     def position_table_rows(positions):
         if not positions:
-            return "<tr><td colspan='9'>No positions</td></tr>\n"
+            return "<tr><td colspan='8'>No positions</td></tr>\n"
         rows = ""
         for pos in positions:
             source_class = "badge-spot" if pos["source"] == "SPOT" else "badge-futures"
             entry_price = pos.get("entry_price", 0)
             current_price = pos.get("current_price", 0)
             fees = pos.get("fees", 0)
-            stake = pos.get("stake", 0)
             # Format prices based on magnitude
             def fmt_price(p):
                 if not p:
@@ -990,7 +851,6 @@ def generate_dashboard():
             upnl_class = "positive" if upnl >= 0 else "negative"
             upnl_str = f"${upnl:,.2f}" if upnl != 0 else "-"
             fees_str = f"${fees:.2f}" if fees else "-"
-            stake_str = f"${stake:,.0f}" if stake else "-"
             rows += f"""        <tr>
             <td><span class='badge {source_class}'>{pos['source']}</span></td>
             <td>{pos['asset']}</td>
@@ -998,7 +858,6 @@ def generate_dashboard():
             <td>{entry_time}</td>
             <td>{entry_str}</td>
             <td>{current_str}</td>
-            <td>{stake_str}</td>
             <td>{fees_str}</td>
             <td class='{upnl_class}'>{upnl_str}</td>
         </tr>\n"""
@@ -1008,7 +867,7 @@ def generate_dashboard():
     html += f"""
     <h2>Open Positions ({len(all_open_positions)}, PnL: <span class="{'positive' if open_long_pnl >= 0 else 'negative'}">${open_long_pnl:,.2f}</span>)</h2>
     <table>
-        <tr class="long-header"><th>Source</th><th>Asset</th><th>Amount</th><th>Entry Time</th><th>Entry Price</th><th>Actual Price</th><th>Stake</th><th>Fees</th><th>Unrealized PnL</th></tr>
+        <tr class="long-header"><th>Source</th><th>Asset</th><th>Amount</th><th>Entry Time</th><th>Entry Price</th><th>Actual Price</th><th>Fees</th><th>Unrealized PnL</th></tr>
 """
     html += position_table_rows(all_open_positions)
     html += "    </table>\n"
@@ -1026,12 +885,10 @@ def generate_dashboard():
 
     def trade_table_rows(trades):
         if not trades:
-            return "<tr><td colspan='13'>No trades</td></tr>\n"
+            return "<tr><td colspan='11'>No trades</td></tr>\n"
         rows = ""
         for t in trades:
             pnl_class = "positive" if t["pnl"] >= 0 else "negative"
-            direction = t.get("direction", "LONG")
-            dir_class = "badge-long" if direction == "LONG" else "badge-short"
             entry_str = format_time(t.get("entry_time"))
             exit_str = format_time(t.get("exit_time")) if t.get("exit_time") else "Open"
             indicator = t.get("indicator", "-")
@@ -1041,7 +898,6 @@ def generate_dashboard():
             exit_price = t.get("exit_price", 0)
             amount = t.get("amount", 0)
             fees = t.get("fees", 0)
-            stake = t.get("entry_value", 0)  # entry_value is the stake
             # Shorten reason for display
             if reason and len(reason) > 25:
                 reason = reason[:22] + "..."
@@ -1062,16 +918,14 @@ def generate_dashboard():
                 else:
                     return f"{a:.6f}"
             fees_str = f"${fees:.2f}" if fees else "-"
-            stake_str = f"${stake:,.0f}" if stake else "-"
             rows += f"""        <tr>
-            <td>{t['symbol']}<span class='badge {dir_class}'>{direction[0]}</span></td>
+            <td>{t['symbol']}</td>
             <td>{indicator}/{htf}</td>
             <td>{entry_str}</td>
             <td>{fmt_price(entry_price)}</td>
             <td>{exit_str}</td>
             <td>{fmt_price(exit_price)}</td>
             <td>{fmt_amount(amount)}</td>
-            <td>{stake_str}</td>
             <td>{fees_str}</td>
             <td class="{pnl_class}">${t['pnl']:,.2f}</td>
             <td class="{pnl_class}">{t['pnl_pct']:+.2f}%</td>
@@ -1079,19 +933,19 @@ def generate_dashboard():
         </tr>\n"""
         return rows
 
-    # Closed Trades section (Long + Short)
+    # Closed Trades section (Long only)
     html += f"""
     <div class="section">
-    <h2>Closed Trades ({total_closed_trades} trades, PnL: <span class="{'positive' if total_realized_pnl >= 0 else 'negative'}">${total_realized_pnl:,.2f}</span>)</h2>
+    <h2>Closed Trades ({len(all_trades_list)} trades, PnL: <span class="{'positive' if long_pnl >= 0 else 'negative'}">${long_pnl:,.2f}</span>)</h2>
     <table>
-        <tr><th>Symbol</th><th>Strategy</th><th>Entry Time</th><th>Entry Price</th><th>Exit Time</th><th>Exit Price</th><th>Amount</th><th>Stake</th><th>Fees</th><th>PnL</th><th>PnL %</th><th>Reason</th></tr>
+        <tr class="long-header"><th>Symbol</th><th>Strategy</th><th>Entry Time</th><th>Entry Price</th><th>Exit Time</th><th>Exit Price</th><th>Amount</th><th>Fees</th><th>PnL</th><th>PnL %</th><th>Reason</th></tr>
 """
-    html += trade_table_rows(all_trades_processed)
+    html += trade_table_rows(all_trades_list)
 
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     # Calculate verification sums
-    table_pnl_sum = sum(t["pnl"] for t in all_trades_processed)
+    table_pnl_sum = sum(t["pnl"] for t in all_trades_list)
 
     html += f"""    </table>
     </div>
@@ -1102,11 +956,11 @@ def generate_dashboard():
             <tr><td style="text-align: left;">Sum of all PnLs in table:</td><td style="text-align: right;">${table_pnl_sum:,.2f}</td></tr>
             <tr><td style="text-align: left;">Displayed Total (header):</td><td style="text-align: right;">${total_realized_pnl:,.2f}</td></tr>
             <tr><td style="text-align: left;">Difference:</td><td style="text-align: right; color: {'#ff4757' if abs(table_pnl_sum - total_realized_pnl) > 0.01 else '#00ff88'};">${table_pnl_sum - total_realized_pnl:,.2f}</td></tr>
-            <tr><td style="text-align: left;">Trade count:</td><td style="text-align: right;">{total_closed_trades}</td></tr>
+            <tr><td style="text-align: left;">Trade count:</td><td style="text-align: right;">{len(all_trades_list)}</td></tr>
         </table>
     </div>
 
-    <p class="timestamp">Generated: {timestamp} | Paper Trading Mode (Long only)</p>
+    <p class="timestamp">Generated: {timestamp} | Paper Trading Mode (Long-only SPOT)</p>
 </div>
 </body>
 </html>"""
@@ -1119,54 +973,11 @@ def generate_dashboard():
     return output_path
 
 
-def run_simulation_refresh():
-    """Run paper_trader simulation to sync all closed trades."""
-    import subprocess
-    import sys
-    print("[Sync] Running simulation to sync closed trades...")
-    try:
-        # Use same python as current process
-        python_cmd = sys.executable
-        result = subprocess.run(
-            [python_cmd, "paper_trader.py", "--simulate", "--testnet", "--close-at-end", "--start", "2025-01-01"],
-            capture_output=True,
-            text=True,
-            timeout=300  # 5 minute timeout
-        )
-        if result.returncode == 0:
-            print("[Sync] Simulation completed successfully")
-            # Count lines mentioning trades
-            trade_lines = [l for l in result.stdout.split('\n') if 'trade' in l.lower()]
-            if trade_lines:
-                print(f"[Sync] {len(trade_lines)} trade-related updates")
-        else:
-            print(f"[Sync] Simulation finished with warnings")
-            if result.stderr:
-                # Only show last few lines of stderr
-                err_lines = result.stderr.strip().split('\n')[-5:]
-                for line in err_lines:
-                    print(f"  {line}")
-        # Also show some stdout for debugging
-        if result.stdout:
-            out_lines = result.stdout.strip().split('\n')[-3:]
-            for line in out_lines:
-                if line.strip():
-                    print(f"  {line}")
-    except subprocess.TimeoutExpired:
-        print("[Sync] Simulation timed out after 5 minutes")
-    except FileNotFoundError:
-        print("[Sync] paper_trader.py not found - skipping simulation")
-    except Exception as e:
-        print(f"[Sync] Error running simulation: {e}")
-
-
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--loop", action="store_true", help="Run in continuous loop mode")
     parser.add_argument("--interval", type=int, default=30, help="Refresh interval in seconds (default: 30)")
-    parser.add_argument("--sync", action="store_true", help="Run simulation to sync closed trades before dashboard")
-    parser.add_argument("--auto-refresh", type=int, default=0, help="Auto-refresh simulation every N dashboard cycles (0=disabled)")
     args = parser.parse_args()
 
     # PnL correction disabled - paper_trader.py already calculates correct PnL with lot sizes
@@ -1183,24 +994,10 @@ if __name__ == "__main__":
         for m in missing:
             print(f"  - {m}")
 
-    # Initial sync if requested
-    if args.sync:
-        run_simulation_refresh()
-
     if args.loop:
         print(f"Running dashboard loop (refresh every {args.interval}s). Press Ctrl+C to stop.")
-        if args.auto_refresh > 0:
-            print(f"Auto-refresh simulation every {args.auto_refresh} cycles")
-        cycle_count = 0
         while True:
             try:
-                # Auto-refresh simulation periodically
-                if args.auto_refresh > 0:
-                    cycle_count += 1
-                    if cycle_count >= args.auto_refresh:
-                        run_simulation_refresh()
-                        cycle_count = 0
-
                 path = generate_dashboard()
                 print(f"[{datetime.now().strftime('%H:%M:%S')}] Dashboard updated: {path}")
                 time.sleep(args.interval)
