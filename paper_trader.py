@@ -201,6 +201,86 @@ def correct_historical_trades_pnl(json_path: str = None) -> int:
         return 0
 
 
+def recalculate_trades_variable_stake(
+    trades_df: pd.DataFrame,
+    start_capital: float = START_TOTAL_CAPITAL,
+    max_positions: int = 10,
+    fee_rate: float = 0.001,  # 0.1% per side (entry + exit = 0.2% total)
+) -> Tuple[pd.DataFrame, float]:
+    """
+    Recalculate all trades with variable stake based on running capital.
+
+    Formula (matching spreadsheet columns AB-AG):
+    - stake = current_capital / max_positions
+    - amount = stake / entry_price
+    - PnL = amount * (exit_price - entry_price) for long
+    - fee = stake * fee_rate * 2 (entry + exit)
+    - net_pnl = PnL - fee
+    - capital += net_pnl
+
+    Returns: (updated DataFrame, final capital)
+    """
+    if trades_df.empty:
+        return trades_df.copy(), start_capital
+
+    df = trades_df.copy()
+
+    # Ensure we have required columns
+    entry_col = "entry_time" if "entry_time" in df.columns else "Zeit"
+    entry_price_col = "entry_price" if "entry_price" in df.columns else "Entry"
+    exit_price_col = "exit_price" if "exit_price" in df.columns else "ExitPreis"
+    direction_col = "direction" if "direction" in df.columns else "Direction"
+
+    # Convert entry_time to datetime for sorting
+    if entry_col in df.columns:
+        df[entry_col] = pd.to_datetime(df[entry_col])
+
+    # Sort by entry time (chronological order)
+    df = df.sort_values(entry_col).reset_index(drop=True)
+
+    current_capital = start_capital
+
+    for idx in range(len(df)):
+        entry_price = float(df.loc[idx, entry_price_col] if entry_price_col in df.columns else 0)
+        exit_price = float(df.loc[idx, exit_price_col] if exit_price_col in df.columns else 0)
+        direction = str(df.loc[idx, direction_col] if direction_col in df.columns else "long").lower()
+
+        if entry_price <= 0 or exit_price <= 0:
+            continue
+
+        # Variable stake based on current capital
+        stake = current_capital / max_positions
+
+        # Amount (size in units)
+        amount = stake / entry_price
+
+        # PnL calculation
+        if direction == "long":
+            pnl_raw = amount * (exit_price - entry_price)
+        else:
+            pnl_raw = amount * (entry_price - exit_price)
+
+        # Fees: fee_rate per side, so total = 2 * fee_rate * stake
+        fees = stake * fee_rate * 2
+
+        # Net PnL
+        net_pnl = pnl_raw - fees
+
+        # Update capital
+        new_capital = current_capital + net_pnl
+
+        # Update DataFrame with recalculated values
+        df.loc[idx, "stake"] = stake
+        df.loc[idx, "size_units"] = amount
+        df.loc[idx, "fees"] = fees
+        df.loc[idx, "pnl"] = net_pnl
+        df.loc[idx, "equity_after"] = new_capital
+
+        current_capital = new_capital
+
+    return df, current_capital
+
+
 CONFIG_FILE = "paper_trading_config.csv"
 STATE_FILE = "paper_trading_state.json"
 TRADE_LOG_FILE = "paper_trading_log.csv"
@@ -2992,11 +3072,16 @@ def write_live_reports(final_state: Dict, closed_trades: List[TradeResult], filt
             filtered_count = len(all_trades_df)
             if original_count != filtered_count:
                 print(f"[Filter] Filtered trades from {original_count} to {filtered_count} (from {filter_start_ts.strftime('%Y-%m-%d')})")
-                # Recalculate capital based on filtered trades only
-                pnl_col = "pnl" if "pnl" in all_trades_df.columns else "PnL"
-                if pnl_col in all_trades_df.columns:
-                    filtered_pnl = all_trades_df[pnl_col].sum()
-                    final_state["total_capital"] = START_TOTAL_CAPITAL + filtered_pnl
+            # Recalculate ALL filtered trades with variable stake starting from START_TOTAL_CAPITAL
+            # Formula: stake = capital / 10, amount = stake / entry_price, PnL = amount * price_diff - fees
+            all_trades_df, final_capital = recalculate_trades_variable_stake(
+                all_trades_df, start_capital=START_TOTAL_CAPITAL, max_positions=MAX_LONG_POSITIONS
+            )
+            final_state["total_capital"] = final_capital
+            pnl_col = "pnl" if "pnl" in all_trades_df.columns else "PnL"
+            if pnl_col in all_trades_df.columns:
+                filtered_pnl = all_trades_df[pnl_col].sum()
+                print(f"[Recalc] Variable stake PnL: ${filtered_pnl:,.2f}, Final capital: ${final_capital:,.2f}")
 
     # Use filtered (or all) historical trades for summary and charts
     open_positions = final_state.get("positions", [])
@@ -3892,12 +3977,16 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
                 filtered_count = len(trades_df)
                 if original_count != filtered_count:
                     print(f"[Filter] Filtered trades from {original_count} to {filtered_count} (opening from {start_ts.strftime('%Y-%m-%d')})")
-                    # Recalculate capital based on filtered trades only
-                    pnl_col = "pnl" if "pnl" in trades_df.columns else "PnL"
-                    if pnl_col in trades_df.columns:
-                        filtered_pnl = trades_df[pnl_col].sum()
-                        final_state["total_capital"] = START_TOTAL_CAPITAL + filtered_pnl
-                        print(f"[Filter] Recalculated capital: ${START_TOTAL_CAPITAL:,.2f} + ${filtered_pnl:,.2f} = ${final_state['total_capital']:,.2f}")
+                # Recalculate ALL filtered trades with variable stake starting from START_TOTAL_CAPITAL
+                # Formula: stake = capital / 10, amount = stake / entry_price, PnL = amount * price_diff - fees
+                trades_df, final_capital = recalculate_trades_variable_stake(
+                    trades_df, start_capital=START_TOTAL_CAPITAL, max_positions=MAX_LONG_POSITIONS
+                )
+                final_state["total_capital"] = final_capital
+                pnl_col = "pnl" if "pnl" in trades_df.columns else "PnL"
+                if pnl_col in trades_df.columns:
+                    filtered_pnl = trades_df[pnl_col].sum()
+                    print(f"[Recalc] Variable stake PnL: ${filtered_pnl:,.2f}, Final capital: ${final_capital:,.2f}")
 
         write_closed_trades_report(trades_df, log_path, log_json_path)
         print(f"[Simulation] Final capital: {final_state['total_capital']:.2f} USDT")
