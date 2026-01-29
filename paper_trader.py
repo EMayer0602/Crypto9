@@ -203,7 +203,7 @@ def correct_historical_trades_pnl(json_path: str = None) -> int:
 
 def recalculate_trades_variable_stake(
     trades_df: pd.DataFrame,
-    start_capital: float = START_TOTAL_CAPITAL,
+    start_capital: float = None,
     max_positions: int = 10,
     fee_rate: float = 0.001,  # 0.1% per side (entry + exit = 0.2% total)
 ) -> Tuple[pd.DataFrame, float]:
@@ -220,6 +220,9 @@ def recalculate_trades_variable_stake(
 
     Returns: (updated DataFrame, final capital)
     """
+    if start_capital is None:
+        start_capital = 16_500.0  # Default START_TOTAL_CAPITAL
+
     if trades_df.empty:
         return trades_df.copy(), start_capital
 
@@ -284,7 +287,7 @@ def recalculate_trades_variable_stake(
 def recalculate_open_positions_variable_stake(
     open_positions: List[Dict],
     closed_trades_df: pd.DataFrame,
-    start_capital: float = START_TOTAL_CAPITAL,
+    start_capital: float = None,
     max_positions: int = 10,
     fee_rate: float = 0.001,
 ) -> List[Dict]:
@@ -300,6 +303,9 @@ def recalculate_open_positions_variable_stake(
 
     Returns: List of updated position dicts
     """
+    if start_capital is None:
+        start_capital = 16_500.0  # Default START_TOTAL_CAPITAL
+
     if not open_positions:
         return []
 
