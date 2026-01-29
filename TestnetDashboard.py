@@ -724,30 +724,44 @@ def generate_dashboard():
     current_prices = fetch_current_prices(position_symbols)
 
     all_open_positions = []
+    # Track positions by symbol to avoid duplicates (keep newest by entry_time)
+    positions_by_symbol = {}
+
     for pos in source_positions:
         symbol = pos.get("symbol", "").replace("/", "")
         direction = pos.get("direction", "long").upper()
         # Long-only mode: skip any short positions
         if direction == "SHORT":
             continue
-        entry_price = pos.get("entry_price", 0) or pos.get("entry_price_live", 0)
+
+        # Get entry price - try multiple fields and convert to float
+        entry_price_raw = pos.get("entry_price") or pos.get("entry_price_live") or 0
+        try:
+            entry_price = float(entry_price_raw)
+        except (ValueError, TypeError):
+            entry_price = 0
+
+        # Skip positions with invalid entry price
+        if entry_price <= 0:
+            print(f"  Warning: Skipping {symbol} position with invalid entry_price: {entry_price_raw}")
+            continue
 
         # Recalculate stake based on current capital (dynamic sizing)
         stake = current_stake_per_position
         # Recalculate size_units based on dynamic stake
-        size_units = stake / entry_price if entry_price else 0
+        size_units = stake / entry_price
 
         # Calculate unrealized PnL using current price
         current_price = current_prices.get(symbol, 0)
         # Calculate fees: (entry_price + current_price) * size_units * fee_rate
         fee_rate = 0.00075  # VIP Level 1
-        fees = (entry_price + current_price) * size_units * fee_rate if entry_price and current_price and size_units else 0
-        if current_price and entry_price and size_units:
+        fees = (entry_price + current_price) * size_units * fee_rate if current_price else 0
+        if current_price:
             unrealized_pnl = (current_price - entry_price) * size_units - fees
         else:
             unrealized_pnl = pos.get("unrealized_pnl", 0)
 
-        all_open_positions.append({
+        position_data = {
             "asset": symbol.replace("USDT", "").replace("USDC", "").replace("EUR", ""),
             "symbol": symbol,
             "amount": size_units,
@@ -759,7 +773,20 @@ def generate_dashboard():
             "fees": fees,
             "unrealized_pnl": unrealized_pnl,
             "entry_time": pos.get("entry_time", ""),
-        })
+        }
+
+        # Deduplicate by symbol - keep newest position (by entry_time)
+        if symbol in positions_by_symbol:
+            existing_time = positions_by_symbol[symbol].get("entry_time", "")
+            new_time = position_data.get("entry_time", "")
+            # Keep newer position
+            if new_time > existing_time:
+                positions_by_symbol[symbol] = position_data
+        else:
+            positions_by_symbol[symbol] = position_data
+
+    all_open_positions = list(positions_by_symbol.values())
+    print(f"  {len(all_open_positions)} unique open positions (deduplicated by symbol)")
 
     # ========== PROCESS ALL CLOSED TRADES (Long only) ==========
     long_trades = []
@@ -1070,33 +1097,42 @@ def generate_dashboard():
 def run_simulation_refresh():
     """Run paper_trader simulation to sync all closed trades."""
     import subprocess
-    print("[Refresh] Running simulation to sync closed trades...")
+    import sys
+    print("[Sync] Running simulation to sync closed trades...")
     try:
+        # Use same python as current process
+        python_cmd = sys.executable
         result = subprocess.run(
-            ["python3", "paper_trader.py", "--simulate", "--testnet", "--close-at-end"],
+            [python_cmd, "paper_trader.py", "--simulate", "--testnet", "--close-at-end", "--start", "2025-01-01"],
             capture_output=True,
             text=True,
             timeout=300  # 5 minute timeout
         )
         if result.returncode == 0:
-            print("[Refresh] Simulation completed successfully")
+            print("[Sync] Simulation completed successfully")
             # Count lines mentioning trades
             trade_lines = [l for l in result.stdout.split('\n') if 'trade' in l.lower()]
             if trade_lines:
-                print(f"[Refresh] {len(trade_lines)} trade-related updates")
+                print(f"[Sync] {len(trade_lines)} trade-related updates")
         else:
-            print(f"[Refresh] Simulation finished with warnings")
+            print(f"[Sync] Simulation finished with warnings")
             if result.stderr:
                 # Only show last few lines of stderr
                 err_lines = result.stderr.strip().split('\n')[-5:]
                 for line in err_lines:
                     print(f"  {line}")
+        # Also show some stdout for debugging
+        if result.stdout:
+            out_lines = result.stdout.strip().split('\n')[-3:]
+            for line in out_lines:
+                if line.strip():
+                    print(f"  {line}")
     except subprocess.TimeoutExpired:
-        print("[Refresh] Simulation timed out after 5 minutes")
+        print("[Sync] Simulation timed out after 5 minutes")
     except FileNotFoundError:
-        print("[Refresh] paper_trader.py not found - skipping simulation")
+        print("[Sync] paper_trader.py not found - skipping simulation")
     except Exception as e:
-        print(f"[Refresh] Error running simulation: {e}")
+        print(f"[Sync] Error running simulation: {e}")
 
 
 if __name__ == "__main__":
