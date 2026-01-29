@@ -281,6 +281,87 @@ def recalculate_trades_variable_stake(
     return df, current_capital
 
 
+def recalculate_open_positions_variable_stake(
+    open_positions: List[Dict],
+    closed_trades_df: pd.DataFrame,
+    start_capital: float = START_TOTAL_CAPITAL,
+    max_positions: int = 10,
+    fee_rate: float = 0.001,
+) -> List[Dict]:
+    """
+    Recalculate open positions with variable stake based on capital at entry time.
+
+    For each open position:
+    1. Find all closed trades that happened BEFORE this position was opened
+    2. Calculate the capital at that point (start_capital + sum of closed PnLs)
+    3. Recalculate stake = capital_at_entry / max_positions
+    4. Recalculate size_units = stake / entry_price
+    5. Recalculate unrealized_pnl based on new stake
+
+    Returns: List of updated position dicts
+    """
+    if not open_positions:
+        return []
+
+    recalculated = []
+
+    # Sort closed trades by entry time
+    if not closed_trades_df.empty:
+        entry_col = "entry_time" if "entry_time" in closed_trades_df.columns else "Zeit"
+        if entry_col in closed_trades_df.columns:
+            closed_trades_df = closed_trades_df.copy()
+            closed_trades_df[entry_col] = pd.to_datetime(closed_trades_df[entry_col])
+            closed_trades_df = closed_trades_df.sort_values(entry_col)
+
+    for pos in open_positions:
+        pos_copy = pos.copy()
+        entry_time = pd.to_datetime(pos.get("entry_time"))
+        entry_price = float(pos.get("entry_price", 0))
+        direction = str(pos.get("direction", "long")).lower()
+        last_price = float(pos.get("last_price", entry_price))
+
+        if entry_price <= 0:
+            recalculated.append(pos_copy)
+            continue
+
+        # Calculate capital at the time this position was opened
+        # = start_capital + sum of PnL from all closed trades that closed BEFORE this entry
+        capital_at_entry = start_capital
+
+        if not closed_trades_df.empty:
+            entry_col = "entry_time" if "entry_time" in closed_trades_df.columns else "Zeit"
+            exit_col = "exit_time" if "exit_time" in closed_trades_df.columns else "ExitZeit"
+            pnl_col = "pnl" if "pnl" in closed_trades_df.columns else "PnL"
+
+            if exit_col in closed_trades_df.columns and pnl_col in closed_trades_df.columns:
+                closed_trades_df[exit_col] = pd.to_datetime(closed_trades_df[exit_col])
+                # Get trades that CLOSED before this position was opened
+                prior_trades = closed_trades_df[closed_trades_df[exit_col] < entry_time]
+                if not prior_trades.empty:
+                    capital_at_entry = start_capital + prior_trades[pnl_col].sum()
+
+        # Recalculate stake based on capital at entry
+        new_stake = capital_at_entry / max_positions
+        new_size_units = new_stake / entry_price
+
+        # Recalculate unrealized PnL
+        if direction == "long":
+            unrealized_pnl = new_size_units * (last_price - entry_price)
+        else:
+            unrealized_pnl = new_size_units * (entry_price - last_price)
+
+        # Update position
+        pos_copy["stake"] = new_stake
+        pos_copy["size_units"] = new_size_units
+        pos_copy["unrealized_pnl"] = unrealized_pnl
+        if entry_price > 0:
+            pos_copy["unrealized_pct"] = ((last_price - entry_price) / entry_price) * 100 if direction == "long" else ((entry_price - last_price) / entry_price) * 100
+
+        recalculated.append(pos_copy)
+
+    return recalculated
+
+
 CONFIG_FILE = "paper_trading_config.csv"
 STATE_FILE = "paper_trading_state.json"
 TRADE_LOG_FILE = "paper_trading_log.csv"
@@ -3085,6 +3166,14 @@ def write_live_reports(final_state: Dict, closed_trades: List[TradeResult], filt
 
     # Use filtered (or all) historical trades for summary and charts
     open_positions = final_state.get("positions", [])
+
+    # Also recalculate open positions with variable stake if filtering is active
+    if filter_start_ts is not None and open_positions:
+        open_positions = recalculate_open_positions_variable_stake(
+            open_positions, all_trades_df, start_capital=START_TOTAL_CAPITAL, max_positions=MAX_LONG_POSITIONS
+        )
+        final_state["positions"] = open_positions
+        print(f"[Recalc] Recalculated {len(open_positions)} open positions with variable stake")
     write_open_positions_report(open_positions, SIMULATION_OPEN_POSITIONS_FILE, SIMULATION_OPEN_POSITIONS_JSON)
     open_df = open_positions_to_dataframe(open_positions)
     start_ts, end_ts = _derive_summary_window(all_trades_df)
@@ -3987,6 +4076,14 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
                 if pnl_col in trades_df.columns:
                     filtered_pnl = trades_df[pnl_col].sum()
                     print(f"[Recalc] Variable stake PnL: ${filtered_pnl:,.2f}, Final capital: ${final_capital:,.2f}")
+
+                # Also recalculate open positions with variable stake
+                if open_positions:
+                    open_positions = recalculate_open_positions_variable_stake(
+                        open_positions, trades_df, start_capital=START_TOTAL_CAPITAL, max_positions=MAX_LONG_POSITIONS
+                    )
+                    final_state["positions"] = open_positions
+                    print(f"[Recalc] Recalculated {len(open_positions)} open positions with variable stake")
 
         write_closed_trades_report(trades_df, log_path, log_json_path)
         print(f"[Simulation] Final capital: {final_state['total_capital']:.2f} USDT")
