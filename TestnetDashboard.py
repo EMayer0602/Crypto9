@@ -787,10 +787,13 @@ def generate_dashboard():
     all_open_positions = list(positions_by_symbol.values())
     print(f"  {len(all_open_positions)} unique open positions (deduplicated by symbol)")
 
-    # ========== PROCESS ALL CLOSED TRADES (Long + Short) ==========
+    # ========== PROCESS ALL CLOSED TRADES (Long only) ==========
     all_trades_processed = []
     for trade in all_closed_trades:
         direction = trade.get("direction", "long").upper()
+        # Long-only mode: skip short trades
+        if direction == "SHORT":
+            continue
         stake = trade.get("stake", 0) or FIXED_STAKE
         pnl = trade.get("pnl", 0)
         # Calculate exit_value: stake + pnl
@@ -900,7 +903,7 @@ def generate_dashboard():
 <body>
 <div class="container">
     <h1>Crypto9 Testnet Dashboard</h1>
-    <p style="color:#666;">SPOT Simulation - Long + Short | Auto-refresh: 60s</p>
+    <p style="color:#666;">SPOT Simulation - Long only | Auto-refresh: 60s</p>
 
     <div class="summary-boxes">
         <div class="summary-box">
@@ -1103,7 +1106,7 @@ def generate_dashboard():
         </table>
     </div>
 
-    <p class="timestamp">Generated: {timestamp} | Paper Trading Mode (Long + Short)</p>
+    <p class="timestamp">Generated: {timestamp} | Paper Trading Mode (Long only)</p>
 </div>
 </body>
 </html>"""
