@@ -1336,6 +1336,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--loop", action="store_true", help="Run in continuous loop mode")
     parser.add_argument("--interval", type=int, default=30, help="Refresh interval in seconds (default: 30)")
+    parser.add_argument("--start", type=str, default=None, help="Filter trades from this date (format: 2025-12-01)")
     args = parser.parse_args()
 
     # PnL correction disabled - paper_trader.py already calculates correct PnL with lot sizes
@@ -1357,8 +1358,8 @@ if __name__ == "__main__":
         while True:
             try:
                 # Generate both English and German dashboards
-                path_en = generate_dashboard(german_format=False)
-                path_de = generate_dashboard(german_format=True)
+                path_en = generate_dashboard(german_format=False, filter_start_date=args.start)
+                path_de = generate_dashboard(german_format=True, filter_start_date=args.start)
                 print(f"[{datetime.now().strftime('%H:%M:%S')}] Dashboards updated: {path_en}, {path_de}")
                 time.sleep(args.interval)
             except KeyboardInterrupt:
@@ -1366,7 +1367,7 @@ if __name__ == "__main__":
                 break
     else:
         # Generate both English and German dashboards
-        path_en = generate_dashboard(german_format=False)
-        path_de = generate_dashboard(german_format=True)
+        path_en = generate_dashboard(german_format=False, filter_start_date=args.start)
+        path_de = generate_dashboard(german_format=True, filter_start_date=args.start)
         print(f"Open English: start {path_en}")
         print(f"Open German:  start {path_de}")
