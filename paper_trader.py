@@ -205,19 +205,19 @@ def recalculate_trades_variable_stake(
     trades_df: pd.DataFrame,
     start_capital: float = None,
     max_positions: int = 10,
-    fee_rate: float = 0.001,  # 0.1% per side (entry + exit = 0.2% total)
 ) -> Tuple[pd.DataFrame, float]:
     """
     Recalculate all trades with variable stake based on running capital.
 
-    Formula (matching spreadsheet columns AB-AG):
+    Formula (matching Supertrend_5Min.py):
     - stake = current_capital / max_positions
-    - amount = stake / entry_price
-    - PnL = amount * (exit_price - entry_price) for long
-    - fee = stake * fee_rate * 2 (entry + exit)
-    - net_pnl = PnL - fee
+    - size_units = stake / entry_price
+    - PnL = size_units * (exit_price - entry_price) for long
+    - fees = (entry_price + exit_price) * size_units * st.FEE_RATE  (0.075% per side)
+    - net_pnl = PnL - fees
     - capital += net_pnl
 
+    Uses st.FEE_RATE from exchange config (VIP Level 1 = 0.00075).
     Returns: (updated DataFrame, final capital)
     """
     if start_capital is None:
@@ -263,8 +263,8 @@ def recalculate_trades_variable_stake(
         else:
             pnl_raw = amount * (entry_price - exit_price)
 
-        # Fees: fee_rate per side, so total = 2 * fee_rate * stake
-        fees = stake * fee_rate * 2
+        # Fees: (entry + exit) * size_units * fee_rate (same as Supertrend_5Min.py)
+        fees = (entry_price + exit_price) * amount * st.FEE_RATE
 
         # Net PnL
         net_pnl = pnl_raw - fees
@@ -289,7 +289,6 @@ def recalculate_open_positions_variable_stake(
     closed_trades_df: pd.DataFrame,
     start_capital: float = None,
     max_positions: int = 10,
-    fee_rate: float = 0.001,
 ) -> List[Dict]:
     """
     Recalculate open positions with variable stake based on capital at entry time.
@@ -299,8 +298,10 @@ def recalculate_open_positions_variable_stake(
     2. Calculate the capital at that point (start_capital + sum of closed PnLs)
     3. Recalculate stake = capital_at_entry / max_positions
     4. Recalculate size_units = stake / entry_price
-    5. Recalculate unrealized_pnl based on new stake
+    5. Recalculate unrealized_pnl based on new size_units (no fees for open positions)
 
+    Note: Fees are not deducted from unrealized PnL - only charged when position closes.
+    Uses st.FEE_RATE from exchange config (VIP Level 1 = 0.00075).
     Returns: List of updated position dicts
     """
     if start_capital is None:
