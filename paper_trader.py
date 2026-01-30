@@ -4151,9 +4151,8 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
         if not trades_df.empty and start_ts is not None:
             entry_col = "entry_time" if "entry_time" in trades_df.columns else "Zeit"
             if entry_col in trades_df.columns:
-                trades_df[entry_col] = pd.to_datetime(trades_df[entry_col])
-                if trades_df[entry_col].dt.tz is None:
-                    trades_df[entry_col] = trades_df[entry_col].dt.tz_localize(st.BERLIN_TZ)
+                trades_df[entry_col] = pd.to_datetime(trades_df[entry_col], utc=True)
+                trades_df[entry_col] = trades_df[entry_col].dt.tz_convert(st.BERLIN_TZ)
                 original_count = len(trades_df)
                 trades_df = trades_df[trades_df[entry_col] >= start_ts]
                 filtered_count = len(trades_df)
