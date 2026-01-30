@@ -946,12 +946,30 @@ def generate_dashboard(german_format=False, filter_start_date: str = None):
         exit_price_val = trade.get("exit_price", 0) or 0
         amount_val = trade.get("size_units") or trade.get("amount") or (stake / entry_price_val if entry_price_val else 0)
         fees = trade.get("fees") or trade.get("Fees") or ((entry_price_val + exit_price_val) * amount_val * 0.00075 if entry_price_val and exit_price_val and amount_val else 0)
+        # Convert Unix timestamps to ISO format for display
+        def convert_timestamp(val):
+            if not val:
+                return val
+            try:
+                if isinstance(val, (int, float)) or (isinstance(val, str) and val.isdigit()):
+                    ts = int(val)
+                    if ts > 1e12:  # milliseconds
+                        ts = ts / 1000
+                    dt = datetime.fromtimestamp(ts)
+                    return dt.strftime("%Y-%m-%dT%H:%M:%S")
+            except:
+                pass
+            return val
+
+        raw_entry = trade.get("entry_time") or trade.get("Zeit")
+        raw_exit = trade.get("exit_time") or trade.get("ExitZeit") or trade.get("closed_at")
+
         trade_data = {
             "symbol": trade.get("symbol", "").replace("/", ""),
             "direction": direction,
             "source": "SPOT",
-            "entry_time": trade.get("entry_time") or trade.get("Zeit"),
-            "exit_time": trade.get("exit_time") or trade.get("ExitZeit") or trade.get("closed_at"),
+            "entry_time": convert_timestamp(raw_entry),
+            "exit_time": convert_timestamp(raw_exit),
             "entry_price": entry_price_val,
             "exit_price": exit_price_val,
             "amount": amount_val,
