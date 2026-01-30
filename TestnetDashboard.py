@@ -852,32 +852,19 @@ def generate_dashboard(german_format=False, filter_start_date: str = None):
     if len(all_closed_trades_raw) != len(all_closed_trades):
         print(f"  Removed {len(all_closed_trades_raw) - len(all_closed_trades)} duplicate trades")
 
-    # ========== FILTER BY DATE (NO RECALCULATION - trades are immutable) ==========
+    # ========== FILTER AND RECALCULATE WITH VARIABLE STAKE ==========
+    # Starting from filter_start_date with capital = 16,500
+    # Each trade: stake = current_capital / 10
     if filter_start_date:
-        print(f"  Filtering trades from {filter_start_date}...")
-        filter_ts = pd.to_datetime(filter_start_date)
-        filtered = []
-        for t in all_closed_trades:
-            entry_time = t.get("entry_time") or t.get("Zeit") or ""
-            try:
-                # Parse timestamp (handles Unix ms/s and ISO strings)
-                if isinstance(entry_time, (int, float)) or (isinstance(entry_time, str) and entry_time.isdigit()):
-                    ts = int(entry_time)
-                    if ts > 1e12:
-                        entry_ts = pd.Timestamp(ts, unit='ms').tz_localize(None)
-                    else:
-                        entry_ts = pd.Timestamp(ts, unit='s').tz_localize(None)
-                else:
-                    entry_ts = pd.to_datetime(entry_time)
-                    if entry_ts.tz is not None:
-                        entry_ts = entry_ts.tz_localize(None)
-                if entry_ts >= filter_ts:
-                    filtered.append(t)
-            except:
-                filtered.append(t)  # Keep if can't parse
-        all_closed_trades = filtered
+        print(f"  Filtering and recalculating trades from {filter_start_date}...")
+        all_closed_trades, final_capital, trade_count = recalculate_trades_with_variable_stake(
+            all_closed_trades,
+            start_capital=START_TOTAL_CAPITAL,
+            max_positions=10,
+            filter_start_date=filter_start_date,
+        )
         total_pnl = sum(t.get("pnl", 0) for t in all_closed_trades)
-        print(f"  Filtered to {len(all_closed_trades)} trades, PnL={total_pnl:,.2f}")
+        print(f"  Recalculated {trade_count} trades: PnL={total_pnl:,.2f}, Capital={final_capital:,.2f}")
 
     # ========== PROCESS POSITIONS (Long only) ==========
     # First collect all symbols to fetch prices
