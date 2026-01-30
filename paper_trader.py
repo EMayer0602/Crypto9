@@ -4113,24 +4113,29 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
                     pnl_usd = stake * pnl_pct
 
                     # Create trade result
+                    size_units = float(pos.get("size_units", stake / entry_price if entry_price else 0))
+                    fees = (entry_price + last_price) * size_units * st.FEE_RATE
+                    pnl = pnl_usd - fees
                     trade = TradeResult(
                         symbol=symbol,
                         direction=pos.get("direction", "Long"),
                         indicator=pos.get("indicator", ""),
                         htf=pos.get("htf", ""),
+                        param_desc=pos.get("param_desc", ""),
                         entry_time=pos.get("entry_time", ""),
                         exit_time=end_ts.isoformat(),
                         entry_price=entry_price,
                         exit_price=last_price,
                         stake=stake,
-                        pnl_pct=pnl_pct * 100,
-                        pnl_usd=pnl_usd,
-                        exit_reason="simulation_end",
-                        equity_after=final_state["total_capital"] + pnl_usd,
+                        fees=fees,
+                        pnl=pnl,
+                        equity_after=final_state["total_capital"] + pnl,
+                        reason="simulation_end",
+                        size_units=size_units,
                     )
                     trades.append(trade)
-                    final_state["total_capital"] += pnl_usd
-                    print(f"  Closed {symbol} {direction}: PnL {pnl_usd:+.2f} USDT ({pnl_pct*100:+.1f}%)")
+                    final_state["total_capital"] += pnl
+                    print(f"  Closed {symbol} {direction}: PnL {pnl:+.2f} USDT ({pnl_pct*100:+.1f}%)")
 
                 # Clear positions after force close
                 final_state["positions"] = []
