@@ -852,18 +852,32 @@ def generate_dashboard(german_format=False, filter_start_date: str = None):
     if len(all_closed_trades_raw) != len(all_closed_trades):
         print(f"  Removed {len(all_closed_trades_raw) - len(all_closed_trades)} duplicate trades")
 
-    # ========== FILTER AND RECALCULATE WITH VARIABLE STAKE ==========
-    final_capital = START_TOTAL_CAPITAL
+    # ========== FILTER BY DATE (NO RECALCULATION - trades are immutable) ==========
     if filter_start_date:
-        print(f"  Filtering and recalculating trades from {filter_start_date}...")
-        all_closed_trades, final_capital, trade_count = recalculate_trades_with_variable_stake(
-            all_closed_trades,
-            start_capital=START_TOTAL_CAPITAL,
-            max_positions=10,
-            filter_start_date=filter_start_date,
-        )
+        print(f"  Filtering trades from {filter_start_date}...")
+        filter_ts = pd.to_datetime(filter_start_date)
+        filtered = []
+        for t in all_closed_trades:
+            entry_time = t.get("entry_time") or t.get("Zeit") or ""
+            try:
+                # Parse timestamp (handles Unix ms/s and ISO strings)
+                if isinstance(entry_time, (int, float)) or (isinstance(entry_time, str) and entry_time.isdigit()):
+                    ts = int(entry_time)
+                    if ts > 1e12:
+                        entry_ts = pd.Timestamp(ts, unit='ms').tz_localize(None)
+                    else:
+                        entry_ts = pd.Timestamp(ts, unit='s').tz_localize(None)
+                else:
+                    entry_ts = pd.to_datetime(entry_time)
+                    if entry_ts.tz is not None:
+                        entry_ts = entry_ts.tz_localize(None)
+                if entry_ts >= filter_ts:
+                    filtered.append(t)
+            except:
+                filtered.append(t)  # Keep if can't parse
+        all_closed_trades = filtered
         total_pnl = sum(t.get("pnl", 0) for t in all_closed_trades)
-        print(f"  Recalculated {trade_count} trades: PnL={total_pnl:,.2f}, Capital={final_capital:,.2f}")
+        print(f"  Filtered to {len(all_closed_trades)} trades, PnL={total_pnl:,.2f}")
 
     # ========== PROCESS POSITIONS (Long only) ==========
     # First collect all symbols to fetch prices
@@ -912,19 +926,30 @@ def generate_dashboard(german_format=False, filter_start_date: str = None):
             "entry_time": pos.get("entry_time", ""),
         })
 
-    # Recalculate open positions with variable stake if filter is active
+    # Filter open positions by entry time (NO RECALCULATION - positions keep their original values)
     if filter_start_date and all_open_positions:
-        # Filter positions by entry time
-        filtered_positions = [
+        def parse_entry_ts(entry_time):
+            try:
+                if isinstance(entry_time, (int, float)) or (isinstance(entry_time, str) and str(entry_time).isdigit()):
+                    ts = int(entry_time)
+                    if ts > 1e12:
+                        return pd.Timestamp(ts, unit='ms').tz_localize(None)
+                    else:
+                        return pd.Timestamp(ts, unit='s').tz_localize(None)
+                else:
+                    et = pd.to_datetime(entry_time)
+                    if et.tz is not None:
+                        et = et.tz_localize(None)
+                    return et
+            except:
+                return pd.Timestamp.min
+
+        filter_ts = pd.to_datetime(filter_start_date)
+        all_open_positions = [
             p for p in all_open_positions
-            if str(p.get("entry_time", ""))[:10] >= filter_start_date
+            if parse_entry_ts(p.get("entry_time", "")) >= filter_ts
         ]
-        # Recalculate with variable stake
-        recalc_positions = recalculate_open_positions_with_variable_stake(
-            filtered_positions, all_closed_trades, start_capital=START_TOTAL_CAPITAL, max_positions=10
-        )
-        all_open_positions = recalc_positions
-        print(f"  Recalculated {len(all_open_positions)} open positions with variable stake")
+        print(f"  Filtered to {len(all_open_positions)} open positions from {filter_start_date}")
 
     # ========== PROCESS ALL CLOSED TRADES (Long + Short) ==========
     all_trades_list = []
