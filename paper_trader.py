@@ -2334,8 +2334,9 @@ def write_closed_trades_report(trades_df: pd.DataFrame, csv_path: str, json_path
         if added_count > 0:
             print(f"[Simulation] Appending {added_count} new trades to existing {len(existing_trades) - added_count}")
             merged_df = pd.DataFrame(existing_trades)
-            # Sort by entry_time
+            # Normalize entry_time to string for consistent sorting
             if "entry_time" in merged_df.columns:
+                merged_df["entry_time"] = merged_df["entry_time"].astype(str)
                 merged_df = merged_df.sort_values("entry_time").reset_index(drop=True)
             _write_dataframe_outputs(merged_df, csv_path, json_path, label="closed trades (merged)")
         else:
