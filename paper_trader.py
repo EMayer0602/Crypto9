@@ -3142,8 +3142,13 @@ def write_live_reports(final_state: Dict, closed_trades: List[TradeResult], filt
     current_trades_df = trades_to_dataframe(closed_trades)
     write_closed_trades_report(current_trades_df, SIMULATION_LOG_FILE, SIMULATION_LOG_JSON)
 
-    # NOW load ALL historical trades from cumulative log for display
-    all_trades_df = _load_trade_log_dataframe(TRADE_LOG_FILE)
+    # Load trades for display - use SIMULATION_LOG_FILE when filtering (monitor/simulate mode)
+    # Otherwise use TRADE_LOG_FILE (live trading cumulative log)
+    if filter_start_ts is not None:
+        all_trades_df = _load_trade_log_dataframe(SIMULATION_LOG_FILE)
+        print(f"[Filter] Loaded {len(all_trades_df)} trades from simulation log")
+    else:
+        all_trades_df = _load_trade_log_dataframe(TRADE_LOG_FILE)
     if all_trades_df.empty:
         all_trades_df = current_trades_df
 
