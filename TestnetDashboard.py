@@ -558,16 +558,35 @@ def recalculate_trades_with_variable_stake(
     if not trades:
         return [], start_capital, 0
 
-    # Sort trades by entry time
-    sorted_trades = sorted(trades, key=lambda t: t.get("entry_time") or t.get("Zeit") or "")
+    # Debug: show sample of entry times
+    if trades:
+        sample_times = [t.get("entry_time") or t.get("Zeit") for t in trades[:3]]
+        print(f"  [Debug] Sample entry times: {sample_times}")
+
+    # Sort trades by entry time (parse dates properly)
+    def parse_entry_time(t):
+        entry = t.get("entry_time") or t.get("Zeit") or ""
+        try:
+            return pd.to_datetime(entry)
+        except:
+            return pd.Timestamp.min
+
+    sorted_trades = sorted(trades, key=parse_entry_time)
 
     # Filter by start date if provided
     if filter_start_date:
+        filter_ts = pd.to_datetime(filter_start_date)
         filtered = []
         for t in sorted_trades:
             entry_time = t.get("entry_time") or t.get("Zeit") or ""
-            if str(entry_time)[:10] >= filter_start_date:
-                filtered.append(t)
+            try:
+                entry_ts = pd.to_datetime(entry_time)
+                if entry_ts.tz is not None:
+                    entry_ts = entry_ts.tz_localize(None)
+                if entry_ts >= filter_ts:
+                    filtered.append(t)
+            except Exception as e:
+                print(f"  [Filter] Failed to parse entry_time '{entry_time}': {e}")
         sorted_trades = filtered
         print(f"  [Filter] Trades from {filter_start_date}: {len(sorted_trades)}")
 
@@ -1015,7 +1034,7 @@ def generate_dashboard(german_format=False, filter_start_date: str = None):
         </div>
         <div class="summary-box">
             <h3>Win Rate</h3>
-            <div class="value">{fmt_de((long_wins / len(all_trades_list) * 100), 1) if german_format else f"{(long_wins / len(all_trades_list) * 100):.1f}"}%</div>
+            <div class="value">{fmt_de((long_wins / len(all_trades_list) * 100) if all_trades_list else 0, 1) if german_format else f"{(long_wins / len(all_trades_list) * 100) if all_trades_list else 0:.1f}"}%</div>
         </div>
     </div>
 
