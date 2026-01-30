@@ -926,7 +926,7 @@ def generate_dashboard(german_format=False, filter_start_date: str = None):
             "entry_time": pos.get("entry_time", ""),
         })
 
-    # Filter open positions by entry time (NO RECALCULATION - positions keep their original values)
+    # Filter and recalculate open positions (stakes based on capital at entry time)
     if filter_start_date and all_open_positions:
         def parse_entry_ts(entry_time):
             try:
@@ -945,11 +945,48 @@ def generate_dashboard(german_format=False, filter_start_date: str = None):
                 return pd.Timestamp.min
 
         filter_ts = pd.to_datetime(filter_start_date)
-        all_open_positions = [
+        # Filter positions by entry date
+        filtered_positions = [
             p for p in all_open_positions
             if parse_entry_ts(p.get("entry_time", "")) >= filter_ts
         ]
-        print(f"  Filtered to {len(all_open_positions)} open positions from {filter_start_date}")
+
+        # Recalculate stakes for open positions based on capital at entry time
+        # Formula: stake = capital_at_entry / 10
+        # capital_at_entry = START_CAPITAL + sum(closed trades PnL before entry)
+        recalculated = []
+        for pos in filtered_positions:
+            pos_copy = pos.copy()
+            entry_ts = parse_entry_ts(pos.get("entry_time", ""))
+            entry_price = float(pos.get("entry_price", 0) or 0)
+            current_price = float(pos.get("current_price", 0) or pos.get("last_price", 0) or entry_price)
+            direction = str(pos.get("direction", "long")).lower()
+
+            # Calculate capital at entry time
+            capital_at_entry = START_TOTAL_CAPITAL
+            for t in all_closed_trades:
+                exit_time = t.get("exit_time") or t.get("ExitZeit") or ""
+                exit_ts = parse_entry_ts(exit_time)
+                if exit_ts < entry_ts:
+                    capital_at_entry += float(t.get("pnl", 0) or 0)
+
+            # Recalculate stake and size
+            new_stake = capital_at_entry / 10
+            new_size = new_stake / entry_price if entry_price > 0 else 0
+
+            # Recalculate unrealized PnL (no fees for open positions)
+            if direction == "long":
+                unrealized_pnl = new_size * (current_price - entry_price)
+            else:
+                unrealized_pnl = new_size * (entry_price - current_price)
+
+            pos_copy["stake"] = new_stake
+            pos_copy["amount"] = new_size
+            pos_copy["unrealized_pnl"] = unrealized_pnl
+            recalculated.append(pos_copy)
+
+        all_open_positions = recalculated
+        print(f"  Recalculated {len(all_open_positions)} open positions with variable stake")
 
     # ========== PROCESS ALL CLOSED TRADES (Long + Short) ==========
     all_trades_list = []
