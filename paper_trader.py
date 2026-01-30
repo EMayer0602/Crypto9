@@ -2896,7 +2896,7 @@ def generate_equity_curve(
         print("[Equity] Missing required columns (exit_time, pnl).")
         return
 
-    df["exit_time"] = pd.to_datetime(df["exit_time"], errors="coerce")
+    df["exit_time"] = pd.to_datetime(df["exit_time"], errors="coerce", utc=True)
     df = df.dropna(subset=["exit_time", "pnl"])
     df = df.sort_values("exit_time").reset_index(drop=True)
 
