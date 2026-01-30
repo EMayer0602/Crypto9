@@ -3215,7 +3215,9 @@ def write_live_reports(final_state: Dict, closed_trades: List[TradeResult], filt
     if _TESTNET_ACTIVE:
         try:
             from TestnetDashboard import generate_dashboard
-            generate_dashboard()
+            # Pass filter_start_date to dashboard for proper filtering and stake recalculation
+            filter_date_str = filter_start_ts.strftime("%Y-%m-%d") if filter_start_ts else None
+            generate_dashboard(filter_start_date=filter_date_str)
             print("[Dashboard] Testnet dashboard updated")
         except Exception as e:
             print(f"[Dashboard] Failed to update: {e}")

@@ -534,15 +534,156 @@ def match_futures_trades(trades: list, symbol: str) -> list:
 
 
 # ============================================================================
+# VARIABLE STAKE RECALCULATION
+# ============================================================================
+
+def recalculate_trades_with_variable_stake(
+    trades: list,
+    start_capital: float = START_TOTAL_CAPITAL,
+    max_positions: int = 10,
+    filter_start_date: str = None,
+) -> tuple:
+    """
+    Filter trades by start date and recalculate with variable stake.
+
+    Args:
+        trades: List of trade dicts
+        start_capital: Starting capital (default 16500)
+        max_positions: Max positions for stake calculation (default 10)
+        filter_start_date: Filter trades from this date (format: "2025-12-01")
+
+    Returns:
+        (filtered_trades, final_capital, filtered_count)
+    """
+    if not trades:
+        return [], start_capital, 0
+
+    # Sort trades by entry time
+    sorted_trades = sorted(trades, key=lambda t: t.get("entry_time") or t.get("Zeit") or "")
+
+    # Filter by start date if provided
+    if filter_start_date:
+        filtered = []
+        for t in sorted_trades:
+            entry_time = t.get("entry_time") or t.get("Zeit") or ""
+            if str(entry_time)[:10] >= filter_start_date:
+                filtered.append(t)
+        sorted_trades = filtered
+        print(f"  [Filter] Trades from {filter_start_date}: {len(sorted_trades)}")
+
+    if not sorted_trades:
+        return [], start_capital, 0
+
+    # Recalculate each trade with variable stake
+    current_capital = start_capital
+    recalculated = []
+
+    for t in sorted_trades:
+        t_copy = t.copy()
+        entry_price = float(t.get("entry_price") or t.get("Entry") or 0)
+        exit_price = float(t.get("exit_price") or t.get("ExitPreis") or 0)
+        direction = str(t.get("direction") or "long").lower()
+
+        if entry_price <= 0 or exit_price <= 0:
+            recalculated.append(t_copy)
+            continue
+
+        # Variable stake based on current capital
+        stake = current_capital / max_positions
+        size_units = stake / entry_price
+
+        # Fees: (entry + exit) * size_units * fee_rate
+        fees = (entry_price + exit_price) * size_units * FEE_RATE
+
+        # PnL calculation
+        if direction == "long":
+            pnl_raw = size_units * (exit_price - entry_price)
+        else:
+            pnl_raw = size_units * (entry_price - exit_price)
+
+        net_pnl = pnl_raw - fees
+        current_capital += net_pnl
+
+        # Update trade with recalculated values
+        t_copy["stake"] = stake
+        t_copy["size_units"] = size_units
+        t_copy["fees"] = fees
+        t_copy["pnl"] = net_pnl
+        t_copy["equity_after"] = current_capital
+
+        recalculated.append(t_copy)
+
+    return recalculated, current_capital, len(recalculated)
+
+
+def recalculate_open_positions_with_variable_stake(
+    positions: list,
+    closed_trades: list,
+    start_capital: float = START_TOTAL_CAPITAL,
+    max_positions: int = 10,
+) -> list:
+    """
+    Recalculate open positions with variable stake based on capital at entry time.
+    """
+    if not positions:
+        return []
+
+    # Calculate capital at each point in time from closed trades
+    recalculated = []
+
+    for pos in positions:
+        pos_copy = pos.copy()
+        entry_time = pos.get("entry_time") or ""
+        entry_price = float(pos.get("entry_price") or 0)
+        current_price = float(pos.get("current_price") or pos.get("last_price") or entry_price)
+        direction = str(pos.get("direction") or "long").lower()
+
+        if entry_price <= 0:
+            recalculated.append(pos_copy)
+            continue
+
+        # Calculate capital at entry time (start + PnL from prior closed trades)
+        capital_at_entry = start_capital
+        for t in closed_trades:
+            exit_time = t.get("exit_time") or t.get("ExitZeit") or ""
+            if str(exit_time) < str(entry_time):
+                capital_at_entry += float(t.get("pnl") or 0)
+
+        # Recalculate stake and size
+        new_stake = capital_at_entry / max_positions
+        new_size_units = new_stake / entry_price
+
+        # Recalculate unrealized PnL (without fees - only charged at close)
+        if direction == "long":
+            unrealized_pnl = new_size_units * (current_price - entry_price)
+        else:
+            unrealized_pnl = new_size_units * (entry_price - current_price)
+
+        pos_copy["stake"] = new_stake
+        pos_copy["size_units"] = new_size_units
+        pos_copy["amount"] = new_size_units
+        pos_copy["unrealized_pnl"] = unrealized_pnl
+        if entry_price > 0:
+            pct = ((current_price - entry_price) / entry_price) * 100 if direction == "long" else ((entry_price - current_price) / entry_price) * 100
+            pos_copy["unrealized_pct"] = pct
+
+        recalculated.append(pos_copy)
+
+    return recalculated
+
+
+# ============================================================================
 # DASHBOARD GENERATION
 # ============================================================================
 
-def generate_dashboard(german_format=False):
+def generate_dashboard(german_format=False, filter_start_date: str = None):
     """Generate HTML dashboard with Crypto9 local tracking - Long-only SPOT mode.
 
     Args:
         german_format: If True, use German number formatting (1.234,56)
                       If False, use English/US formatting (1,234.56)
+        filter_start_date: Filter trades from this date (format: "2025-12-01")
+                          If set, recalculates stakes from START_TOTAL_CAPITAL
     """
     fmt_suffix = "_de" if german_format else ""
     print(f"Fetching Crypto9 testnet data (Long-only SPOT mode, {'German' if german_format else 'English'} format)...")
@@ -671,6 +812,19 @@ def generate_dashboard(german_format=False):
     if len(all_closed_trades_raw) != len(all_closed_trades):
         print(f"  Removed {len(all_closed_trades_raw) - len(all_closed_trades)} duplicate trades")
 
+    # ========== FILTER AND RECALCULATE WITH VARIABLE STAKE ==========
+    final_capital = START_TOTAL_CAPITAL
+    if filter_start_date:
+        print(f"  Filtering and recalculating trades from {filter_start_date}...")
+        all_closed_trades, final_capital, trade_count = recalculate_trades_with_variable_stake(
+            all_closed_trades,
+            start_capital=START_TOTAL_CAPITAL,
+            max_positions=10,
+            filter_start_date=filter_start_date,
+        )
+        total_pnl = sum(t.get("pnl", 0) for t in all_closed_trades)
+        print(f"  Recalculated {trade_count} trades: PnL={total_pnl:,.2f}, Capital={final_capital:,.2f}")
+
     # ========== PROCESS POSITIONS (Long only) ==========
     # First collect all symbols to fetch prices
     position_symbols = []
@@ -717,6 +871,20 @@ def generate_dashboard(german_format=False):
             "unrealized_pnl": unrealized_pnl,
             "entry_time": pos.get("entry_time", ""),
         })
+
+    # Recalculate open positions with variable stake if filter is active
+    if filter_start_date and all_open_positions:
+        # Filter positions by entry time
+        filtered_positions = [
+            p for p in all_open_positions
+            if str(p.get("entry_time", ""))[:10] >= filter_start_date
+        ]
+        # Recalculate with variable stake
+        recalc_positions = recalculate_open_positions_with_variable_stake(
+            filtered_positions, all_closed_trades, start_capital=START_TOTAL_CAPITAL, max_positions=10
+        )
+        all_open_positions = recalc_positions
+        print(f"  Recalculated {len(all_open_positions)} open positions with variable stake")
 
     # ========== PROCESS ALL CLOSED TRADES (Long + Short) ==========
     all_trades_list = []
@@ -856,20 +1024,20 @@ def generate_dashboard(german_format=False):
     open_long_pnl = sum(p.get("unrealized_pnl", 0) for p in all_open_positions)
 
     def format_entry_time(t):
-        """Format entry time for display."""
+        """Format entry time for display as yyyy-mm-dd HH:MM."""
         if not t:
             return "-"
         t_str = str(t)
-        # Handle ISO format: 2026-01-10T14:00:00+01:00 -> 01-10 14:00
+        # Handle ISO format: 2026-01-10T14:00:00+01:00 -> 2026-01-10 14:00
         if "T" in t_str:
             try:
-                return t_str[5:16].replace("T", " ")  # "01-10 14:00"
+                return t_str[:16].replace("T", " ")  # "2026-01-10 14:00"
             except:
                 return t_str[:16]
-        # Handle space format: 2026-01-10 14:00:00 -> 01-10 14:00
+        # Handle space format: 2026-01-10 14:00:00 -> 2026-01-10 14:00
         if " " in t_str:
             try:
-                return t_str[5:16]  # "01-10 14:00"
+                return t_str[:16]  # "2026-01-10 14:00"
             except:
                 return t_str[:16]
         return t_str[:16]
@@ -936,7 +1104,7 @@ def generate_dashboard(german_format=False):
                 return t[:16].replace("T", " ")  # "2026-01-10T12:00" -> "2026-01-10 12:00"
             except:
                 return t
-        return t.strftime("%m-%d %H:%M") if hasattr(t, "strftime") else str(t)
+        return t.strftime("%Y-%m-%d %H:%M") if hasattr(t, "strftime") else str(t)[:16]
 
     def trade_table_rows(trades):
         if not trades:
