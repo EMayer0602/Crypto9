@@ -93,7 +93,7 @@ def correct_trades_pnl(json_path: str) -> int:
             if entry_price > 0 and exit_price > 0 and stake > 0:
                 size_units = stake / entry_price
                 fees = (entry_price + exit_price) * size_units * FEE_RATE
-                direction = str(t.get('direction', 'Long')).lower()
+                direction = str(t.get('direction') or 'Long').lower()
                 if direction == 'long':
                     new_pnl = size_units * (exit_price - entry_price) - fees
                 else:
@@ -881,7 +881,7 @@ def generate_dashboard(german_format=False, filter_start_date: str = None):
     all_open_positions = []
     for pos in source_positions:
         symbol = pos.get("symbol", "").replace("/", "")
-        direction = pos.get("direction", "long").upper()
+        direction = (pos.get("direction") or "long").upper()
         # Long-only mode: skip any short positions
         if direction == "SHORT":
             continue
@@ -947,7 +947,7 @@ def generate_dashboard(german_format=False, filter_start_date: str = None):
             entry_ts = parse_entry_ts(pos.get("entry_time", ""))
             entry_price = float(pos.get("entry_price", 0) or 0)
             current_price = float(pos.get("current_price", 0) or pos.get("last_price", 0) or entry_price)
-            direction = str(pos.get("direction", "long")).lower()
+            direction = str(pos.get("direction") or "long").lower()
 
             # Calculate capital at entry time
             capital_at_entry = START_TOTAL_CAPITAL
@@ -978,7 +978,7 @@ def generate_dashboard(german_format=False, filter_start_date: str = None):
     # ========== PROCESS ALL CLOSED TRADES (Long + Short) ==========
     all_trades_list = []
     for trade in all_closed_trades:
-        direction = trade.get("direction", "long").upper()
+        direction = (trade.get("direction") or "long").upper()
         # Include both Long and Short trades for full profit
         stake = trade.get("stake", 0)
         pnl = trade.get("pnl", 0)
