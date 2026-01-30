@@ -3266,8 +3266,27 @@ def run_signal_cycle(
             reset_state=False,
             clear_outputs=False,
         )
-        # Write simulated open positions to file
+        # Write simulation results to files
         sim_positions = sim_state.get("positions", [])
+        trades_df = trades_to_dataframe(trades)
+
+        # Recalculate with variable stake starting from 16500
+        if not trades_df.empty:
+            trades_df, final_capital = recalculate_trades_variable_stake(
+                trades_df, start_capital=START_TOTAL_CAPITAL, max_positions=MAX_LONG_POSITIONS
+            )
+            sim_state["total_capital"] = final_capital
+            print(f"[{_now_str()}] Recalculated {len(trades_df)} trades with variable stake, PnL: ${trades_df['pnl'].sum():,.2f}")
+
+        # Recalculate open positions with variable stake
+        if sim_positions:
+            sim_positions = recalculate_open_positions_variable_stake(
+                sim_positions, trades_df, start_capital=START_TOTAL_CAPITAL, max_positions=MAX_LONG_POSITIONS
+            )
+            sim_state["positions"] = sim_positions
+
+        # Write to files
+        write_closed_trades_report(trades_df, SIMULATION_LOG_FILE, SIMULATION_LOG_JSON)
         write_open_positions_report(sim_positions, SIMULATION_OPEN_POSITIONS_FILE, SIMULATION_OPEN_POSITIONS_JSON)
         print(f"[{_now_str()}] Simulation complete: {len(trades)} trades, {len(sim_positions)} open positions")
     except Exception as e:
