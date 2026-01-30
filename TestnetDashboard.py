@@ -558,20 +558,46 @@ def recalculate_trades_with_variable_stake(
     if not trades:
         return [], start_capital, 0
 
+    # Helper to parse entry time (handles Unix timestamps and ISO strings)
+    def parse_timestamp(val):
+        """Parse timestamp from various formats including Unix ms/s."""
+        if not val:
+            return pd.Timestamp.min
+        # Handle Unix timestamps (int or numeric string)
+        try:
+            if isinstance(val, (int, float)):
+                ts = int(val)
+                if ts > 1e12:  # milliseconds
+                    return pd.Timestamp(ts, unit='ms', tz='UTC').tz_convert('Europe/Berlin').tz_localize(None)
+                else:  # seconds
+                    return pd.Timestamp(ts, unit='s', tz='UTC').tz_convert('Europe/Berlin').tz_localize(None)
+            if isinstance(val, str) and val.isdigit():
+                ts = int(val)
+                if ts > 1e12:  # milliseconds
+                    return pd.Timestamp(ts, unit='ms', tz='UTC').tz_convert('Europe/Berlin').tz_localize(None)
+                else:  # seconds
+                    return pd.Timestamp(ts, unit='s', tz='UTC').tz_convert('Europe/Berlin').tz_localize(None)
+        except:
+            pass
+        # Try normal parsing
+        try:
+            ts = pd.to_datetime(val)
+            if ts.tz is not None:
+                ts = ts.tz_localize(None)
+            return ts
+        except:
+            return pd.Timestamp.min
+
     # Debug: show sample of entry times
     if trades:
         sample_times = [t.get("entry_time") or t.get("Zeit") for t in trades[:3]]
         print(f"  [Debug] Sample entry times: {sample_times}")
+        # Also show parsed values
+        sample_parsed = [parse_timestamp(t.get("entry_time") or t.get("Zeit")) for t in trades[:3]]
+        print(f"  [Debug] Parsed as: {sample_parsed}")
 
     # Sort trades by entry time (parse dates properly)
-    def parse_entry_time(t):
-        entry = t.get("entry_time") or t.get("Zeit") or ""
-        try:
-            return pd.to_datetime(entry)
-        except:
-            return pd.Timestamp.min
-
-    sorted_trades = sorted(trades, key=parse_entry_time)
+    sorted_trades = sorted(trades, key=lambda t: parse_timestamp(t.get("entry_time") or t.get("Zeit") or ""))
 
     # Filter by start date if provided
     if filter_start_date:
@@ -579,14 +605,9 @@ def recalculate_trades_with_variable_stake(
         filtered = []
         for t in sorted_trades:
             entry_time = t.get("entry_time") or t.get("Zeit") or ""
-            try:
-                entry_ts = pd.to_datetime(entry_time)
-                if entry_ts.tz is not None:
-                    entry_ts = entry_ts.tz_localize(None)
-                if entry_ts >= filter_ts:
-                    filtered.append(t)
-            except Exception as e:
-                print(f"  [Filter] Failed to parse entry_time '{entry_time}': {e}")
+            entry_ts = parse_timestamp(entry_time)
+            if entry_ts >= filter_ts:
+                filtered.append(t)
         sorted_trades = filtered
         print(f"  [Filter] Trades from {filter_start_date}: {len(sorted_trades)}")
 
@@ -1118,6 +1139,22 @@ def generate_dashboard(german_format=False, filter_start_date: str = None):
     def format_time(t):
         if not t:
             return "N/A"
+        # Handle Unix timestamps (integer or numeric string like "1769526000000")
+        try:
+            if isinstance(t, (int, float)):
+                ts = int(t)
+                if ts > 1e12:  # milliseconds
+                    ts = ts / 1000
+                dt = datetime.fromtimestamp(ts)
+                return dt.strftime("%Y-%m-%d %H:%M")
+            if isinstance(t, str) and t.isdigit():
+                ts = int(t)
+                if ts > 1e12:  # milliseconds
+                    ts = ts / 1000
+                dt = datetime.fromtimestamp(ts)
+                return dt.strftime("%Y-%m-%d %H:%M")
+        except:
+            pass
         if isinstance(t, str):
             try:
                 return t[:16].replace("T", " ")  # "2026-01-10T12:00" -> "2026-01-10 12:00"
