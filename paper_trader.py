@@ -2248,6 +2248,7 @@ def enrich_open_positions(positions: List[Dict]) -> pd.DataFrame:
         entry_time = pos.get("entry_time")
         bars_held = bars_in_position(entry_time, latest_ts) if entry_time else 0
         enriched.append({
+            "key": pos.get("key", f"{context.symbol}|{context.direction}|{context.indicator}|{context.htf}"),
             "symbol": context.symbol,
             "direction": context.direction,
             "indicator": context.indicator,
@@ -2255,6 +2256,7 @@ def enrich_open_positions(positions: List[Dict]) -> pd.DataFrame:
             "entry_time": entry_time,
             "entry_price": entry_price,
             "stake": stake,
+            "size_units": pos.get("size_units", stake / entry_price if entry_price else 0),
             "param_a": context.param_a,
             "param_b": context.param_b,
             "atr_mult": context.atr_mult,
