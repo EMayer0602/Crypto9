@@ -2289,8 +2289,60 @@ def _write_dataframe_outputs(df: pd.DataFrame, csv_path: Optional[str], json_pat
     print(f"[Simulation] Wrote {row_count} {label} rows to {target_text}")
 
 
-def write_closed_trades_report(trades_df: pd.DataFrame, csv_path: str, json_path: str) -> None:
-    _write_dataframe_outputs(trades_df, csv_path, json_path, label="closed trades")
+def _get_trade_key(row) -> tuple:
+    """Create unique key for a trade based on symbol, entry_time, exit_time, indicator."""
+    return (
+        str(row.get("symbol", "")),
+        str(row.get("entry_time", "")),
+        str(row.get("exit_time", "")),
+        str(row.get("indicator", "")),
+    )
+
+
+def write_closed_trades_report(trades_df: pd.DataFrame, csv_path: str, json_path: str, append_mode: bool = True) -> None:
+    """Write closed trades report, merging with existing trades if append_mode is True."""
+    if trades_df.empty:
+        print(f"[Simulation] No closed trades written (no rows) – keeping previous files if any.")
+        return
+
+    if append_mode:
+        # Load existing trades and merge
+        existing_trades = []
+        if csv_path and os.path.exists(csv_path):
+            try:
+                existing_df = pd.read_csv(csv_path)
+                existing_trades = existing_df.to_dict("records")
+                print(f"[Simulation] Loaded {len(existing_trades)} existing trades from {csv_path}")
+            except Exception as e:
+                print(f"[Simulation] Could not load existing trades: {e}")
+
+        # Create set of existing trade keys
+        existing_keys = set()
+        for trade in existing_trades:
+            existing_keys.add(_get_trade_key(trade))
+
+        # Add new trades that don't already exist
+        new_trades = trades_df.to_dict("records")
+        added_count = 0
+        for trade in new_trades:
+            trade_key = _get_trade_key(trade)
+            if trade_key not in existing_keys:
+                existing_trades.append(trade)
+                existing_keys.add(trade_key)
+                added_count += 1
+
+        if added_count > 0:
+            print(f"[Simulation] Appending {added_count} new trades to existing {len(existing_trades) - added_count}")
+            merged_df = pd.DataFrame(existing_trades)
+            # Sort by entry_time
+            if "entry_time" in merged_df.columns:
+                merged_df = merged_df.sort_values("entry_time").reset_index(drop=True)
+            _write_dataframe_outputs(merged_df, csv_path, json_path, label="closed trades (merged)")
+        else:
+            print(f"[Simulation] No new trades to add (all {len(new_trades)} already exist)")
+    else:
+        # Overwrite mode - original behavior
+        _write_dataframe_outputs(trades_df, csv_path, json_path, label="closed trades")
 
 
 def write_open_positions_report(positions: List[Dict], csv_path: str, json_path: Optional[str]) -> None:
