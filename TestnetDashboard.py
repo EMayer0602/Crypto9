@@ -852,6 +852,12 @@ def generate_dashboard(german_format=False, filter_start_date: str = None):
     if len(all_closed_trades_raw) != len(all_closed_trades):
         print(f"  Removed {len(all_closed_trades_raw) - len(all_closed_trades)} duplicate trades")
 
+    # Filter out simulation_end trades (artificial force-closes from simulation)
+    before_filter = len(all_closed_trades)
+    all_closed_trades = [t for t in all_closed_trades if t.get("reason", "") != "simulation_end"]
+    if before_filter != len(all_closed_trades):
+        print(f"  Excluded {before_filter - len(all_closed_trades)} simulation_end trades")
+
     # ========== FILTER AND RECALCULATE WITH VARIABLE STAKE ==========
     # Starting from filter_start_date with capital = 16,500
     # Each trade: stake = current_capital / 10
