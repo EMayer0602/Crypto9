@@ -2247,7 +2247,7 @@ def enrich_open_positions(positions: List[Dict]) -> pd.DataFrame:
             unrealized_pnl = unrealized_pct * stake
         status = "Gewinn" if unrealized_pnl > 0 else "Verlust" if unrealized_pnl < 0 else "Flat"
         entry_time = pos.get("entry_time")
-        bars_held = bars_in_position(entry_time, latest_ts) if entry_time else 0
+        bars_held = bars_in_position(entry_time, latest_ts, context.htf) if entry_time else 0
         enriched.append({
             "key": pos.get("key", f"{context.symbol}|{context.direction}|{context.indicator}|{context.htf}"),
             "symbol": context.symbol,
