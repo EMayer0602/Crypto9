@@ -3212,9 +3212,8 @@ def write_live_reports(final_state: Dict, closed_trades: List[TradeResult], filt
     if filter_start_ts is not None and not all_trades_df.empty:
         entry_col = "entry_time" if "entry_time" in all_trades_df.columns else "Zeit"
         if entry_col in all_trades_df.columns:
-            all_trades_df[entry_col] = pd.to_datetime(all_trades_df[entry_col])
-            if all_trades_df[entry_col].dt.tz is None:
-                all_trades_df[entry_col] = all_trades_df[entry_col].dt.tz_localize(st.BERLIN_TZ)
+            all_trades_df[entry_col] = pd.to_datetime(all_trades_df[entry_col], utc=True)
+            all_trades_df[entry_col] = all_trades_df[entry_col].dt.tz_convert(st.BERLIN_TZ)
             original_count = len(all_trades_df)
             all_trades_df = all_trades_df[all_trades_df[entry_col] >= filter_start_ts]
             filtered_count = len(all_trades_df)
