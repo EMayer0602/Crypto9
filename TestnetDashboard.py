@@ -584,13 +584,21 @@ def generate_dashboard():
         stake = pos.get("stake", 0)
         size_units = pos.get("size_units", 0)
 
+        # Calculate size_units if not provided
+        if not size_units and stake and entry_price:
+            size_units = stake / entry_price
+
         # Calculate unrealized PnL using current price
         current_price = current_prices.get(symbol, 0)
-        # Calculate fees: (entry_price + current_price) * size_units * fee_rate
+        # Calculate fees: only entry fee for open position (exit fee unknown)
         fee_rate = 0.00075  # VIP Level 1
-        fees = (entry_price + current_price) * size_units * fee_rate if entry_price and current_price and size_units else 0
+        # For open positions, only calculate entry fee (not exit since we don't know exit price)
+        entry_fee = entry_price * size_units * fee_rate if entry_price and size_units else 0
+        fees = entry_fee  # Only show entry fee for open positions
         if current_price and entry_price and size_units:
-            unrealized_pnl = (current_price - entry_price) * size_units - fees
+            # Unrealized PnL = price difference * size - entry fee only
+            # (exit fee will be added when trade closes)
+            unrealized_pnl = (current_price - entry_price) * size_units - entry_fee
         else:
             unrealized_pnl = pos.get("unrealized_pnl", 0)
 
