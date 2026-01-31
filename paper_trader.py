@@ -236,7 +236,7 @@ def recalculate_trades_variable_stake(
 
     # Convert entry_time to datetime for sorting
     if entry_col in df.columns:
-        df[entry_col] = pd.to_datetime(df[entry_col])
+        df[entry_col] = pd.to_datetime(df[entry_col], utc=True, format='mixed')
 
     # Sort by entry time (chronological order)
     df = df.sort_values(entry_col).reset_index(drop=True)
@@ -317,12 +317,12 @@ def recalculate_open_positions_variable_stake(
         entry_col = "entry_time" if "entry_time" in closed_trades_df.columns else "Zeit"
         if entry_col in closed_trades_df.columns:
             closed_trades_df = closed_trades_df.copy()
-            closed_trades_df[entry_col] = pd.to_datetime(closed_trades_df[entry_col])
+            closed_trades_df[entry_col] = pd.to_datetime(closed_trades_df[entry_col], utc=True, format='mixed')
             closed_trades_df = closed_trades_df.sort_values(entry_col)
 
     for pos in open_positions:
         pos_copy = pos.copy()
-        entry_time = pd.to_datetime(pos.get("entry_time"))
+        entry_time = pd.to_datetime(pos.get("entry_time"), utc=True, format='mixed')
         entry_price = float(pos.get("entry_price", 0))
         direction = str(pos.get("direction", "long")).lower()
         last_price = float(pos.get("last_price", entry_price))
@@ -341,7 +341,7 @@ def recalculate_open_positions_variable_stake(
             pnl_col = "pnl" if "pnl" in closed_trades_df.columns else "PnL"
 
             if exit_col in closed_trades_df.columns and pnl_col in closed_trades_df.columns:
-                closed_trades_df[exit_col] = pd.to_datetime(closed_trades_df[exit_col])
+                closed_trades_df[exit_col] = pd.to_datetime(closed_trades_df[exit_col], utc=True, format='mixed')
                 # Get trades that CLOSED before this position was opened
                 prior_trades = closed_trades_df[closed_trades_df[exit_col] < entry_time]
                 if not prior_trades.empty:
@@ -2816,7 +2816,7 @@ def generate_trade_charts(trades_df: pd.DataFrame, open_positions_df: pd.DataFra
                 for _, trade in symbol_trades.iterrows():
                     try:
                         if "entry_time" in trade:
-                            entry_ts = pd.to_datetime(trade["entry_time"])
+                            entry_ts = pd.to_datetime(trade["entry_time"], utc=True, format='mixed')
                             entry_price = float(trade.get("entry_price", np.nan))
                             entries_x.append(entry_ts)
                             # Offset by -2.5 * ATR
@@ -2826,7 +2826,7 @@ def generate_trade_charts(trades_df: pd.DataFrame, open_positions_df: pd.DataFra
                                 offset = 2.5 * atr_val
                             entries_y.append(entry_price - offset if entry_price else entry_price)
                         if "exit_time" in trade and pd.notna(trade["exit_time"]):
-                            exit_ts = pd.to_datetime(trade["exit_time"])
+                            exit_ts = pd.to_datetime(trade["exit_time"], utc=True, format='mixed')
                             exit_price = float(trade.get("exit_price", np.nan))
                             exits_x.append(exit_ts)
                             # Offset by +2.5 * ATR
@@ -2843,7 +2843,7 @@ def generate_trade_charts(trades_df: pd.DataFrame, open_positions_df: pd.DataFra
                 for _, pos in symbol_open.iterrows():
                     try:
                         if "entry_time" in pos:
-                            entry_ts = pd.to_datetime(pos["entry_time"])
+                            entry_ts = pd.to_datetime(pos["entry_time"], utc=True, format='mixed')
                             entry_price = float(pos.get("entry_price", np.nan))
                             open_entries_x.append(entry_ts)
                             # Offset by -2.5 * ATR
@@ -3176,7 +3176,7 @@ def _derive_summary_window(trades_df: pd.DataFrame) -> Tuple[pd.Timestamp, pd.Ti
     if trades_df.empty or "exit_time" not in trades_df.columns:
         # Default to 7 days back if no trades
         return end_ts - pd.Timedelta(days=7), end_ts
-    exit_times = pd.to_datetime(trades_df["exit_time"], errors="coerce")
+    exit_times = pd.to_datetime(trades_df["exit_time"], errors="coerce", utc=True, format='mixed')
     exit_times = exit_times.dropna()
     if exit_times.empty:
         return end_ts - pd.Timedelta(days=7), end_ts
