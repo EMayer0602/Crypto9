@@ -2,6 +2,7 @@
 """Generate HTML dashboard for Binance Testnet trading."""
 
 import argparse
+import json
 import os
 import time
 import hmac
@@ -205,88 +206,111 @@ def match_trades(orders: list, symbol: str) -> list:
     return matched
 
 
+def load_simulation_data(trades_since: datetime = None):
+    """Load closed trades and open positions from simulation logs.
+
+    Args:
+        trades_since: Only include trades from this date onwards
+
+    Returns:
+        Tuple of (closed_trades_list, open_positions_list)
+    """
+    closed_trades = []
+    open_positions = []
+
+    # Load closed trades from simulation log
+    sim_log_path = Path("paper_trading_simulation_log.json")
+    if sim_log_path.exists():
+        try:
+            with open(sim_log_path, "r", encoding="utf-8") as f:
+                all_trades = json.load(f)
+            for t in all_trades:
+                # Parse exit_time for filtering
+                exit_time_str = t.get("exit_time") or t.get("ExitZeit")
+                if exit_time_str:
+                    try:
+                        exit_time = datetime.fromisoformat(str(exit_time_str).replace("Z", "+00:00"))
+                        if trades_since and exit_time < trades_since:
+                            continue
+                        closed_trades.append({
+                            "symbol": t.get("symbol", "?"),
+                            "direction": t.get("direction", "long").upper(),
+                            "entry_time": t.get("entry_time") or t.get("Zeit"),
+                            "exit_time": exit_time_str,
+                            "entry_price": float(t.get("entry_price") or t.get("Entry") or 0),
+                            "exit_price": float(t.get("exit_price") or t.get("ExitPreis") or 0),
+                            "stake": float(t.get("stake") or 0),
+                            "pnl": float(t.get("pnl") or 0),
+                            "reason": t.get("reason", ""),
+                        })
+                    except Exception:
+                        continue
+        except Exception as e:
+            print(f"[Warning] Failed to load simulation log: {e}")
+
+    # Load open positions from actual trades file
+    open_pos_path = Path("paper_trading_actual_trades.json")
+    if open_pos_path.exists():
+        try:
+            with open(open_pos_path, "r", encoding="utf-8") as f:
+                positions = json.load(f)
+            for p in positions:
+                open_positions.append({
+                    "symbol": p.get("symbol", "?"),
+                    "direction": p.get("direction", "long").upper(),
+                    "entry_time": p.get("entry_time"),
+                    "entry_price": float(p.get("entry_price") or 0),
+                    "last_price": float(p.get("last_price") or 0),
+                    "stake": float(p.get("stake") or 0),
+                    "unrealized_pnl": float(p.get("unrealized_pnl") or 0),
+                    "unrealized_pct": float(p.get("unrealized_pct") or 0),
+                    "bars_held": int(p.get("bars_held") or 0),
+                })
+        except Exception as e:
+            print(f"[Warning] Failed to load open positions: {e}")
+
+    return closed_trades, open_positions
+
+
 def generate_dashboard(trades_since: datetime = None):
-    """Generate HTML dashboard.
+    """Generate HTML dashboard from simulation logs.
 
     Args:
         trades_since: Only show trades from this date onwards. If None, uses TRADES_SINCE_DATE.
     """
     if trades_since is None:
         trades_since = TRADES_SINCE_DATE
-    print("Fetching testnet data...")
+    print("Loading simulation data...")
 
-    # Get balances
-    balances = get_account_balances()
-
-    # Filter relevant balances (ignore testnet junk tokens)
-    open_positions = []
-    base_balances = []
-    for bal in balances:
-        asset = bal["asset"]
-        free = float(bal["free"])
-        locked = float(bal["locked"])
-        total = free + locked
-        if total > 0:
-            if asset in BASE_CURRENCIES:
-                base_balances.append({"asset": asset, "amount": total})
-            elif asset in RELEVANT_ASSETS:
-                open_positions.append({"asset": asset, "amount": total})
-
-    # Get order history for each symbol (filtered by date)
-    all_matched_trades = []
-    symbol_stats = {}
-    for sym in SYMBOLS:
-        orders = get_all_orders(sym)
-        if orders:
-            # Filter orders by date if trades_since is set
-            if trades_since:
-                filtered_orders = []
-                for o in orders:
-                    ts = o.get("time", 0)
-                    if ts:
-                        order_time = datetime.fromtimestamp(ts/1000, tz=timezone.utc)
-                        if order_time >= trades_since:
-                            filtered_orders.append(o)
-                orders = filtered_orders
-
-            stats = calculate_trade_stats(orders)
-            if stats["trades"] > 0:
-                symbol_stats[sym] = stats
-
-            # Match trades into round-trips
-            matched = match_trades(orders, sym)
-            all_matched_trades.extend(matched)
-
-    # Sort matched trades by exit time (most recent first)
-    all_matched_trades.sort(key=lambda x: x["exit_time"] or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+    # Load data from simulation logs
+    closed_trades, open_positions = load_simulation_data(trades_since)
 
     # Separate long and short trades
-    long_trades = [t for t in all_matched_trades if t["direction"] == "LONG"]
-    short_trades = [t for t in all_matched_trades if t["direction"] == "SHORT"]
-
-    # Calculate total volume for share calculation
-    total_volume = sum(t["entry_value"] for t in all_matched_trades) if all_matched_trades else 1
+    long_trades = [t for t in closed_trades if t["direction"] == "LONG"]
+    short_trades = [t for t in closed_trades if t["direction"] == "SHORT"]
 
     # Calculate totals
-    total_realized_pnl = sum(t["pnl"] for t in all_matched_trades)
-    total_closed_trades = len(all_matched_trades)
+    total_realized_pnl = sum(t["pnl"] for t in closed_trades)
+    total_closed_trades = len(closed_trades)
+    total_unrealized_pnl = sum(p["unrealized_pnl"] for p in open_positions)
     long_pnl = sum(t["pnl"] for t in long_trades)
     short_pnl = sum(t["pnl"] for t in short_trades)
     long_wins = sum(1 for t in long_trades if t["pnl"] > 0)
     short_wins = sum(1 for t in short_trades if t["pnl"] > 0)
+    win_rate = (long_wins + short_wins) / total_closed_trades * 100 if total_closed_trades > 0 else 0
 
     # Generate HTML
     html = f"""<!DOCTYPE html>
 <html>
 <head>
     <meta charset="utf-8">
-    <title>Testnet Trading Dashboard</title>
+    <title>Paper Trading Dashboard</title>
+    <meta http-equiv="refresh" content="60">
     <style>
         body {{ font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }}
         .container {{ max-width: 1400px; margin: 0 auto; }}
         h1 {{ color: #333; border-bottom: 2px solid #007bff; padding-bottom: 10px; }}
         h2 {{ color: #555; margin-top: 30px; }}
-        h3 {{ color: #666; margin-top: 20px; }}
         table {{ border-collapse: collapse; width: 100%; margin-top: 10px; background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }}
         th, td {{ border: 1px solid #ddd; padding: 8px; text-align: right; }}
         th {{ background: #007bff; color: white; text-align: center; }}
@@ -304,7 +328,7 @@ def generate_dashboard(trades_since: datetime = None):
 </head>
 <body>
 <div class="container">
-    <h1>Binance Testnet Dashboard</h1>
+    <h1>Paper Trading Dashboard</h1>
 
     <div class="summary-boxes">
         <div class="summary-box">
@@ -316,59 +340,39 @@ def generate_dashboard(trades_since: datetime = None):
             <div class="value {'positive' if total_realized_pnl >= 0 else 'negative'}">{total_realized_pnl:,.2f}</div>
         </div>
         <div class="summary-box">
-            <h3>Long Trades</h3>
-            <div class="value">{len(long_trades)} ({long_wins}W)</div>
-        </div>
-        <div class="summary-box">
-            <h3>Short Trades</h3>
-            <div class="value">{len(short_trades)} ({short_wins}W)</div>
+            <h3>Win Rate</h3>
+            <div class="value">{win_rate:.1f}%</div>
         </div>
         <div class="summary-box">
             <h3>Open Positions</h3>
             <div class="value">{len(open_positions)}</div>
         </div>
+        <div class="summary-box">
+            <h3>Unrealized PnL</h3>
+            <div class="value {'positive' if total_unrealized_pnl >= 0 else 'negative'}">{total_unrealized_pnl:,.2f}</div>
+        </div>
     </div>
 
-    <h2>Base Currency Balances</h2>
+    <h2>Open Positions ({len(open_positions)})</h2>
     <table>
-        <tr><th>Currency</th><th>Amount</th></tr>
-"""
-    for bal in sorted(base_balances, key=lambda x: x["amount"], reverse=True):
-        html += f"        <tr><td>{bal['asset']}</td><td>{bal['amount']:,.2f}</td></tr>\n"
-
-    html += """    </table>
-
-    <h2>Open Positions</h2>
-    <table>
-        <tr><th>Asset</th><th>Amount</th></tr>
+        <tr><th>Symbol</th><th>Direction</th><th>Entry Time</th><th>Entry Price</th><th>Last Price</th><th>Stake</th><th>Unrealized PnL</th><th>PnL %</th></tr>
 """
     if open_positions:
-        for pos in sorted(open_positions, key=lambda x: x["amount"], reverse=True)[:20]:
-            html += f"        <tr><td>{pos['asset']}</td><td>{pos['amount']:,.4f}</td></tr>\n"
-    else:
-        html += "        <tr><td colspan='2'>No open positions</td></tr>\n"
-
-    # Helper function to generate trade table rows
-    def trade_table_rows(trades, header_class=""):
-        if not trades:
-            return "<tr><td colspan='8'>No trades</td></tr>\n"
-        rows = ""
-        for t in trades:
-            pnl_class = "positive" if t["pnl"] >= 0 else "negative"
-            entry_str = t["entry_time"].strftime("%Y-%m-%d %H:%M") if t["entry_time"] else "N/A"
-            exit_str = t["exit_time"].strftime("%Y-%m-%d %H:%M") if t["exit_time"] else "N/A"
-            share = (t["entry_value"] / total_volume * 100) if total_volume > 0 else 0
-            rows += f"""        <tr>
-            <td>{t['symbol']}</td>
-            <td>{entry_str}</td>
-            <td>{exit_str}</td>
-            <td>{t['entry_value']:,.2f}</td>
-            <td>{t['exit_value']:,.2f}</td>
-            <td class="{pnl_class}">{t['pnl']:,.2f}</td>
-            <td class="{pnl_class}">{t['pnl_pct']:+.2f}%</td>
-            <td>{share:.1f}%</td>
+        for pos in open_positions:
+            pnl_class = "positive" if pos["unrealized_pnl"] >= 0 else "negative"
+            entry_time = pos.get("entry_time", "N/A")
+            html += f"""        <tr>
+            <td>{pos['symbol']}</td>
+            <td>{pos['direction']}</td>
+            <td>{entry_time}</td>
+            <td>{pos['entry_price']:.8f}</td>
+            <td>{pos['last_price']:.8f}</td>
+            <td>{pos['stake']:,.2f}</td>
+            <td class="{pnl_class}">{pos['unrealized_pnl']:,.2f}</td>
+            <td class="{pnl_class}">{pos['unrealized_pct']:+.2f}%</td>
         </tr>\n"""
-        return rows
+    else:
+        html += "        <tr><td colspan='8'>No open positions</td></tr>\n"
 
     # Long Trades section
     html += f"""    </table>
@@ -376,9 +380,23 @@ def generate_dashboard(trades_since: datetime = None):
     <div class="section">
     <h2>Long Trades ({len(long_trades)} closed, PnL: <span class="{'positive' if long_pnl >= 0 else 'negative'}">{long_pnl:,.2f}</span>)</h2>
     <table>
-        <tr class="long-header"><th>Symbol</th><th>Entry</th><th>Exit</th><th>Entry Value</th><th>Exit Value</th><th>PnL</th><th>PnL %</th><th>Share</th></tr>
+        <tr class="long-header"><th>Symbol</th><th>Entry Time</th><th>Exit Time</th><th>Entry Price</th><th>Exit Price</th><th>Stake</th><th>PnL</th><th>Reason</th></tr>
 """
-    html += trade_table_rows(long_trades)
+    if long_trades:
+        for t in long_trades:
+            pnl_class = "positive" if t["pnl"] >= 0 else "negative"
+            html += f"""        <tr>
+            <td>{t['symbol']}</td>
+            <td>{t['entry_time']}</td>
+            <td>{t['exit_time']}</td>
+            <td>{t['entry_price']:.8f}</td>
+            <td>{t['exit_price']:.8f}</td>
+            <td>{t['stake']:,.2f}</td>
+            <td class="{pnl_class}">{t['pnl']:,.2f}</td>
+            <td>{t['reason']}</td>
+        </tr>\n"""
+    else:
+        html += "        <tr><td colspan='8'>No long trades</td></tr>\n"
 
     # Short Trades section
     html += f"""    </table>
@@ -387,15 +405,29 @@ def generate_dashboard(trades_since: datetime = None):
     <div class="section">
     <h2>Short Trades ({len(short_trades)} closed, PnL: <span class="{'positive' if short_pnl >= 0 else 'negative'}">{short_pnl:,.2f}</span>)</h2>
     <table>
-        <tr class="short-header"><th>Symbol</th><th>Entry</th><th>Exit</th><th>Entry Value</th><th>Exit Value</th><th>PnL</th><th>PnL %</th><th>Share</th></tr>
+        <tr class="short-header"><th>Symbol</th><th>Entry Time</th><th>Exit Time</th><th>Entry Price</th><th>Exit Price</th><th>Stake</th><th>PnL</th><th>Reason</th></tr>
 """
-    html += trade_table_rows(short_trades)
+    if short_trades:
+        for t in short_trades:
+            pnl_class = "positive" if t["pnl"] >= 0 else "negative"
+            html += f"""        <tr>
+            <td>{t['symbol']}</td>
+            <td>{t['entry_time']}</td>
+            <td>{t['exit_time']}</td>
+            <td>{t['entry_price']:.8f}</td>
+            <td>{t['exit_price']:.8f}</td>
+            <td>{t['stake']:,.2f}</td>
+            <td class="{pnl_class}">{t['pnl']:,.2f}</td>
+            <td>{t['reason']}</td>
+        </tr>\n"""
+    else:
+        html += "        <tr><td colspan='8'>No short trades</td></tr>\n"
 
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     html += f"""    </table>
     </div>
 
-    <p class="timestamp">Generated: {timestamp}</p>
+    <p class="timestamp">Generated: {timestamp} | Data from simulation logs</p>
 </div>
 </body>
 </html>"""
