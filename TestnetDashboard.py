@@ -793,8 +793,10 @@ def generate_dashboard():
                     return f"${p:,.2f}"
                 elif p >= 1:
                     return f"${p:.4f}"
-                else:
+                elif p >= 0.0001:
                     return f"${p:.6f}"
+                else:
+                    return f"${p:.8f}"  # For very small prices like LUNC
             entry_str = fmt_price(entry_price)
             current_str = fmt_price(current_price)
             entry_time = format_entry_time(pos.get("entry_time", ""))
@@ -805,7 +807,7 @@ def generate_dashboard():
             rows += f"""        <tr>
             <td><span class='badge {source_class}'>{pos['source']}</span></td>
             <td>{pos['asset']}</td>
-            <td>{pos['amount']:,.6f}</td>
+            <td>{pos['amount']:,.2f}</td>
             <td>{entry_time}</td>
             <td>{entry_str}</td>
             <td>{current_str}</td>
@@ -929,11 +931,11 @@ def run_simulation_and_update_summary(start_date: str = "2025-01-01", start_capi
         pt.MAX_OPEN_POSITIONS = max_positions
         pt.MAX_LONG_POSITIONS = max_positions
 
-        # Run simulation with saved state (continue from current positions)
+        # Run FULL simulation (not incremental) to regenerate all trades
         trades, final_state = pt.run_simulation(
             start_ts=start_ts,
             end_ts=end_ts,
-            use_saved_state=True,  # Continue from existing state
+            use_saved_state=False,  # Full simulation from start
             emit_entry_log=False,
             use_testnet=False,  # Use simulation mode (not testnet)
             refresh_params=False,  # Don't refresh params each time
