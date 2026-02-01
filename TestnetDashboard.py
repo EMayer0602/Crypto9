@@ -14,6 +14,14 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# Import simulation functions from paper_trader
+try:
+    import paper_trader as pt
+    SIMULATION_AVAILABLE = True
+except ImportError:
+    SIMULATION_AVAILABLE = False
+    print("Warning: paper_trader not available - simulation disabled")
+
 # Local Crypto9 tracking files
 CRYPTO9_POSITIONS_FILE = "crypto9_testnet_positions.json"
 CRYPTO9_CLOSED_TRADES_FILE = "crypto9_testnet_closed_trades.json"
@@ -902,11 +910,65 @@ def generate_dashboard():
     return output_path
 
 
+def run_simulation_and_update_summary():
+    """Run simulation from paper_trader and update trading_summary.html/json in report_html/."""
+    if not SIMULATION_AVAILABLE:
+        print("[Simulation] paper_trader not available - skipping simulation")
+        return False
+
+    try:
+        print("[Simulation] Running simulation to update trading_summary...")
+
+        # Set up simulation parameters
+        now = pd.Timestamp.now(tz=pt.st.BERLIN_TZ)
+        start_ts = pd.Timestamp("2025-01-01", tz=pt.st.BERLIN_TZ)
+        end_ts = now
+
+        # Run simulation with saved state (continue from current positions)
+        trades, final_state = pt.run_simulation(
+            start_ts=start_ts,
+            end_ts=end_ts,
+            use_saved_state=True,  # Continue from existing state
+            emit_entry_log=False,
+            use_testnet=False,  # Use simulation mode (not testnet)
+            refresh_params=False,  # Don't refresh params each time
+        )
+
+        print(f"[Simulation] Completed: {len(trades)} trades processed")
+
+        # Generate summary from simulation results
+        if trades:
+            # Build summary using paper_trader functions
+            trades_df = pt.trades_to_df(trades)
+            open_df = pt.state_to_open_df(final_state)
+            summary = pt.compute_summary(trades, final_state)
+
+            # Write to report_html/ (not report_testnet/)
+            html_path = os.path.join("report_html", "trading_summary.html")
+            json_path = os.path.join("report_html", "trading_summary.json")
+
+            pt.generate_summary_html(summary, trades_df, open_df, html_path)
+            pt.write_summary_json(summary, json_path)
+
+            print(f"[Simulation] Updated {html_path} and {json_path}")
+            return True
+        else:
+            print("[Simulation] No trades to process")
+            return False
+
+    except Exception as e:
+        print(f"[Simulation] Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--loop", action="store_true", help="Run in continuous loop mode")
     parser.add_argument("--interval", type=int, default=30, help="Refresh interval in seconds (default: 30)")
+    parser.add_argument("--simulate", action="store_true", help="Run simulation and update trading_summary before dashboard")
     args = parser.parse_args()
 
     # PnL correction disabled - paper_trader.py already calculates correct PnL with lot sizes
@@ -923,10 +985,20 @@ if __name__ == "__main__":
         for m in missing:
             print(f"  - {m}")
 
+    # Run simulation first if requested
+    if args.simulate:
+        run_simulation_and_update_summary()
+
     if args.loop:
         print(f"Running dashboard loop (refresh every {args.interval}s). Press Ctrl+C to stop.")
+        sim_counter = 0
         while True:
             try:
+                # Run simulation every 10 iterations (e.g., every 5 minutes at 30s interval)
+                if args.simulate and sim_counter % 10 == 0:
+                    run_simulation_and_update_summary()
+                sim_counter += 1
+
                 path = generate_dashboard()
                 print(f"[{datetime.now().strftime('%H:%M:%S')}] Dashboard updated: {path}")
                 time.sleep(args.interval)
