@@ -206,106 +206,206 @@ def match_trades(orders: list, symbol: str) -> list:
     return matched
 
 
-def load_simulation_data(trades_since: datetime = None):
-    """Load closed trades and open positions from trading_summary.html.
+def load_simulation_data(trades_since: datetime = None, start_capital: float = 16500.0, max_positions: int = 10):
+    """Load trades from trading_summary.html and recalculate with proper capital management.
 
     Args:
-        trades_since: Only include trades from this date onwards
+        trades_since: Only include trades from this date onwards (by entry_time)
+        start_capital: Starting capital for simulation
+        max_positions: Maximum open positions (stake = capital / max_positions)
 
     Returns:
-        Tuple of (closed_trades_list, open_positions_list)
+        Tuple of (closed_trades_list, open_positions_list, final_capital)
     """
+    FEE_RATE = 0.001  # 0.1% per trade (entry + exit)
+
     closed_trades = []
     open_positions = []
+    raw_trades = []
+    raw_open_positions = []
 
     # Load from trading_summary.html
     summary_path = Path("report_html/trading_summary.html")
-    if summary_path.exists():
-        try:
-            # Read HTML tables using pandas
-            tables = pd.read_html(summary_path, encoding="utf-8")
-
-            # Find the Long Trades table (has columns: symbol, direction, indicator, htf, entry_time, etc.)
-            for df in tables:
-                cols = [str(c).lower() for c in df.columns]
-                if "symbol" in cols and "pnl" in cols and "exit_time" in cols:
-                    # This is the trades table
-                    for _, row in df.iterrows():
-                        direction = str(row.get("direction", "long")).upper()
-                        # Only include LONG trades
-                        if direction != "LONG":
-                            continue
-
-                        exit_time_str = str(row.get("exit_time", ""))
-                        if not exit_time_str or exit_time_str == "nan":
-                            continue
-
-                        # Parse exit_time for filtering
-                        try:
-                            exit_time = datetime.fromisoformat(exit_time_str.replace("Z", "+00:00"))
-                            if trades_since and exit_time < trades_since:
-                                continue
-                        except Exception:
-                            continue
-
-                        closed_trades.append({
-                            "symbol": str(row.get("symbol", "?")),
-                            "direction": direction,
-                            "entry_time": str(row.get("entry_time", "")),
-                            "exit_time": exit_time_str,
-                            "entry_price": float(row.get("entry_price", 0) or 0),
-                            "exit_price": float(row.get("exit_price", 0) or 0),
-                            "stake": float(row.get("stake", 0) or 0),
-                            "pnl": float(row.get("pnl", 0) or 0),
-                            "reason": str(row.get("reason", "")),
-                        })
-                    break
-
-            # Find the Open Positions table
-            for df in tables:
-                cols = [str(c).lower() for c in df.columns]
-                if "symbol" in cols and "unrealized_pnl" in cols and "last_price" in cols:
-                    # This is the open positions table
-                    for _, row in df.iterrows():
-                        direction = str(row.get("direction", "long")).upper()
-                        # Only include LONG positions
-                        if direction != "LONG":
-                            continue
-
-                        open_positions.append({
-                            "symbol": str(row.get("symbol", "?")),
-                            "direction": direction,
-                            "entry_time": str(row.get("entry_time", "")),
-                            "entry_price": float(row.get("entry_price", 0) or 0),
-                            "last_price": float(row.get("last_price", 0) or 0),
-                            "stake": float(row.get("stake", 0) or 0),
-                            "unrealized_pnl": float(row.get("unrealized_pnl", 0) or 0),
-                            "unrealized_pct": float(row.get("unrealized_pct", 0) or 0),
-                            "bars_held": int(row.get("bars_held", 0) or 0),
-                        })
-                    break
-
-            print(f"[Data] Loaded {len(closed_trades)} closed trades, {len(open_positions)} open positions from trading_summary.html")
-        except Exception as e:
-            print(f"[Warning] Failed to load trading_summary.html: {e}")
-    else:
+    if not summary_path.exists():
         print(f"[Warning] trading_summary.html not found at {summary_path}")
+        return closed_trades, open_positions, start_capital
 
-    return closed_trades, open_positions
+    try:
+        # Read HTML tables using pandas
+        tables = pd.read_html(summary_path, encoding="utf-8")
+
+        # Find the Long Trades table (has columns: symbol, direction, indicator, htf, entry_time, etc.)
+        for df in tables:
+            cols = [str(c).lower() for c in df.columns]
+            if "symbol" in cols and "pnl" in cols and "exit_time" in cols:
+                # This is the trades table
+                for _, row in df.iterrows():
+                    direction = str(row.get("direction", "long")).upper()
+                    # Only include LONG trades
+                    if direction != "LONG":
+                        continue
+
+                    entry_time_str = str(row.get("entry_time", ""))
+                    exit_time_str = str(row.get("exit_time", ""))
+                    if not entry_time_str or entry_time_str == "nan":
+                        continue
+                    if not exit_time_str or exit_time_str == "nan":
+                        continue
+
+                    # Parse entry_time for filtering
+                    try:
+                        entry_time = datetime.fromisoformat(entry_time_str.replace("Z", "+00:00"))
+                        if trades_since and entry_time < trades_since:
+                            continue
+                    except Exception:
+                        continue
+
+                    raw_trades.append({
+                        "symbol": str(row.get("symbol", "?")),
+                        "direction": direction,
+                        "entry_time": entry_time_str,
+                        "entry_time_dt": entry_time,
+                        "exit_time": exit_time_str,
+                        "entry_price": float(row.get("entry_price", 0) or 0),
+                        "exit_price": float(row.get("exit_price", 0) or 0),
+                        "reason": str(row.get("reason", "")),
+                    })
+                break
+
+        # Find the Open Positions table
+        for df in tables:
+            cols = [str(c).lower() for c in df.columns]
+            if "symbol" in cols and "unrealized_pnl" in cols and "last_price" in cols:
+                # This is the open positions table
+                for _, row in df.iterrows():
+                    direction = str(row.get("direction", "long")).upper()
+                    # Only include LONG positions
+                    if direction != "LONG":
+                        continue
+
+                    entry_time_str = str(row.get("entry_time", ""))
+                    try:
+                        entry_time = datetime.fromisoformat(entry_time_str.replace("Z", "+00:00"))
+                        if trades_since and entry_time < trades_since:
+                            continue
+                    except Exception:
+                        continue
+
+                    raw_open_positions.append({
+                        "symbol": str(row.get("symbol", "?")),
+                        "direction": direction,
+                        "entry_time": entry_time_str,
+                        "entry_time_dt": entry_time,
+                        "entry_price": float(row.get("entry_price", 0) or 0),
+                        "last_price": float(row.get("last_price", 0) or 0),
+                        "bars_held": int(row.get("bars_held", 0) or 0),
+                    })
+                break
+
+    except Exception as e:
+        print(f"[Warning] Failed to load trading_summary.html: {e}")
+        return closed_trades, open_positions, start_capital
+
+    # Sort raw trades chronologically by entry_time
+    raw_trades.sort(key=lambda x: x["entry_time_dt"])
+
+    # Recalculate trades with proper capital management
+    capital = start_capital
+    for t in raw_trades:
+        entry_price = t["entry_price"]
+        exit_price = t["exit_price"]
+
+        if entry_price <= 0:
+            continue
+
+        # Calculate stake based on current capital
+        stake = capital / max_positions
+        amount = stake / entry_price
+
+        # Calculate fees (entry + exit)
+        entry_fee = stake * FEE_RATE
+        exit_value = amount * exit_price
+        exit_fee = exit_value * FEE_RATE
+        total_fees = entry_fee + exit_fee
+
+        # Calculate PnL
+        gross_pnl = exit_value - stake
+        pnl = gross_pnl - total_fees
+        pnl_pct = (pnl / stake * 100) if stake > 0 else 0
+
+        # Update capital
+        capital += pnl
+
+        closed_trades.append({
+            "symbol": t["symbol"],
+            "direction": t["direction"],
+            "entry_time": t["entry_time"],
+            "exit_time": t["exit_time"],
+            "entry_price": entry_price,
+            "exit_price": exit_price,
+            "stake": stake,
+            "amount": amount,
+            "fees": total_fees,
+            "pnl": pnl,
+            "pnl_pct": pnl_pct,
+            "reason": t["reason"],
+        })
+
+    # Recalculate open positions with current capital
+    for p in raw_open_positions:
+        entry_price = p["entry_price"]
+        last_price = p["last_price"]
+
+        if entry_price <= 0:
+            continue
+
+        # Calculate stake based on current capital
+        stake = capital / max_positions
+        amount = stake / entry_price
+
+        # Calculate unrealized PnL (only entry fee paid so far)
+        entry_fee = stake * FEE_RATE
+        current_value = amount * last_price
+        unrealized_pnl = current_value - stake - entry_fee
+        unrealized_pct = (unrealized_pnl / stake * 100) if stake > 0 else 0
+
+        open_positions.append({
+            "symbol": p["symbol"],
+            "direction": p["direction"],
+            "entry_time": p["entry_time"],
+            "entry_price": entry_price,
+            "last_price": last_price,
+            "stake": stake,
+            "amount": amount,
+            "fees": entry_fee,
+            "unrealized_pnl": unrealized_pnl,
+            "unrealized_pct": unrealized_pct,
+            "bars_held": p["bars_held"],
+        })
+
+    print(f"[Data] Loaded {len(closed_trades)} closed trades, {len(open_positions)} open positions")
+    print(f"[Data] Capital: {start_capital:,.2f} -> {capital:,.2f} (PnL: {capital - start_capital:,.2f})")
+
+    return closed_trades, open_positions, capital
 
 
-def generate_dashboard(trades_since: datetime = None):
-    """Generate HTML dashboard from simulation logs.
+def generate_dashboard(trades_since: datetime = None, start_capital: float = 16500.0, max_positions: int = 10, lang: str = "en"):
+    """Generate HTML dashboard from trading_summary.html with recalculated capital.
 
     Args:
         trades_since: Only show trades from this date onwards. If None, uses TRADES_SINCE_DATE.
+        start_capital: Starting capital for simulation
+        max_positions: Maximum open positions
+        lang: Language for dashboard ("en" or "de")
     """
     if trades_since is None:
         trades_since = TRADES_SINCE_DATE
-    print("Loading simulation data...")
+    print(f"Loading simulation data (lang={lang})...")
 
-    # Load data from trading_summary.html (only LONG trades)
-    closed_trades, open_positions = load_simulation_data(trades_since)
+    # Load data from trading_summary.html with recalculated capital
+    closed_trades, open_positions, final_capital = load_simulation_data(
+        trades_since, start_capital, max_positions
+    )
 
     # Calculate totals
     total_realized_pnl = sum(t["pnl"] for t in closed_trades)
@@ -314,63 +414,131 @@ def generate_dashboard(trades_since: datetime = None):
     wins = sum(1 for t in closed_trades if t["pnl"] > 0)
     win_rate = wins / total_closed_trades * 100 if total_closed_trades > 0 else 0
 
+    # Labels based on language
+    labels = {
+        "en": {
+            "title": "Paper Trading Dashboard",
+            "subtitle": f"SPOT Only - Long-only Mode | Start: ${start_capital:,.2f} | Max Positions: {max_positions}",
+            "start_capital": "Start Capital",
+            "current_capital": "Current Capital",
+            "closed_trades": "Closed Trades",
+            "realized_pnl": "Realized PnL",
+            "win_rate": "Win Rate",
+            "open_positions": "Open Positions",
+            "unrealized_pnl": "Unrealized PnL",
+            "symbol": "Symbol",
+            "entry_time": "Entry Time",
+            "exit_time": "Exit Time",
+            "entry_price": "Entry Price",
+            "exit_price": "Exit Price",
+            "last_price": "Last Price",
+            "stake": "Stake",
+            "amount": "Amount",
+            "fees": "Fees",
+            "pnl": "PnL",
+            "pnl_pct": "PnL %",
+            "reason": "Reason",
+            "no_positions": "No open positions",
+            "no_trades": "No closed trades",
+            "generated": "Generated",
+            "data_source": "Data from trading_summary.html (Long only, recalculated)",
+        },
+        "de": {
+            "title": "Paper Trading Dashboard",
+            "subtitle": f"Nur SPOT - Nur Long | Start: {start_capital:,.2f}€ | Max Positionen: {max_positions}",
+            "start_capital": "Startkapital",
+            "current_capital": "Aktuelles Kapital",
+            "closed_trades": "Geschlossene Trades",
+            "realized_pnl": "Realisierter PnL",
+            "win_rate": "Gewinnrate",
+            "open_positions": "Offene Positionen",
+            "unrealized_pnl": "Unrealisierter PnL",
+            "symbol": "Symbol",
+            "entry_time": "Einstiegszeit",
+            "exit_time": "Ausstiegszeit",
+            "entry_price": "Einstiegspreis",
+            "exit_price": "Ausstiegspreis",
+            "last_price": "Aktueller Preis",
+            "stake": "Einsatz",
+            "amount": "Menge",
+            "fees": "Gebühren",
+            "pnl": "PnL",
+            "pnl_pct": "PnL %",
+            "reason": "Grund",
+            "no_positions": "Keine offenen Positionen",
+            "no_trades": "Keine geschlossenen Trades",
+            "generated": "Erstellt",
+            "data_source": "Daten aus trading_summary.html (Nur Long, neu berechnet)",
+        },
+    }
+    L = labels.get(lang, labels["en"])
+
     # Generate HTML
     html = f"""<!DOCTYPE html>
 <html>
 <head>
     <meta charset="utf-8">
-    <title>Paper Trading Dashboard</title>
+    <title>{L['title']}</title>
     <meta http-equiv="refresh" content="60">
     <style>
         body {{ font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }}
-        .container {{ max-width: 1400px; margin: 0 auto; }}
+        .container {{ max-width: 1600px; margin: 0 auto; }}
         h1 {{ color: #333; border-bottom: 2px solid #007bff; padding-bottom: 10px; }}
+        .subtitle {{ color: #666; font-size: 14px; margin-top: -10px; }}
         h2 {{ color: #555; margin-top: 30px; }}
         table {{ border-collapse: collapse; width: 100%; margin-top: 10px; background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }}
-        th, td {{ border: 1px solid #ddd; padding: 8px; text-align: right; }}
+        th, td {{ border: 1px solid #ddd; padding: 6px; text-align: right; font-size: 13px; }}
         th {{ background: #007bff; color: white; text-align: center; }}
         td:first-child {{ text-align: left; }}
         .positive {{ color: green; font-weight: bold; }}
         .negative {{ color: red; font-weight: bold; }}
-        .summary-box {{ display: inline-block; background: white; padding: 20px; margin: 10px; border-radius: 5px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); min-width: 150px; text-align: center; }}
-        .summary-box h3 {{ margin: 0 0 10px 0; color: #666; font-size: 14px; }}
-        .summary-box .value {{ font-size: 24px; font-weight: bold; }}
+        .summary-box {{ display: inline-block; background: white; padding: 15px; margin: 8px; border-radius: 5px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); min-width: 130px; text-align: center; }}
+        .summary-box h3 {{ margin: 0 0 8px 0; color: #666; font-size: 12px; }}
+        .summary-box .value {{ font-size: 20px; font-weight: bold; }}
         .long-header {{ background: #28a745 !important; }}
-        .short-header {{ background: #dc3545 !important; }}
         .timestamp {{ color: #666; font-size: 12px; margin-top: 20px; }}
         .section {{ margin-bottom: 30px; }}
     </style>
 </head>
 <body>
 <div class="container">
-    <h1>Paper Trading Dashboard</h1>
+    <h1>{L['title']}</h1>
+    <p class="subtitle">{L['subtitle']}</p>
 
     <div class="summary-boxes">
         <div class="summary-box">
-            <h3>Closed Trades</h3>
+            <h3>{L['start_capital']}</h3>
+            <div class="value">{start_capital:,.2f}</div>
+        </div>
+        <div class="summary-box">
+            <h3>{L['current_capital']}</h3>
+            <div class="value {'positive' if final_capital >= start_capital else 'negative'}">{final_capital:,.2f}</div>
+        </div>
+        <div class="summary-box">
+            <h3>{L['closed_trades']}</h3>
             <div class="value">{total_closed_trades}</div>
         </div>
         <div class="summary-box">
-            <h3>Realized PnL</h3>
+            <h3>{L['realized_pnl']}</h3>
             <div class="value {'positive' if total_realized_pnl >= 0 else 'negative'}">{total_realized_pnl:,.2f}</div>
         </div>
         <div class="summary-box">
-            <h3>Win Rate</h3>
+            <h3>{L['win_rate']}</h3>
             <div class="value">{win_rate:.1f}%</div>
         </div>
         <div class="summary-box">
-            <h3>Open Positions</h3>
+            <h3>{L['open_positions']}</h3>
             <div class="value">{len(open_positions)}</div>
         </div>
         <div class="summary-box">
-            <h3>Unrealized PnL</h3>
+            <h3>{L['unrealized_pnl']}</h3>
             <div class="value {'positive' if total_unrealized_pnl >= 0 else 'negative'}">{total_unrealized_pnl:,.2f}</div>
         </div>
     </div>
 
-    <h2>Open Positions ({len(open_positions)})</h2>
+    <h2>{L['open_positions']} ({len(open_positions)})</h2>
     <table>
-        <tr><th>Symbol</th><th>Direction</th><th>Entry Time</th><th>Entry Price</th><th>Last Price</th><th>Stake</th><th>Unrealized PnL</th><th>PnL %</th></tr>
+        <tr><th>{L['symbol']}</th><th>{L['entry_time']}</th><th>{L['entry_price']}</th><th>{L['last_price']}</th><th>{L['stake']}</th><th>{L['amount']}</th><th>{L['fees']}</th><th>{L['unrealized_pnl']}</th><th>{L['pnl_pct']}</th></tr>
 """
     if open_positions:
         for pos in open_positions:
@@ -378,24 +546,25 @@ def generate_dashboard(trades_since: datetime = None):
             entry_time = pos.get("entry_time", "N/A")
             html += f"""        <tr>
             <td>{pos['symbol']}</td>
-            <td>{pos['direction']}</td>
             <td>{entry_time}</td>
             <td>{pos['entry_price']:.8f}</td>
             <td>{pos['last_price']:.8f}</td>
             <td>{pos['stake']:,.2f}</td>
+            <td>{pos['amount']:,.6f}</td>
+            <td>{pos['fees']:,.2f}</td>
             <td class="{pnl_class}">{pos['unrealized_pnl']:,.2f}</td>
             <td class="{pnl_class}">{pos['unrealized_pct']:+.2f}%</td>
         </tr>\n"""
     else:
-        html += "        <tr><td colspan='8'>No open positions</td></tr>\n"
+        html += f"        <tr><td colspan='9'>{L['no_positions']}</td></tr>\n"
 
     # Closed Trades section (Long only)
     html += f"""    </table>
 
     <div class="section">
-    <h2>Closed Trades ({total_closed_trades} trades, PnL: <span class="{'positive' if total_realized_pnl >= 0 else 'negative'}">{total_realized_pnl:,.2f}</span>)</h2>
+    <h2>{L['closed_trades']} ({total_closed_trades}, PnL: <span class="{'positive' if total_realized_pnl >= 0 else 'negative'}">{total_realized_pnl:,.2f}</span>)</h2>
     <table>
-        <tr class="long-header"><th>Symbol</th><th>Entry Time</th><th>Exit Time</th><th>Entry Price</th><th>Exit Price</th><th>Stake</th><th>PnL</th><th>Reason</th></tr>
+        <tr class="long-header"><th>{L['symbol']}</th><th>{L['entry_time']}</th><th>{L['exit_time']}</th><th>{L['entry_price']}</th><th>{L['exit_price']}</th><th>{L['stake']}</th><th>{L['amount']}</th><th>{L['fees']}</th><th>{L['pnl']}</th><th>{L['pnl_pct']}</th><th>{L['reason']}</th></tr>
 """
     if closed_trades:
         for t in closed_trades:
@@ -407,26 +576,30 @@ def generate_dashboard(trades_since: datetime = None):
             <td>{t['entry_price']:.8f}</td>
             <td>{t['exit_price']:.8f}</td>
             <td>{t['stake']:,.2f}</td>
+            <td>{t['amount']:,.6f}</td>
+            <td>{t['fees']:,.2f}</td>
             <td class="{pnl_class}">{t['pnl']:,.2f}</td>
+            <td class="{pnl_class}">{t['pnl_pct']:+.2f}%</td>
             <td>{t['reason']}</td>
         </tr>\n"""
     else:
-        html += "        <tr><td colspan='8'>No closed trades</td></tr>\n"
+        html += f"        <tr><td colspan='11'>{L['no_trades']}</td></tr>\n"
 
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     html += f"""    </table>
     </div>
 
-    <p class="timestamp">Generated: {timestamp} | Data from trading_summary.html (Long only)</p>
+    <p class="timestamp">{L['generated']}: {timestamp} | {L['data_source']}</p>
 </div>
 </body>
 </html>"""
 
     # Write to file
     OUTPUT_DIR.mkdir(exist_ok=True)
-    output_path = OUTPUT_DIR / "dashboard.html"
+    suffix = "_de" if lang == "de" else ""
+    output_path = OUTPUT_DIR / f"dashboard{suffix}.html"
     output_path.write_text(html, encoding="utf-8")
-    print(f"Dashboard saved to: {output_path}")
+    print(f"Dashboard ({lang}) saved to: {output_path}")
     return output_path
 
 
@@ -528,13 +701,18 @@ if __name__ == "__main__":
                 while True:
                     # Run backfill simulation on every refresh to get latest trades
                     run_backfill_simulation(trades_since, args.start_capital, args.max_positions)
-                    path = generate_dashboard(trades_since)
-                    print(f"[{datetime.now().strftime('%H:%M:%S')}] Dashboard updated: {path}")
+                    # Generate both English and German dashboards
+                    path_en = generate_dashboard(trades_since, args.start_capital, args.max_positions, lang="en")
+                    path_de = generate_dashboard(trades_since, args.start_capital, args.max_positions, lang="de")
+                    print(f"[{datetime.now().strftime('%H:%M:%S')}] Dashboards updated: {path_en}, {path_de}")
                     time.sleep(args.interval)
             except KeyboardInterrupt:
                 print("\nStopped.")
         else:
             # Run backfill simulation to get latest trades
             run_backfill_simulation(trades_since, args.start_capital, args.max_positions)
-            path = generate_dashboard(trades_since)
-            print(f"\nOpen with: start {path}")
+            # Generate both English and German dashboards
+            path_en = generate_dashboard(trades_since, args.start_capital, args.max_positions, lang="en")
+            path_de = generate_dashboard(trades_since, args.start_capital, args.max_positions, lang="de")
+            print(f"\nOpen with: start {path_en}")
+            print(f"           start {path_de}")
