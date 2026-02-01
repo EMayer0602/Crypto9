@@ -301,11 +301,11 @@ def load_simulation_data(trades_since: datetime = None, start_capital: float = 1
     raw_trades = []
     raw_open_positions = []
 
-    # Load from trading_summary.html (testnet uses report_testnet/)
-    summary_path = Path("report_testnet/trading_summary.html")
-    # Fallback to report_html if testnet version doesn't exist
+    # Load from trading_summary.html (prefer report_html for main data)
+    summary_path = Path("report_html/trading_summary.html")
+    # Fallback to report_testnet if report_html version doesn't exist
     if not summary_path.exists():
-        summary_path = Path("report_html/trading_summary.html")
+        summary_path = Path("report_testnet/trading_summary.html")
     if not summary_path.exists():
         print(f"[Warning] trading_summary.html not found at {summary_path}")
         return closed_trades, open_positions, start_capital
