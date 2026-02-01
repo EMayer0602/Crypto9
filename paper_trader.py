@@ -229,7 +229,7 @@ SHORT_STAKE = 200.0  # 1000 / 5 positions
 DEFAULT_DIRECTION_CAPITAL = 2_800.0
 BASE_BAR_MINUTES = st.timeframe_to_minutes(st.TIMEFRAME)
 DEFAULT_SYMBOL_ALLOWLIST = [sym.strip() for sym in st.SYMBOLS if sym and sym.strip()]
-DEFAULT_FIXED_STAKE = 2000.0  # Fixed stake per trade
+# Dynamic stake calculation uses STAKE_DIVISOR (see determine_position_size)
 DEFAULT_ALLOWED_DIRECTIONS = ["long"]  # Long only mode
 DEFAULT_USE_TESTNET = False  # Testnet should be opt-in with --testnet flag
 USE_TIME_BASED_EXIT = True  # Enable time-based exits based on optimal hold times
@@ -243,7 +243,7 @@ DEFAULT_SIGNAL_INTERVAL_MIN = 15
 DEFAULT_SPIKE_INTERVAL_MIN = 5
 DEFAULT_ATR_SPIKE_MULT = 2.5
 DEFAULT_POLL_SECONDS = 30
-TESTNET_DEFAULT_STAKE = 2000.0
+# Testnet uses same dynamic sizing as simulation (total_capital / STAKE_DIVISOR)
 TESTNET_POSITIONS_FILE = "crypto9_testnet_positions.json"
 TESTNET_CLOSED_TRADES_FILE = "crypto9_testnet_closed_trades.json"
 
@@ -946,9 +946,10 @@ def determine_position_size(symbol: str, state: Dict, fixed_stake: Optional[floa
         # Short: Static stake (limited by margin)
         return SHORT_STAKE
     else:
-        # Long: Dynamic sizing based on current capital
+        # Long: Dynamic sizing based on current capital using STAKE_DIVISOR
+        # Same formula for both simulation and testnet (unified)
         total_capital = float(state.get("total_capital", START_TOTAL_CAPITAL))
-        dynamic_stake = total_capital / MAX_LONG_POSITIONS
+        dynamic_stake = total_capital / STAKE_DIVISOR
         return max(dynamic_stake, 100.0)  # Minimum 100 USDT
 
 
