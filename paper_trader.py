@@ -98,6 +98,28 @@ USE_TIME_BASED_EXIT = True  # Enable time-based exits based on optimal hold time
 SIGNAL_DEBUG = False
 USE_FUTURES_SIGNALS = False  # Use futures data for signal generation (Option 1 from futures lead analysis)
 DEFAULT_SIGNAL_INTERVAL_MIN = 15
+
+
+def format_price(price: float, symbol: str = "") -> str:
+    """Format price with appropriate decimal places based on magnitude.
+
+    For very small prices (like LUNC ~0.00004), uses 6 decimal places.
+    For small prices (< 1), uses 4 decimal places.
+    For normal prices, uses 2 decimal places.
+    """
+    if price is None or price == 0:
+        return "0.00"
+    abs_price = abs(price)
+    if abs_price < 0.0001:  # Very small prices like LUNC
+        return f"{price:.8f}"
+    elif abs_price < 0.01:
+        return f"{price:.6f}"
+    elif abs_price < 1:
+        return f"{price:.4f}"
+    elif abs_price < 100:
+        return f"{price:.2f}"
+    else:
+        return f"{price:.2f}"
 DEFAULT_SPIKE_INTERVAL_MIN = 5
 DEFAULT_ATR_SPIKE_MULT = 2.5
 DEFAULT_POLL_SECONDS = 30
@@ -347,7 +369,7 @@ class SmsNotifier(TradeNotifier):
         stake = float(position.get("stake", 0.0) or 0.0)
         ts = position.get("entry_time", "")
         body = (
-            f"PaperTrader ENTRY {symbol} {direction} @ {price:.4f} | stake {stake:.2f} USDT"
+            f"PaperTrader ENTRY {symbol} {direction} @ {format_price(price, symbol)} | stake {stake:.2f} USDT"
             f" | {ts}"
         )
         self._send(body)
@@ -355,7 +377,7 @@ class SmsNotifier(TradeNotifier):
     def notify_exit(self, trade: TradeResult) -> None:
         direction = str(trade.direction).upper()
         body = (
-            f"PaperTrader EXIT {trade.symbol} {direction} @ {trade.exit_price:.4f}"
+            f"PaperTrader EXIT {trade.symbol} {direction} @ {format_price(trade.exit_price, trade.symbol)}"
             f" | PnL {trade.pnl:.2f} USDT | reason: {trade.reason}"
         )
         self._send(body)
@@ -1403,7 +1425,7 @@ def process_snapshot(
     entry_record = dict(entry.__dict__)
     state.setdefault("positions", []).append(entry_record)
     record_symbol_trade(state, context.symbol)
-    _signal_log(f"{context.symbol} {context.direction} entry triggered at {entry_price:.4f} (stake={stake:.2f})")
+    _signal_log(f"{context.symbol} {context.direction} entry triggered at {format_price(entry_price, context.symbol)} (stake={stake:.2f})")
     if order_executor is not None:
         try:
             order = order_executor.submit_entry(entry_record)
@@ -1423,7 +1445,7 @@ def process_snapshot(
             except Exception as exc2:
                 print(f"[Order] Failed to remove position after order error: {exc2}")
     if emit_entry_log:
-        print(f"[Entry] {context.symbol} {context.direction} at {entry_record['entry_price']:.8f} stake {stake:.2f}")
+        print(f"[Entry] {context.symbol} {context.direction} at {format_price(entry_record['entry_price'], context.symbol)} stake {stake:.2f}")
     if trade_notifier is not None:
         try:
             trade_notifier.notify_entry(entry_record)
@@ -1603,7 +1625,8 @@ def _write_dataframe_outputs(df: pd.DataFrame, csv_path: Optional[str], json_pat
         print(f"[Simulation] No {label} written (no rows) – keeping previous files if any.")
         return
     if csv_path:
-        df.to_csv(csv_path, index=False)
+        # Use float_format to avoid scientific notation for small prices like LUNC
+        df.to_csv(csv_path, index=False, float_format="%.8f")
     if json_path:
         df.to_json(json_path, orient="records", indent=2)
     targets = [p for p in (csv_path, json_path) if p]
@@ -2694,7 +2717,7 @@ def force_entry_position(
     save_state(state)
     side_text = "testnet" if use_testnet else "live"
     print(
-        f"[Force] Öffne {context.symbol} {context.direction} @ {entry_price:.8f} "
+        f"[Force] Öffne {context.symbol} {context.direction} @ {format_price(entry_price, context.symbol)} "
         f"(Stake {stake_value:.2f}, {side_text})."
     )
     if order_executor is not None:
