@@ -304,6 +304,32 @@ python BinTestnetOrderHistory.py
 python ClearPositions.py
 ```
 
+### Testnet Dashboard
+Generate and auto-refresh HTML dashboard for Binance Testnet trades:
+
+**Single run:**
+```bash
+python TestnetDashboard.py --start 2025-12-31
+```
+
+**Continuous loop with auto-backfill:**
+```bash
+python TestnetDashboard.py --start 2025-12-31 --loop --interval 60
+```
+
+**With custom capital and max positions:**
+```bash
+python TestnetDashboard.py --start 2025-12-31 --loop --interval 60 \
+  --start-capital 16500 --max-positions 10
+```
+
+The dashboard:
+- Runs backfill simulation on every refresh to fill gaps
+- Shows trades from Binance Testnet API (actual execution data)
+- Auto-updates at specified interval (default: 60 seconds)
+
+Output: `report_testnet/dashboard.html`
+
 ---
 
 ## Output Files

@@ -25,6 +25,7 @@ try:
         SIMULATION_OPEN_POSITIONS_FILE,
         SIMULATION_OPEN_POSITIONS_JSON,
     )
+    import paper_trader as pt  # For setting global variables
     import Supertrend_5Min as st
     BACKFILL_AVAILABLE = True
 except ImportError as e:
@@ -407,14 +408,23 @@ def generate_dashboard(trades_since: datetime = None):
     return output_path
 
 
-def run_backfill_simulation(trades_since: datetime = None) -> bool:
+def run_backfill_simulation(trades_since: datetime = None, start_capital: float = 16500.0, max_positions: int = 10) -> bool:
     """Run backfill simulation to fill gaps since last processed time.
+
+    Args:
+        trades_since: Filter trades from this date onwards
+        start_capital: Starting capital for simulation (default: 16500)
+        max_positions: Maximum open positions (default: 10)
 
     Returns True if backfill was performed, False otherwise.
     """
     if not BACKFILL_AVAILABLE:
         print("[Backfill] Not available - paper_trader import failed")
         return False
+
+    # Set global variables in paper_trader module
+    pt.START_TOTAL_CAPITAL = start_capital
+    pt.MAX_OPEN_POSITIONS = max_positions
 
     last_ts = get_last_processed_timestamp()
     now_ts = pd.Timestamp.now(tz=st.BERLIN_TZ)
@@ -429,7 +439,7 @@ def run_backfill_simulation(trades_since: datetime = None) -> bool:
         return False
 
     print(f"[Backfill] Detected gap of {gap_hours:.1f} hours since {last_ts.strftime('%Y-%m-%d %H:%M')}")
-    print(f"[Backfill] Running simulation from {last_ts.strftime('%Y-%m-%d %H:%M')} to {now_ts.strftime('%Y-%m-%d %H:%M')}...")
+    print(f"[Backfill] Running simulation (capital={start_capital}, max_pos={max_positions})...")
 
     try:
         backfill_trades, backfill_state = run_simulation(
@@ -467,6 +477,10 @@ def parse_args():
                         help="Run continuously in a loop")
     parser.add_argument("--interval", type=int, default=60,
                         help="Refresh interval in seconds when using --loop (default: 60)")
+    parser.add_argument("--start-capital", type=float, default=16500.0,
+                        help="Starting capital for backfill simulation (default: 16500)")
+    parser.add_argument("--max-positions", type=int, default=10,
+                        help="Maximum open positions for backfill simulation (default: 10)")
     return parser.parse_args()
 
 
@@ -487,10 +501,11 @@ if __name__ == "__main__":
 
         if args.loop:
             print(f"Running in loop mode, refreshing every {args.interval} seconds. Press Ctrl+C to stop.")
+            print(f"[Config] Start capital: {args.start_capital}, Max positions: {args.max_positions}")
             try:
                 while True:
                     # Run backfill simulation on every refresh to get latest trades
-                    run_backfill_simulation(trades_since)
+                    run_backfill_simulation(trades_since, args.start_capital, args.max_positions)
                     path = generate_dashboard(trades_since)
                     print(f"[{datetime.now().strftime('%H:%M:%S')}] Dashboard updated: {path}")
                     time.sleep(args.interval)
@@ -498,6 +513,6 @@ if __name__ == "__main__":
                 print("\nStopped.")
         else:
             # Run backfill simulation to get latest trades
-            run_backfill_simulation(trades_since)
+            run_backfill_simulation(trades_since, args.start_capital, args.max_positions)
             path = generate_dashboard(trades_since)
             print(f"\nOpen with: start {path}")
