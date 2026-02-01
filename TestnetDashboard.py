@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Generate HTML dashboard for Binance Testnet trading."""
 
+import argparse
 import os
 import time
 import hmac
@@ -183,8 +184,14 @@ def match_trades(orders: list, symbol: str) -> list:
     return matched
 
 
-def generate_dashboard():
-    """Generate HTML dashboard."""
+def generate_dashboard(trades_since: datetime = None):
+    """Generate HTML dashboard.
+
+    Args:
+        trades_since: Only show trades from this date onwards. If None, uses TRADES_SINCE_DATE.
+    """
+    if trades_since is None:
+        trades_since = TRADES_SINCE_DATE
     print("Fetching testnet data...")
 
     # Get balances
@@ -210,14 +217,14 @@ def generate_dashboard():
     for sym in SYMBOLS:
         orders = get_all_orders(sym)
         if orders:
-            # Filter orders by date if TRADES_SINCE_DATE is set
-            if TRADES_SINCE_DATE:
+            # Filter orders by date if trades_since is set
+            if trades_since:
                 filtered_orders = []
                 for o in orders:
                     ts = o.get("time", 0)
                     if ts:
                         order_time = datetime.fromtimestamp(ts/1000, tz=timezone.utc)
-                        if order_time >= TRADES_SINCE_DATE:
+                        if order_time >= trades_since:
                             filtered_orders.append(o)
                 orders = filtered_orders
 
@@ -380,9 +387,41 @@ def generate_dashboard():
     return output_path
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="Generate HTML dashboard for Binance Testnet trading")
+    parser.add_argument("--start", type=str, default=None,
+                        help="Only show trades from this date onwards (YYYY-MM-DD)")
+    parser.add_argument("--loop", action="store_true",
+                        help="Run continuously in a loop")
+    parser.add_argument("--interval", type=int, default=60,
+                        help="Refresh interval in seconds when using --loop (default: 60)")
+    return parser.parse_args()
+
+
 if __name__ == "__main__":
+    args = parse_args()
+
     if not API_KEY or not API_SECRET:
         print("Error: BINANCE_API_KEY_TEST or BINANCE_API_SECRET_TEST not set")
     else:
-        path = generate_dashboard()
-        print(f"\nOpen with: start {path}")
+        # Parse --start date if provided
+        trades_since = None
+        if args.start:
+            try:
+                trades_since = datetime.strptime(args.start, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                print(f"Filtering trades since: {trades_since.strftime('%Y-%m-%d')}")
+            except ValueError:
+                print(f"Warning: Invalid date format '{args.start}', using default. Use YYYY-MM-DD.")
+
+        if args.loop:
+            print(f"Running in loop mode, refreshing every {args.interval} seconds. Press Ctrl+C to stop.")
+            try:
+                while True:
+                    path = generate_dashboard(trades_since)
+                    print(f"[{datetime.now().strftime('%H:%M:%S')}] Dashboard updated: {path}")
+                    time.sleep(args.interval)
+            except KeyboardInterrupt:
+                print("\nStopped.")
+        else:
+            path = generate_dashboard(trades_since)
+            print(f"\nOpen with: start {path}")
