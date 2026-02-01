@@ -26,9 +26,10 @@ ENV/
 Thumbs.db
 
 # Generated reports and data
+*.csv
+*.json
+*.html
 report_testnet/
-report_html/charts/
-paper_trading_simulation_log.csv
-paper_trading_simulation_log.json
-crypto9_testnet_closed_trades.json
-crypto9_testnet_positions.json
+report_html/
+simulation_logs/
+ohlcv_cache/
