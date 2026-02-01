@@ -969,6 +969,7 @@ if __name__ == "__main__":
     parser.add_argument("--loop", action="store_true", help="Run in continuous loop mode")
     parser.add_argument("--interval", type=int, default=30, help="Refresh interval in seconds (default: 30)")
     parser.add_argument("--simulate", action="store_true", help="Run simulation and update trading_summary before dashboard")
+    parser.add_argument("--start", action="store_true", help="Open dashboard in browser after generation")
     args = parser.parse_args()
 
     # PnL correction disabled - paper_trader.py already calculates correct PnL with lot sizes
@@ -1007,10 +1008,14 @@ if __name__ == "__main__":
                 break
     else:
         path = generate_dashboard()
-        # Auto-open in browser on Windows
-        import subprocess
-        import platform
-        if platform.system() == "Windows":
-            subprocess.run(["start", "", str(path)], shell=True)
+        # Open in browser if --start flag is set
+        if args.start:
+            import subprocess
+            import platform
+            if platform.system() == "Windows":
+                subprocess.run(["start", "", str(path)], shell=True)
+            else:
+                import webbrowser
+                webbrowser.open(str(path))
         else:
             print(f"Open with: start {path}")
