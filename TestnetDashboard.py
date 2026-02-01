@@ -416,8 +416,8 @@ def load_simulation_data(trades_since: datetime = None, start_capital: float = 1
         if entry_price <= 0:
             continue
 
-        # Calculate stake based on current capital
-        stake = capital / max_positions
+        # Calculate stake based on start capital (not accumulated capital)
+        stake = start_capital / max_positions
         amount = stake / entry_price
 
         # Calculate unrealized PnL (only entry fee paid so far)
