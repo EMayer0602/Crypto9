@@ -24,4 +24,11 @@ ENV/
 # OS
 .DS_Store
 Thumbs.db
+
+# Generated reports and data
 report_testnet/
+report_html/charts/
+paper_trading_simulation_log.csv
+paper_trading_simulation_log.json
+crypto9_testnet_closed_trades.json
+crypto9_testnet_positions.json
