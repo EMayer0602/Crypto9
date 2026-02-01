@@ -63,7 +63,7 @@ RELEVANT_ASSETS = {"BTC", "ETH", "SOL", "XRP", "LINK", "BNB", "SUI", "ZEC", "LUN
 # Only show trades from this date onwards (set to None to show all)
 TRADES_SINCE_DATE = datetime(2026, 1, 2, tzinfo=timezone.utc)  # Today
 
-OUTPUT_DIR = Path("report_testnet")
+OUTPUT_DIR = Path("report_html")
 
 
 def format_number(value: float, decimals: int = 2, lang: str = "en") -> str:
@@ -301,11 +301,8 @@ def load_simulation_data(trades_since: datetime = None, start_capital: float = 1
     raw_trades = []
     raw_open_positions = []
 
-    # Load from trading_summary.html (prefer report_html for main data)
+    # Load from trading_summary.html
     summary_path = Path("report_html/trading_summary.html")
-    # Fallback to report_testnet if report_html version doesn't exist
-    if not summary_path.exists():
-        summary_path = Path("report_testnet/trading_summary.html")
     if not summary_path.exists():
         print(f"[Warning] trading_summary.html not found at {summary_path}")
         return closed_trades, open_positions, start_capital
@@ -786,7 +783,7 @@ def git_auto_push(files: list = None) -> bool:
     """Commit and push changes to git repository.
 
     Args:
-        files: List of files to add. If None, adds report_testnet/*.html
+        files: List of files to add. If None, adds report_html/*.html
 
     Returns:
         True if push was successful, False otherwise.
@@ -795,10 +792,10 @@ def git_auto_push(files: list = None) -> bool:
 
     if files is None:
         files = [
-            "report_testnet/trading_summary.html",
-            "report_testnet/trading_summary.json",
-            "report_testnet/dashboard.html",
-            "report_testnet/dashboard_de.html",
+            "report_html/trading_summary.html",
+            "report_html/trading_summary.json",
+            "report_html/dashboard.html",
+            "report_html/dashboard_de.html",
         ]
 
     try:
