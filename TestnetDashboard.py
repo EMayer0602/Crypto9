@@ -485,18 +485,19 @@ if __name__ == "__main__":
             except ValueError:
                 print(f"Warning: Invalid date format '{args.start}', using default. Use YYYY-MM-DD.")
 
-        # Auto-backfill: Run simulation to fill gaps before starting
-        run_backfill_simulation(trades_since)
-
         if args.loop:
             print(f"Running in loop mode, refreshing every {args.interval} seconds. Press Ctrl+C to stop.")
             try:
                 while True:
+                    # Run backfill simulation on every refresh to get latest trades
+                    run_backfill_simulation(trades_since)
                     path = generate_dashboard(trades_since)
                     print(f"[{datetime.now().strftime('%H:%M:%S')}] Dashboard updated: {path}")
                     time.sleep(args.interval)
             except KeyboardInterrupt:
                 print("\nStopped.")
         else:
+            # Run backfill simulation to get latest trades
+            run_backfill_simulation(trades_since)
             path = generate_dashboard(trades_since)
             print(f"\nOpen with: start {path}")
