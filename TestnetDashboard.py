@@ -913,96 +913,125 @@ def generate_dashboard():
 
 
 def run_simulation_and_update_summary(start_date: str = "2025-01-01", start_capital: float = 16500.0, max_positions: int = 10):
-    """Run simulation from paper_trader and update trading_summary.html/json in report_html/."""
+    """Load existing trades and run incremental simulation to add new trades."""
     if not SIMULATION_AVAILABLE:
         print("[Simulation] paper_trader not available - skipping simulation")
         return False
 
     try:
-        print(f"[Simulation] Running simulation from {start_date} with capital={start_capital}, max_positions={max_positions}...")
+        print(f"[Simulation] Loading existing trades and running incremental update...")
 
-        # Set up simulation parameters
-        now = pd.Timestamp.now(tz=pt.st.BERLIN_TZ)
-        start_ts = pd.Timestamp(start_date, tz=pt.st.BERLIN_TZ)
-        end_ts = now
+        # Load ALL existing trades from simulation log (this is the source of truth)
+        existing_trades = []
+        if os.path.exists(PAPER_TRADING_SIMULATION_LOG):
+            try:
+                with open(PAPER_TRADING_SIMULATION_LOG, 'r') as f:
+                    existing_trades = json.load(f)
+                print(f"[Simulation] Loaded {len(existing_trades)} existing trades from {PAPER_TRADING_SIMULATION_LOG}")
+            except Exception as e:
+                print(f"[Simulation] Warning: Could not load existing trades: {e}")
+
+        # Load current state (positions, capital, last_processed_bar)
+        current_state = {}
+        if os.path.exists(PAPER_TRADING_STATE_FILE):
+            try:
+                with open(PAPER_TRADING_STATE_FILE, 'r') as f:
+                    current_state = json.load(f)
+                print(f"[Simulation] Loaded state: {current_state.get('total_capital', 0):.2f} capital, {len(current_state.get('positions', []))} positions")
+            except Exception as e:
+                print(f"[Simulation] Warning: Could not load state: {e}")
 
         # Update paper_trader settings
         pt.START_TOTAL_CAPITAL = start_capital
         pt.MAX_OPEN_POSITIONS = max_positions
         pt.MAX_LONG_POSITIONS = max_positions
 
-        # Run simulation continuing from saved state (keeps existing positions, generates new trades)
-        trades, final_state = pt.run_simulation(
+        # Set up timestamps - only process NEW bars (from last processed to now)
+        now = pd.Timestamp.now(tz=pt.st.BERLIN_TZ)
+
+        # Find the most recent exit_time from existing trades to determine where to continue
+        last_trade_time = None
+        for t in existing_trades:
+            exit_time_str = t.get('exit_time') or t.get('ExitZeit')
+            if exit_time_str:
+                try:
+                    exit_time = pd.Timestamp(exit_time_str)
+                    if last_trade_time is None or exit_time > last_trade_time:
+                        last_trade_time = exit_time
+                except:
+                    pass
+
+        # Start from last trade time or specified start date
+        if last_trade_time:
+            start_ts = last_trade_time - pd.Timedelta(hours=1)  # Small overlap to catch any missed trades
+            print(f"[Simulation] Continuing from last trade: {last_trade_time}")
+        else:
+            start_ts = pd.Timestamp(start_date, tz=pt.st.BERLIN_TZ)
+            print(f"[Simulation] Starting fresh from: {start_date}")
+
+        # Run incremental simulation (use_saved_state=True keeps positions)
+        new_trades, final_state = pt.run_simulation(
             start_ts=start_ts,
-            end_ts=end_ts,
-            use_saved_state=True,  # Continue from existing state with positions
+            end_ts=now,
+            use_saved_state=True,  # Keep existing positions
             emit_entry_log=False,
-            use_testnet=False,  # Use simulation mode (not testnet)
-            refresh_params=False,  # Use existing best_params_overall.csv
+            use_testnet=False,
+            refresh_params=False,
         )
 
-        print(f"[Simulation] Generated {len(trades)} new trades")
+        print(f"[Simulation] Generated {len(new_trades)} new trades")
 
-        # Load existing historical trades from simulation log
-        existing_trades = []
-        if os.path.exists(PAPER_TRADING_SIMULATION_LOG):
-            try:
-                with open(PAPER_TRADING_SIMULATION_LOG, 'r') as f:
-                    existing_trades = json.load(f)
-                print(f"[Simulation] Loaded {len(existing_trades)} existing trades from log")
-            except Exception as e:
-                print(f"[Simulation] Warning: Could not load existing trades: {e}")
-
-        # Combine: existing historical trades + new trades from this run
-        # Convert new trades to dict format for combining
+        # Convert new trades to dict format
         new_trades_dicts = []
-        for t in trades:
+        for t in new_trades:
             if hasattr(t, '_asdict'):
                 new_trades_dicts.append(t._asdict())
             elif isinstance(t, dict):
                 new_trades_dicts.append(t)
 
-        # Deduplicate by (symbol, entry_time, exit_time)
+        # Deduplicate and combine: existing trades + new trades
         seen = set()
         combined_trades = []
 
         # Add existing trades first
         for t in existing_trades:
-            key = (t.get('symbol', ''), str(t.get('entry_time', '')), str(t.get('exit_time', '')))
+            key = (t.get('symbol', ''), str(t.get('entry_time', ''))[:16], str(t.get('exit_time', ''))[:16])
             if key not in seen:
                 seen.add(key)
                 combined_trades.append(t)
 
-        # Add new trades (skip duplicates)
+        # Add only truly new trades
+        added_new = 0
         for t in new_trades_dicts:
-            key = (t.get('symbol', ''), str(t.get('entry_time', '')), str(t.get('exit_time', '')))
+            key = (t.get('symbol', ''), str(t.get('entry_time', ''))[:16], str(t.get('exit_time', ''))[:16])
             if key not in seen:
                 seen.add(key)
                 combined_trades.append(t)
+                added_new += 1
 
-        print(f"[Simulation] Total combined trades: {len(combined_trades)}")
+        print(f"[Simulation] Total trades: {len(combined_trades)} ({len(existing_trades)} existing + {added_new} new)")
 
-        # Build summary using paper_trader functions
+        # Build summary and update files
         if combined_trades:
-            # Convert combined trades to DataFrame
             trades_df = pd.DataFrame(combined_trades)
             open_df = pt.state_to_open_df(final_state)
 
-            # Compute summary from combined trades
-            summary = pt.build_summary_payload(trades_df, open_df, final_state, start_ts, end_ts)
+            # Use original start date for summary
+            summary_start = pd.Timestamp(start_date, tz=pt.st.BERLIN_TZ)
+            summary = pt.build_summary_payload(trades_df, open_df, final_state, summary_start, now)
 
-            # Write to report_html/ (not report_testnet/)
+            # Write to report_html/
             html_path = os.path.join("report_html", "trading_summary.html")
             json_path = os.path.join("report_html", "trading_summary.json")
 
             pt.generate_summary_html(summary, trades_df, open_df, html_path)
             pt.write_summary_json(summary, json_path)
 
-            # Also save combined trades back to simulation log
+            # Save combined trades back to simulation log
             with open(PAPER_TRADING_SIMULATION_LOG, 'w') as f:
                 json.dump(combined_trades, f, indent=2, default=str)
 
-            print(f"[Simulation] Updated {html_path} and {json_path}")
+            print(f"[Simulation] Updated {html_path} ({len(combined_trades)} trades)")
             return True
         else:
             print("[Simulation] No trades to process")
