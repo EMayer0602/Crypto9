@@ -11,6 +11,26 @@ from datetime import datetime, timezone
 from pathlib import Path
 from dotenv import load_dotenv
 
+# Import backfill functions from paper_trader
+try:
+    import pandas as pd
+    from paper_trader import (
+        get_last_processed_timestamp,
+        run_simulation,
+        trades_to_dataframe,
+        write_closed_trades_report,
+        write_open_positions_report,
+        SIMULATION_LOG_FILE,
+        SIMULATION_LOG_JSON,
+        SIMULATION_OPEN_POSITIONS_FILE,
+        SIMULATION_OPEN_POSITIONS_JSON,
+    )
+    import Supertrend_5Min as st
+    BACKFILL_AVAILABLE = True
+except ImportError as e:
+    print(f"[Warning] Backfill not available: {e}")
+    BACKFILL_AVAILABLE = False
+
 load_dotenv()
 
 API_KEY = os.getenv("BINANCE_API_KEY_TEST")
@@ -387,6 +407,58 @@ def generate_dashboard(trades_since: datetime = None):
     return output_path
 
 
+def run_backfill_simulation(trades_since: datetime = None) -> bool:
+    """Run backfill simulation to fill gaps since last processed time.
+
+    Returns True if backfill was performed, False otherwise.
+    """
+    if not BACKFILL_AVAILABLE:
+        print("[Backfill] Not available - paper_trader import failed")
+        return False
+
+    last_ts = get_last_processed_timestamp()
+    now_ts = pd.Timestamp.now(tz=st.BERLIN_TZ)
+
+    if last_ts is None:
+        print("[Backfill] No previous state found - skipping")
+        return False
+
+    gap_hours = (now_ts - last_ts).total_seconds() / 3600
+    if gap_hours <= 1:
+        print(f"[Backfill] Gap is only {gap_hours:.1f} hours - skipping")
+        return False
+
+    print(f"[Backfill] Detected gap of {gap_hours:.1f} hours since {last_ts.strftime('%Y-%m-%d %H:%M')}")
+    print(f"[Backfill] Running simulation from {last_ts.strftime('%Y-%m-%d %H:%M')} to {now_ts.strftime('%Y-%m-%d %H:%M')}...")
+
+    try:
+        backfill_trades, backfill_state = run_simulation(
+            last_ts,
+            now_ts,
+            use_saved_state=True,
+            emit_entry_log=False,
+            allowed_symbols=None,
+            allowed_indicators=None,
+            fixed_stake=None,
+            use_testnet=True,
+            refresh_params=False,
+            reset_state=False,
+            clear_outputs=False,
+        )
+        print(f"[Backfill] Completed: {len(backfill_trades)} trades simulated")
+
+        # Write results to logs
+        if backfill_trades:
+            trades_df = trades_to_dataframe(backfill_trades)
+            write_closed_trades_report(trades_df, SIMULATION_LOG_FILE, SIMULATION_LOG_JSON)
+        open_positions = backfill_state.get("positions", [])
+        write_open_positions_report(open_positions, SIMULATION_OPEN_POSITIONS_FILE, SIMULATION_OPEN_POSITIONS_JSON)
+        return True
+    except Exception as e:
+        print(f"[Backfill] Error: {e}")
+        return False
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Generate HTML dashboard for Binance Testnet trading")
     parser.add_argument("--start", type=str, default=None,
@@ -395,6 +467,10 @@ def parse_args():
                         help="Run continuously in a loop")
     parser.add_argument("--interval", type=int, default=60,
                         help="Refresh interval in seconds when using --loop (default: 60)")
+    parser.add_argument("--auto-backfill", action="store_true", default=True,
+                        help="Automatically run simulation to fill gaps (default: True)")
+    parser.add_argument("--no-backfill", action="store_true",
+                        help="Disable automatic backfill simulation")
     return parser.parse_args()
 
 
@@ -412,6 +488,11 @@ if __name__ == "__main__":
                 print(f"Filtering trades since: {trades_since.strftime('%Y-%m-%d')}")
             except ValueError:
                 print(f"Warning: Invalid date format '{args.start}', using default. Use YYYY-MM-DD.")
+
+        # Auto-backfill: Run simulation to fill gaps before starting
+        do_backfill = args.auto_backfill and not args.no_backfill
+        if do_backfill:
+            run_backfill_simulation(trades_since)
 
         if args.loop:
             print(f"Running in loop mode, refreshing every {args.interval} seconds. Press Ctrl+C to stop.")
