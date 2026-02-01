@@ -1266,7 +1266,7 @@ def generate_dashboard(german_format=False, filter_start_date: str = None):
                 elif p >= 0.0001:
                     return fmt_curr(p, 6)
                 else:
-                    return fmt_curr(p, 8)  # For very small prices like LUNC
+                    return fmt_curr(p, 10)  # For very small prices like LUNC
             # Format amount based on magnitude
             def fmt_amount(a):
                 if a >= 1:
