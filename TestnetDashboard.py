@@ -21,10 +21,19 @@ try:
         trades_to_dataframe,
         write_closed_trades_report,
         write_open_positions_report,
+        open_positions_to_dataframe,
+        build_summary_payload,
+        generate_summary_html,
+        write_summary_json,
+        _derive_summary_window,
+        _load_trade_log_dataframe,
         SIMULATION_LOG_FILE,
         SIMULATION_LOG_JSON,
         SIMULATION_OPEN_POSITIONS_FILE,
         SIMULATION_OPEN_POSITIONS_JSON,
+        SIMULATION_SUMMARY_HTML,
+        SIMULATION_SUMMARY_JSON,
+        TRADE_LOG_FILE,
     )
     import paper_trader as pt  # For setting global variables
     import Supertrend_5Min as st
@@ -292,8 +301,11 @@ def load_simulation_data(trades_since: datetime = None, start_capital: float = 1
     raw_trades = []
     raw_open_positions = []
 
-    # Load from trading_summary.html
-    summary_path = Path("report_html/trading_summary.html")
+    # Load from trading_summary.html (testnet uses report_testnet/)
+    summary_path = Path("report_testnet/trading_summary.html")
+    # Fallback to report_html if testnet version doesn't exist
+    if not summary_path.exists():
+        summary_path = Path("report_html/trading_summary.html")
     if not summary_path.exists():
         print(f"[Warning] trading_summary.html not found at {summary_path}")
         return closed_trades, open_positions, start_capital
@@ -743,11 +755,92 @@ def run_backfill_simulation(trades_since: datetime = None, start_capital: float 
         if backfill_trades:
             trades_df = trades_to_dataframe(backfill_trades)
             write_closed_trades_report(trades_df, SIMULATION_LOG_FILE, SIMULATION_LOG_JSON)
+
         open_positions = backfill_state.get("positions", [])
         write_open_positions_report(open_positions, SIMULATION_OPEN_POSITIONS_FILE, SIMULATION_OPEN_POSITIONS_JSON)
+
+        # Generate trading_summary.html with all historical trades
+        all_trades_df = _load_trade_log_dataframe(TRADE_LOG_FILE)
+        if all_trades_df.empty and backfill_trades:
+            all_trades_df = trades_to_dataframe(backfill_trades)
+
+        open_df = open_positions_to_dataframe(open_positions)
+        start_ts, end_ts = _derive_summary_window(all_trades_df)
+        summary = build_summary_payload(all_trades_df, open_df, backfill_state, start_ts, end_ts)
+
+        # Ensure output directory exists
+        OUTPUT_DIR.mkdir(exist_ok=True)
+        summary_html_path = OUTPUT_DIR / "trading_summary.html"
+        summary_json_path = OUTPUT_DIR / "trading_summary.json"
+        generate_summary_html(summary, all_trades_df, open_df, str(summary_html_path))
+        write_summary_json(summary, str(summary_json_path))
+        print(f"[Backfill] Generated {summary_html_path}")
+
         return True
     except Exception as e:
         print(f"[Backfill] Error: {e}")
+        return False
+
+
+def git_auto_push(files: list = None) -> bool:
+    """Commit and push changes to git repository.
+
+    Args:
+        files: List of files to add. If None, adds report_testnet/*.html
+
+    Returns:
+        True if push was successful, False otherwise.
+    """
+    import subprocess
+
+    if files is None:
+        files = [
+            "report_testnet/trading_summary.html",
+            "report_testnet/trading_summary.json",
+            "report_testnet/dashboard.html",
+            "report_testnet/dashboard_de.html",
+        ]
+
+    try:
+        # Check if there are changes to commit
+        result = subprocess.run(
+            ["git", "status", "--porcelain"] + files,
+            capture_output=True, text=True, timeout=30
+        )
+        if not result.stdout.strip():
+            print("[Git] No changes to push")
+            return True
+
+        # Add files
+        subprocess.run(["git", "add", "-f"] + files, check=True, timeout=30)
+
+        # Commit
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+        subprocess.run(
+            ["git", "commit", "-m", f"Auto-update trading data {timestamp}"],
+            check=True, timeout=30
+        )
+
+        # Push
+        result = subprocess.run(
+            ["git", "push"],
+            capture_output=True, text=True, timeout=60
+        )
+        if result.returncode != 0:
+            print(f"[Git] Push failed: {result.stderr}")
+            return False
+
+        print(f"[Git] Successfully pushed updates")
+        return True
+
+    except subprocess.TimeoutExpired:
+        print("[Git] Operation timed out")
+        return False
+    except subprocess.CalledProcessError as e:
+        print(f"[Git] Error: {e}")
+        return False
+    except Exception as e:
+        print(f"[Git] Unexpected error: {e}")
         return False
 
 
@@ -763,6 +856,8 @@ def parse_args():
                         help="Starting capital for backfill simulation (default: 16500)")
     parser.add_argument("--max-positions", type=int, default=10,
                         help="Maximum open positions for backfill simulation (default: 10)")
+    parser.add_argument("--auto-push", action="store_true",
+                        help="Automatically commit and push changes to git after each update")
     return parser.parse_args()
 
 
@@ -784,6 +879,8 @@ if __name__ == "__main__":
         if args.loop:
             print(f"Running in loop mode, refreshing every {args.interval} seconds. Press Ctrl+C to stop.")
             print(f"[Config] Start capital: {args.start_capital}, Max positions: {args.max_positions}")
+            if args.auto_push:
+                print("[Config] Auto-push enabled - will commit and push after each update")
             try:
                 while True:
                     # Run backfill simulation on every refresh to get latest trades
@@ -792,6 +889,9 @@ if __name__ == "__main__":
                     path_en = generate_dashboard(trades_since, args.start_capital, args.max_positions, lang="en")
                     path_de = generate_dashboard(trades_since, args.start_capital, args.max_positions, lang="de")
                     print(f"[{datetime.now().strftime('%H:%M:%S')}] Dashboards updated: {path_en}, {path_de}")
+                    # Auto-push if enabled
+                    if args.auto_push:
+                        git_auto_push()
                     time.sleep(args.interval)
             except KeyboardInterrupt:
                 print("\nStopped.")
@@ -801,5 +901,8 @@ if __name__ == "__main__":
             # Generate both English and German dashboards
             path_en = generate_dashboard(trades_since, args.start_capital, args.max_positions, lang="en")
             path_de = generate_dashboard(trades_since, args.start_capital, args.max_positions, lang="de")
+            # Auto-push if enabled
+            if args.auto_push:
+                git_auto_push()
             print(f"\nOpen with: start {path_en}")
             print(f"           start {path_de}")
