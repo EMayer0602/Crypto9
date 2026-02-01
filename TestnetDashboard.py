@@ -467,10 +467,6 @@ def parse_args():
                         help="Run continuously in a loop")
     parser.add_argument("--interval", type=int, default=60,
                         help="Refresh interval in seconds when using --loop (default: 60)")
-    parser.add_argument("--auto-backfill", action="store_true", default=True,
-                        help="Automatically run simulation to fill gaps (default: True)")
-    parser.add_argument("--no-backfill", action="store_true",
-                        help="Disable automatic backfill simulation")
     return parser.parse_args()
 
 
@@ -490,9 +486,7 @@ if __name__ == "__main__":
                 print(f"Warning: Invalid date format '{args.start}', using default. Use YYYY-MM-DD.")
 
         # Auto-backfill: Run simulation to fill gaps before starting
-        do_backfill = args.auto_backfill and not args.no_backfill
-        if do_backfill:
-            run_backfill_simulation(trades_since)
+        run_backfill_simulation(trades_since)
 
         if args.loop:
             print(f"Running in loop mode, refreshing every {args.interval} seconds. Press Ctrl+C to stop.")

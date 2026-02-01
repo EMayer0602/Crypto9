@@ -3088,17 +3088,6 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         action="store_true",
         help="Use futures data for signal generation (entries/exits from futures, trades on spot prices)",
     )
-    parser.add_argument(
-        "--auto-backfill",
-        action="store_true",
-        default=True,
-        help="Automatically run a simulation to fill gaps since last processed time before starting monitor loop (default: True)",
-    )
-    parser.add_argument(
-        "--no-backfill",
-        action="store_true",
-        help="Disable automatic backfill simulation",
-    )
     return parser.parse_args(argv)
 
 
@@ -3182,39 +3171,37 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
             reset_state_file()
 
         # Auto-backfill: Run simulation to fill gaps since last processed time
-        do_backfill = args.auto_backfill and not args.no_backfill
-        if do_backfill:
-            last_ts = get_last_processed_timestamp()
-            now_ts = pd.Timestamp.now(tz=st.BERLIN_TZ)
-            if last_ts is not None:
-                gap_hours = (now_ts - last_ts).total_seconds() / 3600
-                if gap_hours > 1:  # Only backfill if gap > 1 hour
-                    print(f"[Backfill] Detected gap of {gap_hours:.1f} hours since {last_ts.strftime('%Y-%m-%d %H:%M')}")
-                    print(f"[Backfill] Running simulation from {last_ts.strftime('%Y-%m-%d %H:%M')} to {now_ts.strftime('%Y-%m-%d %H:%M')}...")
-                    backfill_trades, backfill_state = run_simulation(
-                        last_ts,
-                        now_ts,
-                        use_saved_state=True,  # Continue from existing state
-                        emit_entry_log=False,
-                        allowed_symbols=allowed_symbols,
-                        allowed_indicators=allowed_indicators,
-                        fixed_stake=stake_value,
-                        use_testnet=use_testnet,
-                        refresh_params=False,  # Already done above if requested
-                        reset_state=False,
-                        clear_outputs=False,
-                    )
-                    print(f"[Backfill] Completed: {len(backfill_trades)} trades simulated")
-                    # Write backfill results to logs
-                    if backfill_trades:
-                        trades_df = trades_to_dataframe(backfill_trades)
-                        write_closed_trades_report(trades_df, SIMULATION_LOG_FILE, SIMULATION_LOG_JSON)
-                    open_positions = backfill_state.get("positions", [])
-                    write_open_positions_report(open_positions, SIMULATION_OPEN_POSITIONS_FILE, SIMULATION_OPEN_POSITIONS_JSON)
-                else:
-                    print(f"[Backfill] Gap is only {gap_hours:.1f} hours - skipping backfill")
+        last_ts = get_last_processed_timestamp()
+        now_ts = pd.Timestamp.now(tz=st.BERLIN_TZ)
+        if last_ts is not None:
+            gap_hours = (now_ts - last_ts).total_seconds() / 3600
+            if gap_hours > 1:  # Only backfill if gap > 1 hour
+                print(f"[Backfill] Detected gap of {gap_hours:.1f} hours since {last_ts.strftime('%Y-%m-%d %H:%M')}")
+                print(f"[Backfill] Running simulation from {last_ts.strftime('%Y-%m-%d %H:%M')} to {now_ts.strftime('%Y-%m-%d %H:%M')}...")
+                backfill_trades, backfill_state = run_simulation(
+                    last_ts,
+                    now_ts,
+                    use_saved_state=True,  # Continue from existing state
+                    emit_entry_log=False,
+                    allowed_symbols=allowed_symbols,
+                    allowed_indicators=allowed_indicators,
+                    fixed_stake=stake_value,
+                    use_testnet=use_testnet,
+                    refresh_params=False,  # Already done above if requested
+                    reset_state=False,
+                    clear_outputs=False,
+                )
+                print(f"[Backfill] Completed: {len(backfill_trades)} trades simulated")
+                # Write backfill results to logs
+                if backfill_trades:
+                    trades_df = trades_to_dataframe(backfill_trades)
+                    write_closed_trades_report(trades_df, SIMULATION_LOG_FILE, SIMULATION_LOG_JSON)
+                open_positions = backfill_state.get("positions", [])
+                write_open_positions_report(open_positions, SIMULATION_OPEN_POSITIONS_FILE, SIMULATION_OPEN_POSITIONS_JSON)
             else:
-                print("[Backfill] No previous state found - skipping backfill (run --simulate first)")
+                print(f"[Backfill] Gap is only {gap_hours:.1f} hours - skipping backfill")
+        else:
+            print("[Backfill] No previous state found - skipping backfill (run --simulate first)")
 
         st.configure_exchange(use_testnet=use_testnet)
         order_executor = None
