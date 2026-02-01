@@ -1,4 +1,0 @@
-symbol,direction,indicator,htf,entry_time,entry_price,stake,param_a,param_b,atr_mult,min_hold_bars,last_price,bars_held,unrealized_pct,unrealized_pnl,status
-LUNC/USDT,long,jma,12h,2026-01-03T14:00:00+01:00,4.14399999998e-05,2000.0,20.0,50.0,,0,4.398e-05,5,6.129343629855839,122.58687259711677,Gewinn
-XRP/EUR,long,jma,12h,2026-01-03T15:00:00+01:00,1.7198,1376.4753620227823,30.0,-50.0,,0,1.7077,4,-0.7035701825793697,-9.684470217743728,Verlust
-LINK/EUR,long,jma,1h,2026-01-03T18:00:00+01:00,11.25,1376.5681084910254,30.0,50.0,1.0,0,11.23,1,-0.17777777777777398,-2.447232192872882,Verlust
