@@ -207,7 +207,7 @@ def match_trades(orders: list, symbol: str) -> list:
 
 
 def load_simulation_data(trades_since: datetime = None):
-    """Load closed trades and open positions from simulation logs.
+    """Load closed trades and open positions from trading_summary.html.
 
     Args:
         trades_since: Only include trades from this date onwards
@@ -218,56 +218,78 @@ def load_simulation_data(trades_since: datetime = None):
     closed_trades = []
     open_positions = []
 
-    # Load closed trades from simulation log
-    sim_log_path = Path("paper_trading_simulation_log.json")
-    if sim_log_path.exists():
+    # Load from trading_summary.html
+    summary_path = Path("report_html/trading_summary.html")
+    if summary_path.exists():
         try:
-            with open(sim_log_path, "r", encoding="utf-8") as f:
-                all_trades = json.load(f)
-            for t in all_trades:
-                # Parse exit_time for filtering
-                exit_time_str = t.get("exit_time") or t.get("ExitZeit")
-                if exit_time_str:
-                    try:
-                        exit_time = datetime.fromisoformat(str(exit_time_str).replace("Z", "+00:00"))
-                        if trades_since and exit_time < trades_since:
-                            continue
-                        closed_trades.append({
-                            "symbol": t.get("symbol", "?"),
-                            "direction": t.get("direction", "long").upper(),
-                            "entry_time": t.get("entry_time") or t.get("Zeit"),
-                            "exit_time": exit_time_str,
-                            "entry_price": float(t.get("entry_price") or t.get("Entry") or 0),
-                            "exit_price": float(t.get("exit_price") or t.get("ExitPreis") or 0),
-                            "stake": float(t.get("stake") or 0),
-                            "pnl": float(t.get("pnl") or 0),
-                            "reason": t.get("reason", ""),
-                        })
-                    except Exception:
-                        continue
-        except Exception as e:
-            print(f"[Warning] Failed to load simulation log: {e}")
+            # Read HTML tables using pandas
+            tables = pd.read_html(summary_path, encoding="utf-8")
 
-    # Load open positions from actual trades file
-    open_pos_path = Path("paper_trading_actual_trades.json")
-    if open_pos_path.exists():
-        try:
-            with open(open_pos_path, "r", encoding="utf-8") as f:
-                positions = json.load(f)
-            for p in positions:
-                open_positions.append({
-                    "symbol": p.get("symbol", "?"),
-                    "direction": p.get("direction", "long").upper(),
-                    "entry_time": p.get("entry_time"),
-                    "entry_price": float(p.get("entry_price") or 0),
-                    "last_price": float(p.get("last_price") or 0),
-                    "stake": float(p.get("stake") or 0),
-                    "unrealized_pnl": float(p.get("unrealized_pnl") or 0),
-                    "unrealized_pct": float(p.get("unrealized_pct") or 0),
-                    "bars_held": int(p.get("bars_held") or 0),
-                })
+            # Find the Long Trades table (has columns: symbol, direction, indicator, htf, entry_time, etc.)
+            for df in tables:
+                cols = [str(c).lower() for c in df.columns]
+                if "symbol" in cols and "pnl" in cols and "exit_time" in cols:
+                    # This is the trades table
+                    for _, row in df.iterrows():
+                        direction = str(row.get("direction", "long")).upper()
+                        # Only include LONG trades
+                        if direction != "LONG":
+                            continue
+
+                        exit_time_str = str(row.get("exit_time", ""))
+                        if not exit_time_str or exit_time_str == "nan":
+                            continue
+
+                        # Parse exit_time for filtering
+                        try:
+                            exit_time = datetime.fromisoformat(exit_time_str.replace("Z", "+00:00"))
+                            if trades_since and exit_time < trades_since:
+                                continue
+                        except Exception:
+                            continue
+
+                        closed_trades.append({
+                            "symbol": str(row.get("symbol", "?")),
+                            "direction": direction,
+                            "entry_time": str(row.get("entry_time", "")),
+                            "exit_time": exit_time_str,
+                            "entry_price": float(row.get("entry_price", 0) or 0),
+                            "exit_price": float(row.get("exit_price", 0) or 0),
+                            "stake": float(row.get("stake", 0) or 0),
+                            "pnl": float(row.get("pnl", 0) or 0),
+                            "reason": str(row.get("reason", "")),
+                        })
+                    break
+
+            # Find the Open Positions table
+            for df in tables:
+                cols = [str(c).lower() for c in df.columns]
+                if "symbol" in cols and "unrealized_pnl" in cols and "last_price" in cols:
+                    # This is the open positions table
+                    for _, row in df.iterrows():
+                        direction = str(row.get("direction", "long")).upper()
+                        # Only include LONG positions
+                        if direction != "LONG":
+                            continue
+
+                        open_positions.append({
+                            "symbol": str(row.get("symbol", "?")),
+                            "direction": direction,
+                            "entry_time": str(row.get("entry_time", "")),
+                            "entry_price": float(row.get("entry_price", 0) or 0),
+                            "last_price": float(row.get("last_price", 0) or 0),
+                            "stake": float(row.get("stake", 0) or 0),
+                            "unrealized_pnl": float(row.get("unrealized_pnl", 0) or 0),
+                            "unrealized_pct": float(row.get("unrealized_pct", 0) or 0),
+                            "bars_held": int(row.get("bars_held", 0) or 0),
+                        })
+                    break
+
+            print(f"[Data] Loaded {len(closed_trades)} closed trades, {len(open_positions)} open positions from trading_summary.html")
         except Exception as e:
-            print(f"[Warning] Failed to load open positions: {e}")
+            print(f"[Warning] Failed to load trading_summary.html: {e}")
+    else:
+        print(f"[Warning] trading_summary.html not found at {summary_path}")
 
     return closed_trades, open_positions
 
@@ -282,22 +304,15 @@ def generate_dashboard(trades_since: datetime = None):
         trades_since = TRADES_SINCE_DATE
     print("Loading simulation data...")
 
-    # Load data from simulation logs
+    # Load data from trading_summary.html (only LONG trades)
     closed_trades, open_positions = load_simulation_data(trades_since)
-
-    # Separate long and short trades
-    long_trades = [t for t in closed_trades if t["direction"] == "LONG"]
-    short_trades = [t for t in closed_trades if t["direction"] == "SHORT"]
 
     # Calculate totals
     total_realized_pnl = sum(t["pnl"] for t in closed_trades)
     total_closed_trades = len(closed_trades)
     total_unrealized_pnl = sum(p["unrealized_pnl"] for p in open_positions)
-    long_pnl = sum(t["pnl"] for t in long_trades)
-    short_pnl = sum(t["pnl"] for t in short_trades)
-    long_wins = sum(1 for t in long_trades if t["pnl"] > 0)
-    short_wins = sum(1 for t in short_trades if t["pnl"] > 0)
-    win_rate = (long_wins + short_wins) / total_closed_trades * 100 if total_closed_trades > 0 else 0
+    wins = sum(1 for t in closed_trades if t["pnl"] > 0)
+    win_rate = wins / total_closed_trades * 100 if total_closed_trades > 0 else 0
 
     # Generate HTML
     html = f"""<!DOCTYPE html>
@@ -374,16 +389,16 @@ def generate_dashboard(trades_since: datetime = None):
     else:
         html += "        <tr><td colspan='8'>No open positions</td></tr>\n"
 
-    # Long Trades section
+    # Closed Trades section (Long only)
     html += f"""    </table>
 
     <div class="section">
-    <h2>Long Trades ({len(long_trades)} closed, PnL: <span class="{'positive' if long_pnl >= 0 else 'negative'}">{long_pnl:,.2f}</span>)</h2>
+    <h2>Closed Trades ({total_closed_trades} trades, PnL: <span class="{'positive' if total_realized_pnl >= 0 else 'negative'}">{total_realized_pnl:,.2f}</span>)</h2>
     <table>
         <tr class="long-header"><th>Symbol</th><th>Entry Time</th><th>Exit Time</th><th>Entry Price</th><th>Exit Price</th><th>Stake</th><th>PnL</th><th>Reason</th></tr>
 """
-    if long_trades:
-        for t in long_trades:
+    if closed_trades:
+        for t in closed_trades:
             pnl_class = "positive" if t["pnl"] >= 0 else "negative"
             html += f"""        <tr>
             <td>{t['symbol']}</td>
@@ -396,38 +411,13 @@ def generate_dashboard(trades_since: datetime = None):
             <td>{t['reason']}</td>
         </tr>\n"""
     else:
-        html += "        <tr><td colspan='8'>No long trades</td></tr>\n"
-
-    # Short Trades section
-    html += f"""    </table>
-    </div>
-
-    <div class="section">
-    <h2>Short Trades ({len(short_trades)} closed, PnL: <span class="{'positive' if short_pnl >= 0 else 'negative'}">{short_pnl:,.2f}</span>)</h2>
-    <table>
-        <tr class="short-header"><th>Symbol</th><th>Entry Time</th><th>Exit Time</th><th>Entry Price</th><th>Exit Price</th><th>Stake</th><th>PnL</th><th>Reason</th></tr>
-"""
-    if short_trades:
-        for t in short_trades:
-            pnl_class = "positive" if t["pnl"] >= 0 else "negative"
-            html += f"""        <tr>
-            <td>{t['symbol']}</td>
-            <td>{t['entry_time']}</td>
-            <td>{t['exit_time']}</td>
-            <td>{t['entry_price']:.8f}</td>
-            <td>{t['exit_price']:.8f}</td>
-            <td>{t['stake']:,.2f}</td>
-            <td class="{pnl_class}">{t['pnl']:,.2f}</td>
-            <td>{t['reason']}</td>
-        </tr>\n"""
-    else:
-        html += "        <tr><td colspan='8'>No short trades</td></tr>\n"
+        html += "        <tr><td colspan='8'>No closed trades</td></tr>\n"
 
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     html += f"""    </table>
     </div>
 
-    <p class="timestamp">Generated: {timestamp} | Data from simulation logs</p>
+    <p class="timestamp">Generated: {timestamp} | Data from trading_summary.html (Long only)</p>
 </div>
 </body>
 </html>"""
