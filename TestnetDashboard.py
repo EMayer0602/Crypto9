@@ -320,6 +320,8 @@ def load_simulation_data(trades_since: datetime = None, start_capital: float = 1
                         "exit_time": exit_time_str,
                         "entry_price": float(row.get("entry_price", 0) or 0),
                         "exit_price": float(row.get("exit_price", 0) or 0),
+                        "stake": float(row.get("stake", 0) or 0),
+                        "pnl": float(row.get("pnl", 0) or 0),
                         "reason": str(row.get("reason", "")),
                     })
                 break
@@ -358,34 +360,28 @@ def load_simulation_data(trades_since: datetime = None, start_capital: float = 1
         print(f"[Warning] Failed to load trading_summary.html: {e}")
         return closed_trades, open_positions, start_capital
 
-    # Sort raw trades chronologically by entry_time
+    # Sort raw trades chronologically by entry_time (newest first for display)
     raw_trades.sort(key=lambda x: x["entry_time_dt"])
 
-    # Recalculate trades with proper capital management
+    # Use closed trades directly from HTML (no recalculation)
     capital = start_capital
     for t in raw_trades:
         entry_price = t["entry_price"]
         exit_price = t["exit_price"]
+        stake = t.get("stake", start_capital / max_positions)
+        pnl = t.get("pnl", 0)
 
         if entry_price <= 0:
             continue
 
-        # Calculate stake based on current capital
-        stake = capital / max_positions
-        amount = stake / entry_price
+        # Calculate amount and fees for display
+        amount = stake / entry_price if entry_price > 0 else 0
+        total_fees = stake * FEE_RATE * 2  # Approximate fees
 
-        # Calculate fees (entry + exit)
-        entry_fee = stake * FEE_RATE
-        exit_value = amount * exit_price
-        exit_fee = exit_value * FEE_RATE
-        total_fees = entry_fee + exit_fee
-
-        # Calculate PnL
-        gross_pnl = exit_value - stake
-        pnl = gross_pnl - total_fees
+        # Calculate PnL % for display
         pnl_pct = (pnl / stake * 100) if stake > 0 else 0
 
-        # Update capital
+        # Track capital for open positions calculation
         capital += pnl
 
         closed_trades.append({
