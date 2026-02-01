@@ -910,19 +910,24 @@ def generate_dashboard():
     return output_path
 
 
-def run_simulation_and_update_summary():
+def run_simulation_and_update_summary(start_date: str = "2025-01-01", start_capital: float = 16500.0, max_positions: int = 10):
     """Run simulation from paper_trader and update trading_summary.html/json in report_html/."""
     if not SIMULATION_AVAILABLE:
         print("[Simulation] paper_trader not available - skipping simulation")
         return False
 
     try:
-        print("[Simulation] Running simulation to update trading_summary...")
+        print(f"[Simulation] Running simulation from {start_date} with capital={start_capital}, max_positions={max_positions}...")
 
         # Set up simulation parameters
         now = pd.Timestamp.now(tz=pt.st.BERLIN_TZ)
-        start_ts = pd.Timestamp("2025-01-01", tz=pt.st.BERLIN_TZ)
+        start_ts = pd.Timestamp(start_date, tz=pt.st.BERLIN_TZ)
         end_ts = now
+
+        # Update paper_trader settings
+        pt.START_TOTAL_CAPITAL = start_capital
+        pt.MAX_OPEN_POSITIONS = max_positions
+        pt.MAX_LONG_POSITIONS = max_positions
 
         # Run simulation with saved state (continue from current positions)
         trades, final_state = pt.run_simulation(
@@ -969,7 +974,10 @@ if __name__ == "__main__":
     parser.add_argument("--loop", action="store_true", help="Run in continuous loop mode")
     parser.add_argument("--interval", type=int, default=30, help="Refresh interval in seconds (default: 30)")
     parser.add_argument("--simulate", action="store_true", help="Run simulation and update trading_summary before dashboard")
-    parser.add_argument("--start", action="store_true", help="Open dashboard in browser after generation")
+    parser.add_argument("--start", type=str, default="2025-01-01", help="Simulation start date (YYYY-MM-DD)")
+    parser.add_argument("--start-capital", type=float, default=16500.0, help="Starting capital (default: 16500)")
+    parser.add_argument("--max-positions", type=int, default=10, help="Maximum open positions (default: 10)")
+    parser.add_argument("--open-browser", action="store_true", help="Open dashboard in browser after generation")
     args = parser.parse_args()
 
     # PnL correction disabled - paper_trader.py already calculates correct PnL with lot sizes
@@ -988,7 +996,7 @@ if __name__ == "__main__":
 
     # Run simulation first if requested
     if args.simulate:
-        run_simulation_and_update_summary()
+        run_simulation_and_update_summary(args.start, args.start_capital, args.max_positions)
 
     if args.loop:
         print(f"Running dashboard loop (refresh every {args.interval}s). Press Ctrl+C to stop.")
@@ -997,7 +1005,7 @@ if __name__ == "__main__":
             try:
                 # Run simulation every 10 iterations (e.g., every 5 minutes at 30s interval)
                 if args.simulate and sim_counter % 10 == 0:
-                    run_simulation_and_update_summary()
+                    run_simulation_and_update_summary(args.start, args.start_capital, args.max_positions)
                 sim_counter += 1
 
                 path = generate_dashboard()
@@ -1008,8 +1016,8 @@ if __name__ == "__main__":
                 break
     else:
         path = generate_dashboard()
-        # Open in browser if --start flag is set
-        if args.start:
+        # Open in browser if --open-browser flag is set
+        if args.open_browser:
             import subprocess
             import platform
             if platform.system() == "Windows":
