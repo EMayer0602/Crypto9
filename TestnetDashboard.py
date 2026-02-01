@@ -38,6 +38,7 @@ load_dotenv()
 API_KEY = os.getenv("BINANCE_API_KEY_TEST")
 API_SECRET = os.getenv("BINANCE_API_SECRET_TEST")
 BASE_URL = "https://testnet.binance.vision"
+BINANCE_PUBLIC_URL = "https://api.binance.com"  # Use real Binance for live prices
 RECV_WINDOW_MS = 5_000
 
 # Trading symbols - Testnet only supports USDT pairs
@@ -60,6 +61,57 @@ def sign_request(params: dict, secret: str) -> str:
     query_string = "&".join([f"{k}={v}" for k, v in params.items()])
     signature = hmac.new(secret.encode(), query_string.encode(), hashlib.sha256).hexdigest()
     return query_string + "&signature=" + signature
+
+
+def get_current_price(symbol: str) -> float:
+    """Get current price from Binance (real, not testnet) for a symbol.
+
+    Args:
+        symbol: Trading pair like "BTC/USDC" or "BTCUSDT"
+
+    Returns:
+        Current price as float, or 0.0 if failed
+    """
+    # Convert symbol format: "BTC/USDC" -> "BTCUSDC", "BTC/USDT" -> "BTCUSDT"
+    binance_symbol = symbol.replace("/", "")
+
+    # Try USDC first, then USDT if symbol contains USDC
+    symbols_to_try = [binance_symbol]
+    if "USDC" in binance_symbol:
+        symbols_to_try.append(binance_symbol.replace("USDC", "USDT"))
+    elif "EUR" in binance_symbol:
+        # For EUR pairs, try USDT instead
+        base = binance_symbol.replace("EUR", "")
+        symbols_to_try.append(f"{base}USDT")
+
+    for sym in symbols_to_try:
+        try:
+            url = f"{BINANCE_PUBLIC_URL}/api/v3/ticker/price?symbol={sym}"
+            response = requests.get(url, timeout=5)
+            if response.status_code == 200:
+                data = response.json()
+                return float(data.get("price", 0))
+        except Exception:
+            continue
+
+    return 0.0
+
+
+def get_all_current_prices(symbols: list) -> dict:
+    """Get current prices for multiple symbols at once.
+
+    Args:
+        symbols: List of trading pairs like ["BTC/USDC", "ETH/USDT"]
+
+    Returns:
+        Dict mapping symbol -> price
+    """
+    prices = {}
+    for symbol in symbols:
+        price = get_current_price(symbol)
+        if price > 0:
+            prices[symbol] = price
+    return prices
 
 
 def get_account_balances() -> list:
@@ -351,10 +403,16 @@ def load_simulation_data(trades_since: datetime = None, start_capital: float = 1
             "reason": t["reason"],
         })
 
-    # Recalculate open positions with current capital
+    # Fetch live prices for open positions
+    open_symbols = [p["symbol"] for p in raw_open_positions]
+    live_prices = get_all_current_prices(open_symbols) if open_symbols else {}
+    print(f"[Data] Fetched {len(live_prices)} live prices from Binance")
+
+    # Recalculate open positions with current capital and live prices
     for p in raw_open_positions:
         entry_price = p["entry_price"]
-        last_price = p["last_price"]
+        # Use live price if available, otherwise fall back to last_price from HTML
+        last_price = live_prices.get(p["symbol"], p["last_price"])
 
         if entry_price <= 0:
             continue
