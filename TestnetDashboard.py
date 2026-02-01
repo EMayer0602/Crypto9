@@ -1007,4 +1007,10 @@ if __name__ == "__main__":
                 break
     else:
         path = generate_dashboard()
-        print(f"Open with: start {path}")
+        # Auto-open in browser on Windows
+        import subprocess
+        import platform
+        if platform.system() == "Windows":
+            subprocess.run(["start", "", str(path)], shell=True)
+        else:
+            print(f"Open with: start {path}")
