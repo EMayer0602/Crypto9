@@ -756,10 +756,37 @@ def run_backfill_simulation(trades_since: datetime = None, start_capital: float 
         open_positions = backfill_state.get("positions", [])
         write_open_positions_report(open_positions, SIMULATION_OPEN_POSITIONS_FILE, SIMULATION_OPEN_POSITIONS_JSON)
 
-        # Generate trading_summary.html with all historical trades
-        all_trades_df = _load_trade_log_dataframe(TRADE_LOG_FILE)
-        if all_trades_df.empty and backfill_trades:
-            all_trades_df = trades_to_dataframe(backfill_trades)
+        # Load EXISTING trades from trading_summary.html first (preserve history)
+        summary_path = OUTPUT_DIR / "trading_summary.html"
+        existing_trades_df = pd.DataFrame()
+        if summary_path.exists():
+            try:
+                tables = pd.read_html(str(summary_path), encoding="utf-8")
+                for tbl in tables:
+                    cols = [str(c).lower() for c in tbl.columns]
+                    if "symbol" in cols and "pnl" in cols and "exit_time" in cols:
+                        existing_trades_df = tbl
+                        print(f"[Backfill] Loaded {len(existing_trades_df)} existing trades from {summary_path}")
+                        break
+            except Exception as e:
+                print(f"[Backfill] Could not load existing trades: {e}")
+
+        # Convert backfill trades to DataFrame and append to existing
+        if backfill_trades:
+            new_trades_df = trades_to_dataframe(backfill_trades)
+            if not existing_trades_df.empty:
+                # Merge: existing + new (avoid duplicates by entry_time + symbol)
+                all_trades_df = pd.concat([existing_trades_df, new_trades_df], ignore_index=True)
+                # Remove duplicates based on symbol + entry_time
+                if 'symbol' in all_trades_df.columns and 'entry_time' in all_trades_df.columns:
+                    all_trades_df = all_trades_df.drop_duplicates(
+                        subset=['symbol', 'entry_time'], keep='last'
+                    )
+                print(f"[Backfill] Merged to {len(all_trades_df)} total trades")
+            else:
+                all_trades_df = new_trades_df
+        else:
+            all_trades_df = existing_trades_df if not existing_trades_df.empty else pd.DataFrame()
 
         open_df = open_positions_to_dataframe(open_positions)
         start_ts, end_ts = _derive_summary_window(all_trades_df)
