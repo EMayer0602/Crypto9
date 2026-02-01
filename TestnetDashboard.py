@@ -407,8 +407,11 @@ def load_simulation_data(trades_since: datetime = None, start_capital: float = 1
     # Recalculate open positions with current capital and live prices
     for p in raw_open_positions:
         entry_price = p["entry_price"]
-        # Use live price if available, otherwise fall back to last_price from HTML
-        last_price = live_prices.get(p["symbol"], p["last_price"])
+        # Always use live price from Binance (no fallback)
+        last_price = live_prices.get(p["symbol"], 0)
+        if last_price <= 0:
+            print(f"[Warning] No live price for {p['symbol']} - skipping position")
+            continue
 
         if entry_price <= 0:
             continue
