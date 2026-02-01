@@ -360,28 +360,36 @@ def load_simulation_data(trades_since: datetime = None, start_capital: float = 1
         print(f"[Warning] Failed to load trading_summary.html: {e}")
         return closed_trades, open_positions, start_capital
 
-    # Sort raw trades chronologically by entry_time (newest first for display)
+    # Sort raw trades chronologically by entry_time
     raw_trades.sort(key=lambda x: x["entry_time_dt"])
 
-    # Use closed trades directly from HTML (no recalculation)
+    # Recalculate trades with proper capital management
+    # First trade: stake = initial_capital / max_positions
+    # All subsequent: stake = current_capital / max_positions
     capital = start_capital
     for t in raw_trades:
         entry_price = t["entry_price"]
         exit_price = t["exit_price"]
-        stake = t.get("stake", start_capital / max_positions)
-        pnl = t.get("pnl", 0)
 
         if entry_price <= 0:
             continue
 
-        # Calculate amount and fees for display
-        amount = stake / entry_price if entry_price > 0 else 0
-        total_fees = stake * FEE_RATE * 2  # Approximate fees
+        # Calculate stake based on CURRENT capital
+        stake = capital / max_positions
+        amount = stake / entry_price
 
-        # Calculate PnL % for display
+        # Calculate fees (entry + exit)
+        entry_fee = stake * FEE_RATE
+        exit_value = amount * exit_price
+        exit_fee = exit_value * FEE_RATE
+        total_fees = entry_fee + exit_fee
+
+        # Calculate PnL based on recalculated stake
+        gross_pnl = exit_value - stake
+        pnl = gross_pnl - total_fees
         pnl_pct = (pnl / stake * 100) if stake > 0 else 0
 
-        # Track capital for open positions calculation
+        # Update capital for next trade
         capital += pnl
 
         closed_trades.append({
@@ -416,8 +424,8 @@ def load_simulation_data(trades_since: datetime = None, start_capital: float = 1
         if entry_price <= 0:
             continue
 
-        # Calculate stake based on start capital (not accumulated capital)
-        stake = start_capital / max_positions
+        # Calculate stake based on current capital (after all closed trades)
+        stake = capital / max_positions
         amount = stake / entry_price
 
         # Calculate unrealized PnL (only entry fee paid so far)
