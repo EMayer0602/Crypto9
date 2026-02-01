@@ -558,7 +558,7 @@ def generate_dashboard(trades_since: datetime = None, start_capital: float = 165
     else:
         html += f"        <tr><td colspan='9'>{L['no_positions']}</td></tr>\n"
 
-    # Closed Trades section (Long only)
+    # Closed Trades section (Long only) - newest first
     html += f"""    </table>
 
     <div class="section">
@@ -567,7 +567,7 @@ def generate_dashboard(trades_since: datetime = None, start_capital: float = 165
         <tr class="long-header"><th>{L['symbol']}</th><th>{L['entry_time']}</th><th>{L['exit_time']}</th><th>{L['entry_price']}</th><th>{L['exit_price']}</th><th>{L['stake']}</th><th>{L['amount']}</th><th>{L['fees']}</th><th>{L['pnl']}</th><th>{L['pnl_pct']}</th><th>{L['reason']}</th></tr>
 """
     if closed_trades:
-        for t in closed_trades:
+        for t in reversed(closed_trades):  # Newest first
             pnl_class = "positive" if t["pnl"] >= 0 else "negative"
             html += f"""        <tr>
             <td>{t['symbol']}</td>
