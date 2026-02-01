@@ -931,24 +931,65 @@ def run_simulation_and_update_summary(start_date: str = "2025-01-01", start_capi
         pt.MAX_OPEN_POSITIONS = max_positions
         pt.MAX_LONG_POSITIONS = max_positions
 
-        # Run FULL simulation (not incremental) to regenerate all trades
+        # Run simulation continuing from saved state (keeps existing positions, generates new trades)
         trades, final_state = pt.run_simulation(
             start_ts=start_ts,
             end_ts=end_ts,
-            use_saved_state=False,  # Full simulation from start
+            use_saved_state=True,  # Continue from existing state with positions
             emit_entry_log=False,
             use_testnet=False,  # Use simulation mode (not testnet)
-            refresh_params=False,  # Don't refresh params each time
+            refresh_params=False,  # Use existing best_params_overall.csv
         )
 
-        print(f"[Simulation] Completed: {len(trades)} trades processed")
+        print(f"[Simulation] Generated {len(trades)} new trades")
 
-        # Generate summary from simulation results
-        if trades:
-            # Build summary using paper_trader functions
-            trades_df = pt.trades_to_df(trades)
+        # Load existing historical trades from simulation log
+        existing_trades = []
+        if os.path.exists(PAPER_TRADING_SIMULATION_LOG):
+            try:
+                with open(PAPER_TRADING_SIMULATION_LOG, 'r') as f:
+                    existing_trades = json.load(f)
+                print(f"[Simulation] Loaded {len(existing_trades)} existing trades from log")
+            except Exception as e:
+                print(f"[Simulation] Warning: Could not load existing trades: {e}")
+
+        # Combine: existing historical trades + new trades from this run
+        # Convert new trades to dict format for combining
+        new_trades_dicts = []
+        for t in trades:
+            if hasattr(t, '_asdict'):
+                new_trades_dicts.append(t._asdict())
+            elif isinstance(t, dict):
+                new_trades_dicts.append(t)
+
+        # Deduplicate by (symbol, entry_time, exit_time)
+        seen = set()
+        combined_trades = []
+
+        # Add existing trades first
+        for t in existing_trades:
+            key = (t.get('symbol', ''), str(t.get('entry_time', '')), str(t.get('exit_time', '')))
+            if key not in seen:
+                seen.add(key)
+                combined_trades.append(t)
+
+        # Add new trades (skip duplicates)
+        for t in new_trades_dicts:
+            key = (t.get('symbol', ''), str(t.get('entry_time', '')), str(t.get('exit_time', '')))
+            if key not in seen:
+                seen.add(key)
+                combined_trades.append(t)
+
+        print(f"[Simulation] Total combined trades: {len(combined_trades)}")
+
+        # Build summary using paper_trader functions
+        if combined_trades:
+            # Convert combined trades to DataFrame
+            trades_df = pd.DataFrame(combined_trades)
             open_df = pt.state_to_open_df(final_state)
-            summary = pt.compute_summary(trades, final_state)
+
+            # Compute summary from combined trades
+            summary = pt.build_summary_payload(trades_df, open_df, final_state, start_ts, end_ts)
 
             # Write to report_html/ (not report_testnet/)
             html_path = os.path.join("report_html", "trading_summary.html")
@@ -956,6 +997,10 @@ def run_simulation_and_update_summary(start_date: str = "2025-01-01", start_capi
 
             pt.generate_summary_html(summary, trades_df, open_df, html_path)
             pt.write_summary_json(summary, json_path)
+
+            # Also save combined trades back to simulation log
+            with open(PAPER_TRADING_SIMULATION_LOG, 'w') as f:
+                json.dump(combined_trades, f, indent=2, default=str)
 
             print(f"[Simulation] Updated {html_path} and {json_path}")
             return True
