@@ -57,6 +57,22 @@ TRADES_SINCE_DATE = datetime(2026, 1, 2, tzinfo=timezone.utc)  # Today
 OUTPUT_DIR = Path("report_testnet")
 
 
+def format_number(value: float, decimals: int = 2, lang: str = "en") -> str:
+    """Format number according to language conventions.
+
+    English: 16,500.00
+    German: 16.500,00
+    """
+    if lang == "de":
+        # German format: period as thousands separator, comma as decimal
+        formatted = f"{value:,.{decimals}f}"
+        # Swap . and , for German format
+        formatted = formatted.replace(",", "X").replace(".", ",").replace("X", ".")
+        return formatted
+    else:
+        return f"{value:,.{decimals}f}"
+
+
 def sign_request(params: dict, secret: str) -> str:
     query_string = "&".join([f"{k}={v}" for k, v in params.items()])
     signature = hmac.new(secret.encode(), query_string.encode(), hashlib.sha256).hexdigest()
@@ -479,6 +495,10 @@ def generate_dashboard(trades_since: datetime = None, start_capital: float = 165
     wins = sum(1 for t in closed_trades if t["pnl"] > 0)
     win_rate = wins / total_closed_trades * 100 if total_closed_trades > 0 else 0
 
+    # Helper function for this dashboard
+    def fmt(value: float, decimals: int = 2) -> str:
+        return format_number(value, decimals, lang)
+
     # Labels based on language
     labels = {
         "en": {
@@ -510,7 +530,7 @@ def generate_dashboard(trades_since: datetime = None, start_capital: float = 165
         },
         "de": {
             "title": "Paper Trading Dashboard",
-            "subtitle": f"Nur SPOT - Nur Long | Start: {start_capital:,.2f}€ | Max Positionen: {max_positions}",
+            "subtitle": f"Nur SPOT - Nur Long | Start: {format_number(start_capital, 2, 'de')}€ | Max Positionen: {max_positions}",
             "start_capital": "Startkapital",
             "current_capital": "Aktuelles Kapital",
             "closed_trades": "Geschlossene Trades",
@@ -573,11 +593,11 @@ def generate_dashboard(trades_since: datetime = None, start_capital: float = 165
     <div class="summary-boxes">
         <div class="summary-box">
             <h3>{L['start_capital']}</h3>
-            <div class="value">{start_capital:,.2f}</div>
+            <div class="value">{fmt(start_capital)}</div>
         </div>
         <div class="summary-box">
             <h3>{L['current_capital']}</h3>
-            <div class="value {'positive' if final_capital >= start_capital else 'negative'}">{final_capital:,.2f}</div>
+            <div class="value {'positive' if final_capital >= start_capital else 'negative'}">{fmt(final_capital)}</div>
         </div>
         <div class="summary-box">
             <h3>{L['closed_trades']}</h3>
@@ -585,11 +605,11 @@ def generate_dashboard(trades_since: datetime = None, start_capital: float = 165
         </div>
         <div class="summary-box">
             <h3>{L['realized_pnl']}</h3>
-            <div class="value {'positive' if total_realized_pnl >= 0 else 'negative'}">{total_realized_pnl:,.2f}</div>
+            <div class="value {'positive' if total_realized_pnl >= 0 else 'negative'}">{fmt(total_realized_pnl)}</div>
         </div>
         <div class="summary-box">
             <h3>{L['win_rate']}</h3>
-            <div class="value">{win_rate:.1f}%</div>
+            <div class="value">{fmt(win_rate, 1)}%</div>
         </div>
         <div class="summary-box">
             <h3>{L['open_positions']}</h3>
@@ -597,7 +617,7 @@ def generate_dashboard(trades_since: datetime = None, start_capital: float = 165
         </div>
         <div class="summary-box">
             <h3>{L['unrealized_pnl']}</h3>
-            <div class="value {'positive' if total_unrealized_pnl >= 0 else 'negative'}">{total_unrealized_pnl:,.2f}</div>
+            <div class="value {'positive' if total_unrealized_pnl >= 0 else 'negative'}">{fmt(total_unrealized_pnl)}</div>
         </div>
     </div>
 
@@ -609,16 +629,17 @@ def generate_dashboard(trades_since: datetime = None, start_capital: float = 165
         for pos in open_positions:
             pnl_class = "positive" if pos["unrealized_pnl"] >= 0 else "negative"
             entry_time = pos.get("entry_time", "N/A")
+            pct_sign = "+" if pos["unrealized_pct"] >= 0 else ""
             html += f"""        <tr>
             <td>{pos['symbol']}</td>
             <td>{entry_time}</td>
-            <td>{pos['entry_price']:.8f}</td>
-            <td>{pos['last_price']:.8f}</td>
-            <td>{pos['stake']:,.2f}</td>
-            <td>{pos['amount']:,.6f}</td>
-            <td>{pos['fees']:,.2f}</td>
-            <td class="{pnl_class}">{pos['unrealized_pnl']:,.2f}</td>
-            <td class="{pnl_class}">{pos['unrealized_pct']:+.2f}%</td>
+            <td>{fmt(pos['entry_price'], 8)}</td>
+            <td>{fmt(pos['last_price'], 8)}</td>
+            <td>{fmt(pos['stake'])}</td>
+            <td>{fmt(pos['amount'], 6)}</td>
+            <td>{fmt(pos['fees'])}</td>
+            <td class="{pnl_class}">{fmt(pos['unrealized_pnl'])}</td>
+            <td class="{pnl_class}">{pct_sign}{fmt(pos['unrealized_pct'])}%</td>
         </tr>\n"""
     else:
         html += f"        <tr><td colspan='9'>{L['no_positions']}</td></tr>\n"
@@ -627,24 +648,25 @@ def generate_dashboard(trades_since: datetime = None, start_capital: float = 165
     html += f"""    </table>
 
     <div class="section">
-    <h2>{L['closed_trades']} ({total_closed_trades}, PnL: <span class="{'positive' if total_realized_pnl >= 0 else 'negative'}">{total_realized_pnl:,.2f}</span>)</h2>
+    <h2>{L['closed_trades']} ({total_closed_trades}, PnL: <span class="{'positive' if total_realized_pnl >= 0 else 'negative'}">{fmt(total_realized_pnl)}</span>)</h2>
     <table>
         <tr class="long-header"><th>{L['symbol']}</th><th>{L['entry_time']}</th><th>{L['exit_time']}</th><th>{L['entry_price']}</th><th>{L['exit_price']}</th><th>{L['stake']}</th><th>{L['amount']}</th><th>{L['fees']}</th><th>{L['pnl']}</th><th>{L['pnl_pct']}</th><th>{L['reason']}</th></tr>
 """
     if closed_trades:
         for t in reversed(closed_trades):  # Newest first
             pnl_class = "positive" if t["pnl"] >= 0 else "negative"
+            pct_sign = "+" if t["pnl_pct"] >= 0 else ""
             html += f"""        <tr>
             <td>{t['symbol']}</td>
             <td>{t['entry_time']}</td>
             <td>{t['exit_time']}</td>
-            <td>{t['entry_price']:.8f}</td>
-            <td>{t['exit_price']:.8f}</td>
-            <td>{t['stake']:,.2f}</td>
-            <td>{t['amount']:,.6f}</td>
-            <td>{t['fees']:,.2f}</td>
-            <td class="{pnl_class}">{t['pnl']:,.2f}</td>
-            <td class="{pnl_class}">{t['pnl_pct']:+.2f}%</td>
+            <td>{fmt(t['entry_price'], 8)}</td>
+            <td>{fmt(t['exit_price'], 8)}</td>
+            <td>{fmt(t['stake'])}</td>
+            <td>{fmt(t['amount'], 6)}</td>
+            <td>{fmt(t['fees'])}</td>
+            <td class="{pnl_class}">{fmt(t['pnl'])}</td>
+            <td class="{pnl_class}">{pct_sign}{fmt(t['pnl_pct'])}%</td>
             <td>{t['reason']}</td>
         </tr>\n"""
     else:
