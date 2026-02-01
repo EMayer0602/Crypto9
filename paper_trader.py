@@ -215,9 +215,16 @@ SIMULATION_SUMMARY_JSON = os.path.join("report_html", "trading_summary.json")
 
 
 def get_report_dir(use_testnet: bool = False) -> str:
-    """Return the appropriate report directory based on testnet mode."""
-    # Always use report_html to maintain single source of truth
-    return "report_html"
+    """Return the appropriate report directory based on testnet mode.
+
+    - Testnet mode: report_testnet/ (for dashboards)
+    - Normal mode: report_html/ (for simulation output)
+    """
+    return "report_testnet" if use_testnet else "report_html"
+
+
+# Source of truth for trade signals (always report_html)
+SIGNAL_SOURCE_DIR = "report_html"
 BEST_PARAMS_CSV = st.OVERALL_PARAMS_CSV
 START_TOTAL_CAPITAL = 16_500.0
 MAX_OPEN_POSITIONS = 10

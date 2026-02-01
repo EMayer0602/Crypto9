@@ -1,68 +1,34 @@
 #!/usr/bin/env python3
-"""Generate HTML dashboard for Binance Testnet trading."""
+"""
+TestnetDashboard - READ-ONLY Dashboard für Paper Trading
+
+Liest Daten von:
+- report_html/trading_summary.json (historische + neue Trades)
+- paper_trading_state.json (offene Positionen)
+
+Holt Live-Preise von Binance für offene Positionen.
+Schreibt NUR die Dashboard-HTML Dateien (report_html/dashboard.html, dashboard_de.html)
+"""
 
 import argparse
 import json
 import os
 import time
-import hmac
-import hashlib
 import requests
 from datetime import datetime, timezone
 from pathlib import Path
 from dotenv import load_dotenv
 
-# Import backfill functions from paper_trader
-try:
-    import pandas as pd
-    from paper_trader import (
-        get_last_processed_timestamp,
-        run_simulation,
-        trades_to_dataframe,
-        write_closed_trades_report,
-        write_open_positions_report,
-        open_positions_to_dataframe,
-        build_summary_payload,
-        generate_summary_html,
-        write_summary_json,
-        _derive_summary_window,
-        _load_trade_log_dataframe,
-        SIMULATION_LOG_FILE,
-        SIMULATION_LOG_JSON,
-        SIMULATION_OPEN_POSITIONS_FILE,
-        SIMULATION_OPEN_POSITIONS_JSON,
-        SIMULATION_SUMMARY_HTML,
-        SIMULATION_SUMMARY_JSON,
-        TRADE_LOG_FILE,
-    )
-    import paper_trader as pt  # For setting global variables
-    import Supertrend_5Min as st
-    BACKFILL_AVAILABLE = True
-except ImportError as e:
-    print(f"[Warning] Backfill not available: {e}")
-    BACKFILL_AVAILABLE = False
-
 load_dotenv()
 
-API_KEY = os.getenv("BINANCE_API_KEY_TEST")
-API_SECRET = os.getenv("BINANCE_API_SECRET_TEST")
-BASE_URL = "https://testnet.binance.vision"
-BINANCE_PUBLIC_URL = "https://api.binance.com"  # Use real Binance for live prices
-RECV_WINDOW_MS = 5_000
+# Binance API for live prices (real, not testnet)
+BINANCE_PUBLIC_URL = "https://api.binance.com"
 
-# Trading symbols - Testnet only supports USDT pairs
-SYMBOLS = ["BTCUSDT", "ETHUSDT", "XRPUSDT", "LINKUSDT", "SOLUSDT", "BNBUSDT",
-           "SUIUSDT", "ZECUSDT", "LUNCUSDT", "TNSRUSDT"]
+# Input files (READ ONLY)
+TRADING_SUMMARY_JSON = Path("report_html/trading_summary.json")
+PAPER_TRADING_STATE = Path("paper_trading_state.json")
 
-# Base currencies (don't count as positions)
-BASE_CURRENCIES = {"USDT", "USDC", "BUSD", "BTC", "TUSD"}
-
-# Relevant trading assets (filter out testnet junk)
-RELEVANT_ASSETS = {"BTC", "ETH", "SOL", "XRP", "LINK", "BNB", "SUI", "ZEC", "LUNC", "TNSR"}
-
-# Only show trades from this date onwards (set to None to show all)
-TRADES_SINCE_DATE = datetime(2026, 1, 2, tzinfo=timezone.utc)  # Today
-
+# Output directory for dashboards
 OUTPUT_DIR = Path("report_html")
 
 
@@ -72,24 +38,23 @@ def format_number(value: float, decimals: int = 2, lang: str = "en") -> str:
     English: 16,500.00
     German: 16.500,00
     """
+    if value is None:
+        return "N/A"
+    try:
+        value = float(value)
+    except (ValueError, TypeError):
+        return str(value)
+
     if lang == "de":
-        # German format: period as thousands separator, comma as decimal
         formatted = f"{value:,.{decimals}f}"
-        # Swap . and , for German format
         formatted = formatted.replace(",", "X").replace(".", ",").replace("X", ".")
         return formatted
     else:
         return f"{value:,.{decimals}f}"
 
 
-def sign_request(params: dict, secret: str) -> str:
-    query_string = "&".join([f"{k}={v}" for k, v in params.items()])
-    signature = hmac.new(secret.encode(), query_string.encode(), hashlib.sha256).hexdigest()
-    return query_string + "&signature=" + signature
-
-
 def get_current_price(symbol: str) -> float:
-    """Get current price from Binance (real, not testnet) for a symbol.
+    """Get current price from Binance for a symbol.
 
     Args:
         symbol: Trading pair like "BTC/USDC" or "BTCUSDT"
@@ -97,15 +62,12 @@ def get_current_price(symbol: str) -> float:
     Returns:
         Current price as float, or 0.0 if failed
     """
-    # Convert symbol format: "BTC/USDC" -> "BTCUSDC", "BTC/USDT" -> "BTCUSDT"
     binance_symbol = symbol.replace("/", "")
 
-    # Try USDC first, then USDT if symbol contains USDC
     symbols_to_try = [binance_symbol]
     if "USDC" in binance_symbol:
         symbols_to_try.append(binance_symbol.replace("USDC", "USDT"))
     elif "EUR" in binance_symbol:
-        # For EUR pairs, try USDT instead
         base = binance_symbol.replace("EUR", "")
         symbols_to_try.append(f"{base}USDT")
 
@@ -123,14 +85,7 @@ def get_current_price(symbol: str) -> float:
 
 
 def get_all_current_prices(symbols: list) -> dict:
-    """Get current prices for multiple symbols at once.
-
-    Args:
-        symbols: List of trading pairs like ["BTC/USDC", "ETH/USDT"]
-
-    Returns:
-        Dict mapping symbol -> price
-    """
+    """Get current prices for multiple symbols at once."""
     prices = {}
     for symbol in symbols:
         price = get_current_price(symbol)
@@ -139,376 +94,132 @@ def get_all_current_prices(symbols: list) -> dict:
     return prices
 
 
-def get_account_balances() -> list:
-    """Get all account balances."""
-    endpoint = "/api/v3/account"
-    url = BASE_URL + endpoint
-    params = {
-        "timestamp": int(time.time() * 1000),
-        "recvWindow": RECV_WINDOW_MS,
-    }
-    query = sign_request(params, API_SECRET)
-    headers = {"X-MBX-APIKEY": API_KEY}
+def load_trading_summary() -> dict:
+    """Load trading summary from JSON file."""
+    if not TRADING_SUMMARY_JSON.exists():
+        print(f"[Warning] {TRADING_SUMMARY_JSON} not found")
+        return {}
+
     try:
-        response = requests.get(url + "?" + query, headers=headers, timeout=10)
-        response.raise_for_status()
-        return response.json().get("balances", [])
+        with open(TRADING_SUMMARY_JSON, "r", encoding="utf-8") as f:
+            return json.load(f)
     except Exception as e:
-        print(f"Error fetching balances: {e}")
-        return []
+        print(f"[Error] Failed to load {TRADING_SUMMARY_JSON}: {e}")
+        return {}
 
 
-def get_all_orders(symbol: str) -> list:
-    """Get all orders for a symbol."""
-    endpoint = "/api/v3/allOrders"
-    url = BASE_URL + endpoint
-    params = {
-        "symbol": symbol,
-        "timestamp": int(time.time() * 1000),
-        "recvWindow": RECV_WINDOW_MS,
-    }
-    query = sign_request(params, API_SECRET)
-    headers = {"X-MBX-APIKEY": API_KEY}
+def load_paper_trading_state() -> dict:
+    """Load paper trading state from JSON file."""
+    if not PAPER_TRADING_STATE.exists():
+        print(f"[Warning] {PAPER_TRADING_STATE} not found")
+        return {}
+
     try:
-        response = requests.get(url + "?" + query, headers=headers, timeout=10)
-        if response.status_code == 200:
-            return response.json()
-        return []
-    except:
-        return []
+        with open(PAPER_TRADING_STATE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"[Error] Failed to load {PAPER_TRADING_STATE}: {e}")
+        return {}
 
 
-def calculate_trade_stats(orders: list) -> dict:
-    """Calculate trading statistics from orders."""
-    if not orders:
-        return {"trades": 0, "buys": 0, "sells": 0, "volume": 0, "pnl": 0}
-
-    buys = []
-    sells = []
-
-    for o in orders:
-        if o.get("status") != "FILLED":
-            continue
-        side = o.get("side")
-        qty = float(o.get("executedQty", 0))
-        quote = float(o.get("cummulativeQuoteQty", 0))
-
-        if side == "BUY":
-            buys.append({"qty": qty, "quote": quote})
-        elif side == "SELL":
-            sells.append({"qty": qty, "quote": quote})
-
-    total_buy_quote = sum(b["quote"] for b in buys)
-    total_sell_quote = sum(s["quote"] for s in sells)
-
-    return {
-        "trades": len(buys) + len(sells),
-        "buys": len(buys),
-        "sells": len(sells),
-        "buy_volume": total_buy_quote,
-        "sell_volume": total_sell_quote,
-        "realized_pnl": total_sell_quote - total_buy_quote if sells else 0
-    }
-
-
-def match_trades(orders: list, symbol: str) -> list:
-    """Match BUY/SELL orders into round-trip trades.
-
-    Long trade: BUY entry -> SELL exit
-    Short trade: SELL entry -> BUY exit (on margin/futures, rare on spot)
-    """
-    filled = [o for o in orders if o.get("status") == "FILLED"]
-    filled.sort(key=lambda x: x.get("time", 0))
-
-    matched = []
-    position_qty = 0.0
-    position_cost = 0.0
-    entry_time = None
-    entry_side = None
-
-    for o in filled:
-        side = o.get("side")
-        qty = float(o.get("executedQty", 0))
-        quote = float(o.get("cummulativeQuoteQty", 0))
-        ts = o.get("time", 0)
-        order_time = datetime.fromtimestamp(ts/1000, tz=timezone.utc) if ts else None
-
-        if position_qty == 0:
-            # Opening new position
-            position_qty = qty
-            position_cost = quote
-            entry_time = order_time
-            entry_side = side
-        elif entry_side == "BUY" and side == "SELL":
-            # Closing long position
-            pnl = quote - position_cost
-            matched.append({
-                "symbol": symbol,
-                "direction": "LONG",
-                "entry_time": entry_time,
-                "exit_time": order_time,
-                "entry_value": position_cost,
-                "exit_value": quote,
-                "qty": position_qty,
-                "pnl": pnl,
-                "pnl_pct": (pnl / position_cost * 100) if position_cost > 0 else 0
-            })
-            position_qty = 0
-            position_cost = 0
-            entry_time = None
-            entry_side = None
-        elif entry_side == "SELL" and side == "BUY":
-            # Closing short position
-            pnl = position_cost - quote
-            matched.append({
-                "symbol": symbol,
-                "direction": "SHORT",
-                "entry_time": entry_time,
-                "exit_time": order_time,
-                "entry_value": position_cost,
-                "exit_value": quote,
-                "qty": position_qty,
-                "pnl": pnl,
-                "pnl_pct": (pnl / position_cost * 100) if position_cost > 0 else 0
-            })
-            position_qty = 0
-            position_cost = 0
-            entry_time = None
-            entry_side = None
-        else:
-            # Adding to position (same side)
-            position_qty += qty
-            position_cost += quote
-
-    return matched
-
-
-def load_simulation_data(trades_since: datetime = None, start_capital: float = 16500.0, max_positions: int = 10):
-    """Load trades from trading_summary.html and recalculate with proper capital management.
+def generate_dashboard(
+    trades_since: datetime = None,
+    start_capital: float = 16500.0,
+    max_positions: int = 10,
+    lang: str = "en"
+) -> Path:
+    """Generate HTML dashboard from trading_summary.json.
 
     Args:
-        trades_since: Only include trades from this date onwards (by entry_time)
-        start_capital: Starting capital for simulation
-        max_positions: Maximum open positions (stake = capital / max_positions)
-
-    Returns:
-        Tuple of (closed_trades_list, open_positions_list, final_capital)
-    """
-    FEE_RATE = 0.001  # 0.1% per trade (entry + exit)
-
-    closed_trades = []
-    open_positions = []
-    raw_trades = []
-    raw_open_positions = []
-
-    # Load from trading_summary.html
-    summary_path = Path("report_html/trading_summary.html")
-    if not summary_path.exists():
-        print(f"[Warning] trading_summary.html not found at {summary_path}")
-        return closed_trades, open_positions, start_capital
-
-    try:
-        # Read HTML tables using pandas
-        tables = pd.read_html(summary_path, encoding="utf-8")
-
-        # Find the Long Trades table (has columns: symbol, direction, indicator, htf, entry_time, etc.)
-        for df in tables:
-            cols = [str(c).lower() for c in df.columns]
-            if "symbol" in cols and "pnl" in cols and "exit_time" in cols:
-                # This is the trades table
-                for _, row in df.iterrows():
-                    direction = str(row.get("direction", "long")).upper()
-                    # Only include LONG trades
-                    if direction != "LONG":
-                        continue
-
-                    entry_time_str = str(row.get("entry_time", ""))
-                    exit_time_str = str(row.get("exit_time", ""))
-                    if not entry_time_str or entry_time_str == "nan":
-                        continue
-                    if not exit_time_str or exit_time_str == "nan":
-                        continue
-
-                    # Parse entry_time for filtering
-                    try:
-                        entry_time = datetime.fromisoformat(entry_time_str.replace("Z", "+00:00"))
-                        if trades_since and entry_time < trades_since:
-                            continue
-                    except Exception:
-                        continue
-
-                    raw_trades.append({
-                        "symbol": str(row.get("symbol", "?")),
-                        "direction": direction,
-                        "entry_time": entry_time_str,
-                        "entry_time_dt": entry_time,
-                        "exit_time": exit_time_str,
-                        "entry_price": float(row.get("entry_price", 0) or 0),
-                        "exit_price": float(row.get("exit_price", 0) or 0),
-                        "stake": float(row.get("stake", 0) or 0),
-                        "pnl": float(row.get("pnl", 0) or 0),
-                        "reason": str(row.get("reason", "")),
-                    })
-                break
-
-        # Find the Open Positions table
-        for df in tables:
-            cols = [str(c).lower() for c in df.columns]
-            if "symbol" in cols and "unrealized_pnl" in cols and "last_price" in cols:
-                # This is the open positions table
-                for _, row in df.iterrows():
-                    direction = str(row.get("direction", "long")).upper()
-                    # Only include LONG positions
-                    if direction != "LONG":
-                        continue
-
-                    entry_time_str = str(row.get("entry_time", ""))
-                    try:
-                        entry_time = datetime.fromisoformat(entry_time_str.replace("Z", "+00:00"))
-                        if trades_since and entry_time < trades_since:
-                            continue
-                    except Exception:
-                        continue
-
-                    raw_open_positions.append({
-                        "symbol": str(row.get("symbol", "?")),
-                        "direction": direction,
-                        "entry_time": entry_time_str,
-                        "entry_time_dt": entry_time,
-                        "entry_price": float(row.get("entry_price", 0) or 0),
-                        "last_price": float(row.get("last_price", 0) or 0),
-                        "bars_held": int(row.get("bars_held", 0) or 0),
-                    })
-                break
-
-    except Exception as e:
-        print(f"[Warning] Failed to load trading_summary.html: {e}")
-        return closed_trades, open_positions, start_capital
-
-    # Sort raw trades chronologically by entry_time
-    raw_trades.sort(key=lambda x: x["entry_time_dt"])
-
-    # Recalculate trades with proper capital management
-    # First trade: stake = initial_capital / max_positions
-    # All subsequent: stake = current_capital / max_positions
-    capital = start_capital
-    for t in raw_trades:
-        entry_price = t["entry_price"]
-        exit_price = t["exit_price"]
-
-        if entry_price <= 0:
-            continue
-
-        # Calculate stake based on CURRENT capital
-        stake = capital / max_positions
-        amount = stake / entry_price
-
-        # Calculate fees (entry + exit)
-        entry_fee = stake * FEE_RATE
-        exit_value = amount * exit_price
-        exit_fee = exit_value * FEE_RATE
-        total_fees = entry_fee + exit_fee
-
-        # Calculate PnL based on recalculated stake
-        gross_pnl = exit_value - stake
-        pnl = gross_pnl - total_fees
-        pnl_pct = (pnl / stake * 100) if stake > 0 else 0
-
-        # Update capital for next trade
-        capital += pnl
-
-        closed_trades.append({
-            "symbol": t["symbol"],
-            "direction": t["direction"],
-            "entry_time": t["entry_time"],
-            "exit_time": t["exit_time"],
-            "entry_price": entry_price,
-            "exit_price": exit_price,
-            "stake": stake,
-            "amount": amount,
-            "fees": total_fees,
-            "pnl": pnl,
-            "pnl_pct": pnl_pct,
-            "reason": t["reason"],
-        })
-
-    # Fetch live prices for open positions
-    open_symbols = [p["symbol"] for p in raw_open_positions]
-    live_prices = get_all_current_prices(open_symbols) if open_symbols else {}
-    print(f"[Data] Fetched {len(live_prices)} live prices from Binance")
-
-    # Recalculate open positions with current capital and live prices
-    for p in raw_open_positions:
-        entry_price = p["entry_price"]
-        # Always use live price from Binance (no fallback)
-        last_price = live_prices.get(p["symbol"], 0)
-        if last_price <= 0:
-            print(f"[Warning] No live price for {p['symbol']} - skipping position")
-            continue
-
-        if entry_price <= 0:
-            continue
-
-        # Calculate stake based on current capital (after all closed trades)
-        stake = capital / max_positions
-        amount = stake / entry_price
-
-        # Calculate unrealized PnL (only entry fee paid so far)
-        entry_fee = stake * FEE_RATE
-        current_value = amount * last_price
-        unrealized_pnl = current_value - stake - entry_fee
-        unrealized_pct = (unrealized_pnl / stake * 100) if stake > 0 else 0
-
-        open_positions.append({
-            "symbol": p["symbol"],
-            "direction": p["direction"],
-            "entry_time": p["entry_time"],
-            "entry_price": entry_price,
-            "last_price": last_price,
-            "stake": stake,
-            "amount": amount,
-            "fees": entry_fee,
-            "unrealized_pnl": unrealized_pnl,
-            "unrealized_pct": unrealized_pct,
-            "bars_held": p["bars_held"],
-        })
-
-    print(f"[Data] Loaded {len(closed_trades)} closed trades, {len(open_positions)} open positions")
-    print(f"[Data] Capital: {start_capital:,.2f} -> {capital:,.2f} (PnL: {capital - start_capital:,.2f})")
-
-    return closed_trades, open_positions, capital
-
-
-def generate_dashboard(trades_since: datetime = None, start_capital: float = 16500.0, max_positions: int = 10, lang: str = "en"):
-    """Generate HTML dashboard from trading_summary.html with recalculated capital.
-
-    Args:
-        trades_since: Only show trades from this date onwards. If None, uses TRADES_SINCE_DATE.
-        start_capital: Starting capital for simulation
-        max_positions: Maximum open positions
+        trades_since: Only show trades from this date onwards
+        start_capital: Starting capital for display
+        max_positions: Maximum positions for stake calculation
         lang: Language for dashboard ("en" or "de")
     """
-    if trades_since is None:
-        trades_since = TRADES_SINCE_DATE
-    print(f"Loading simulation data (lang={lang})...")
+    print(f"[Dashboard] Loading data (lang={lang})...")
 
-    # Load data from trading_summary.html with recalculated capital
-    closed_trades, open_positions, final_capital = load_simulation_data(
-        trades_since, start_capital, max_positions
-    )
+    # Load trading summary
+    summary = load_trading_summary()
+    if not summary:
+        print("[Dashboard] No trading summary data available")
+        return None
+
+    # Load paper trading state for open positions
+    state = load_paper_trading_state()
+
+    # Get trades from summary
+    all_trades = summary.get("trades", [])
+
+    # Filter trades by date if specified
+    closed_trades = []
+    for t in all_trades:
+        if trades_since:
+            entry_time_str = t.get("entry_time", "")
+            try:
+                entry_time = datetime.fromisoformat(entry_time_str.replace("Z", "+00:00"))
+                if entry_time < trades_since:
+                    continue
+            except:
+                pass
+        closed_trades.append(t)
+
+    # Get open positions from state (more current than summary)
+    state_positions = state.get("positions", [])
+
+    # Fetch live prices for open positions
+    if state_positions:
+        symbols = [p.get("symbol", "") for p in state_positions]
+        live_prices = get_all_current_prices(symbols)
+        print(f"[Dashboard] Fetched {len(live_prices)} live prices")
+    else:
+        live_prices = {}
+
+    # Calculate open positions with live prices and dynamic stake
+    open_positions = []
+    current_capital = state.get("total_capital", start_capital)
+
+    for p in state_positions:
+        symbol = p.get("symbol", "?")
+        entry_price = float(p.get("entry_price", 0) or 0)
+        live_price = live_prices.get(symbol, entry_price)
+
+        # Use dynamic stake based on current capital
+        stake = current_capital / max_positions
+        if entry_price > 0:
+            amount = stake / entry_price
+            current_value = amount * live_price
+            unrealized_pnl = current_value - stake
+            unrealized_pct = (unrealized_pnl / stake * 100) if stake > 0 else 0
+        else:
+            amount = 0
+            unrealized_pnl = 0
+            unrealized_pct = 0
+
+        open_positions.append({
+            "symbol": symbol,
+            "direction": p.get("direction", "long"),
+            "entry_time": p.get("entry_time", "N/A"),
+            "entry_price": entry_price,
+            "last_price": live_price,
+            "stake": stake,
+            "amount": amount,
+            "unrealized_pnl": unrealized_pnl,
+            "unrealized_pct": unrealized_pct,
+        })
 
     # Calculate totals
-    total_realized_pnl = sum(t["pnl"] for t in closed_trades)
     total_closed_trades = len(closed_trades)
+    total_realized_pnl = sum(float(t.get("pnl", 0) or 0) for t in closed_trades)
     total_unrealized_pnl = sum(p["unrealized_pnl"] for p in open_positions)
-    wins = sum(1 for t in closed_trades if t["pnl"] > 0)
+    wins = sum(1 for t in closed_trades if float(t.get("pnl", 0) or 0) > 0)
     win_rate = wins / total_closed_trades * 100 if total_closed_trades > 0 else 0
+    final_capital = current_capital + total_unrealized_pnl
 
-    # Helper function for this dashboard
+    # Helper function
     def fmt(value: float, decimals: int = 2) -> str:
         return format_number(value, decimals, lang)
 
-    # Labels based on language
+    # Labels
     labels = {
         "en": {
             "title": "Paper Trading Dashboard",
@@ -528,14 +239,13 @@ def generate_dashboard(trades_since: datetime = None, start_capital: float = 165
             "last_price": "Last Price",
             "stake": "Stake",
             "amount": "Amount",
-            "fees": "Fees",
             "pnl": "PnL",
             "pnl_pct": "PnL %",
             "reason": "Reason",
             "no_positions": "No open positions",
             "no_trades": "No closed trades",
             "generated": "Generated",
-            "data_source": "Data from trading_summary.html (Long only, recalculated)",
+            "data_source": "Data from trading_summary.json + paper_trading_state.json",
         },
         "de": {
             "title": "Paper Trading Dashboard",
@@ -555,14 +265,13 @@ def generate_dashboard(trades_since: datetime = None, start_capital: float = 165
             "last_price": "Aktueller Preis",
             "stake": "Einsatz",
             "amount": "Menge",
-            "fees": "Gebühren",
             "pnl": "PnL",
             "pnl_pct": "PnL %",
             "reason": "Grund",
             "no_positions": "Keine offenen Positionen",
             "no_trades": "Keine geschlossenen Trades",
             "generated": "Erstellt",
-            "data_source": "Daten aus trading_summary.html (Nur Long, neu berechnet)",
+            "data_source": "Daten aus trading_summary.json + paper_trading_state.json",
         },
     }
     L = labels.get(lang, labels["en"])
@@ -591,7 +300,6 @@ def generate_dashboard(trades_since: datetime = None, start_capital: float = 165
         .summary-box .value {{ font-size: 20px; font-weight: bold; }}
         .long-header {{ background: #28a745 !important; }}
         .timestamp {{ color: #666; font-size: 12px; margin-top: 20px; }}
-        .section {{ margin-bottom: 30px; }}
     </style>
 </head>
 <body>
@@ -632,58 +340,57 @@ def generate_dashboard(trades_since: datetime = None, start_capital: float = 165
 
     <h2>{L['open_positions']} ({len(open_positions)})</h2>
     <table>
-        <tr><th>{L['symbol']}</th><th>{L['entry_time']}</th><th>{L['entry_price']}</th><th>{L['last_price']}</th><th>{L['stake']}</th><th>{L['amount']}</th><th>{L['fees']}</th><th>{L['unrealized_pnl']}</th><th>{L['pnl_pct']}</th></tr>
+        <tr><th>{L['symbol']}</th><th>{L['entry_time']}</th><th>{L['entry_price']}</th><th>{L['last_price']}</th><th>{L['stake']}</th><th>{L['amount']}</th><th>{L['unrealized_pnl']}</th><th>{L['pnl_pct']}</th></tr>
 """
     if open_positions:
         for pos in open_positions:
             pnl_class = "positive" if pos["unrealized_pnl"] >= 0 else "negative"
-            entry_time = pos.get("entry_time", "N/A")
             pct_sign = "+" if pos["unrealized_pct"] >= 0 else ""
             html += f"""        <tr>
             <td>{pos['symbol']}</td>
-            <td>{entry_time}</td>
+            <td>{pos['entry_time']}</td>
             <td>{fmt(pos['entry_price'], 8)}</td>
             <td>{fmt(pos['last_price'], 8)}</td>
             <td>{fmt(pos['stake'])}</td>
             <td>{fmt(pos['amount'], 6)}</td>
-            <td>{fmt(pos['fees'])}</td>
             <td class="{pnl_class}">{fmt(pos['unrealized_pnl'])}</td>
             <td class="{pnl_class}">{pct_sign}{fmt(pos['unrealized_pct'])}%</td>
         </tr>\n"""
     else:
-        html += f"        <tr><td colspan='9'>{L['no_positions']}</td></tr>\n"
+        html += f"        <tr><td colspan='8'>{L['no_positions']}</td></tr>\n"
 
-    # Closed Trades section (Long only) - newest first
+    # Closed Trades section - newest first
     html += f"""    </table>
 
-    <div class="section">
     <h2>{L['closed_trades']} ({total_closed_trades}, PnL: <span class="{'positive' if total_realized_pnl >= 0 else 'negative'}">{fmt(total_realized_pnl)}</span>)</h2>
     <table>
-        <tr class="long-header"><th>{L['symbol']}</th><th>{L['entry_time']}</th><th>{L['exit_time']}</th><th>{L['entry_price']}</th><th>{L['exit_price']}</th><th>{L['stake']}</th><th>{L['amount']}</th><th>{L['fees']}</th><th>{L['pnl']}</th><th>{L['pnl_pct']}</th><th>{L['reason']}</th></tr>
+        <tr class="long-header"><th>{L['symbol']}</th><th>{L['entry_time']}</th><th>{L['exit_time']}</th><th>{L['entry_price']}</th><th>{L['exit_price']}</th><th>{L['stake']}</th><th>{L['pnl']}</th><th>{L['pnl_pct']}</th><th>{L['reason']}</th></tr>
 """
     if closed_trades:
-        for t in reversed(closed_trades):  # Newest first
-            pnl_class = "positive" if t["pnl"] >= 0 else "negative"
-            pct_sign = "+" if t["pnl_pct"] >= 0 else ""
+        # Sort by entry_time descending (newest first)
+        sorted_trades = sorted(closed_trades, key=lambda t: t.get("entry_time", ""), reverse=True)
+        for t in sorted_trades[:100]:  # Show max 100 trades
+            pnl = float(t.get("pnl", 0) or 0)
+            stake = float(t.get("stake", 0) or 0)
+            pnl_pct = (pnl / stake * 100) if stake > 0 else 0
+            pnl_class = "positive" if pnl >= 0 else "negative"
+            pct_sign = "+" if pnl_pct >= 0 else ""
             html += f"""        <tr>
-            <td>{t['symbol']}</td>
-            <td>{t['entry_time']}</td>
-            <td>{t['exit_time']}</td>
-            <td>{fmt(t['entry_price'], 8)}</td>
-            <td>{fmt(t['exit_price'], 8)}</td>
-            <td>{fmt(t['stake'])}</td>
-            <td>{fmt(t['amount'], 6)}</td>
-            <td>{fmt(t['fees'])}</td>
-            <td class="{pnl_class}">{fmt(t['pnl'])}</td>
-            <td class="{pnl_class}">{pct_sign}{fmt(t['pnl_pct'])}%</td>
-            <td>{t['reason']}</td>
+            <td>{t.get('symbol', '?')}</td>
+            <td>{t.get('entry_time', 'N/A')}</td>
+            <td>{t.get('exit_time', 'N/A')}</td>
+            <td>{fmt(float(t.get('entry_price', 0) or 0), 8)}</td>
+            <td>{fmt(float(t.get('exit_price', 0) or 0), 8)}</td>
+            <td>{fmt(stake)}</td>
+            <td class="{pnl_class}">{fmt(pnl)}</td>
+            <td class="{pnl_class}">{pct_sign}{fmt(pnl_pct)}%</td>
+            <td>{t.get('reason', '')}</td>
         </tr>\n"""
     else:
-        html += f"        <tr><td colspan='11'>{L['no_trades']}</td></tr>\n"
+        html += f"        <tr><td colspan='9'>{L['no_trades']}</td></tr>\n"
 
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     html += f"""    </table>
-    </div>
 
     <p class="timestamp">{L['generated']}: {timestamp} | {L['data_source']}</p>
 </div>
@@ -695,238 +402,64 @@ def generate_dashboard(trades_since: datetime = None, start_capital: float = 165
     suffix = "_de" if lang == "de" else ""
     output_path = OUTPUT_DIR / f"dashboard{suffix}.html"
     output_path.write_text(html, encoding="utf-8")
-    print(f"Dashboard ({lang}) saved to: {output_path}")
+    print(f"[Dashboard] Saved to: {output_path}")
     return output_path
 
 
-def run_backfill_simulation(trades_since: datetime = None, start_capital: float = 16500.0, max_positions: int = 10) -> bool:
-    """Run backfill simulation to fill gaps since last processed time.
-
-    Args:
-        trades_since: Filter trades from this date onwards
-        start_capital: Starting capital for simulation (default: 16500)
-        max_positions: Maximum open positions (default: 10)
-
-    Returns True if backfill was performed, False otherwise.
-    """
-    if not BACKFILL_AVAILABLE:
-        print("[Backfill] Not available - paper_trader import failed")
-        return False
-
-    # Set global variables in paper_trader module
-    pt.START_TOTAL_CAPITAL = start_capital
-    pt.MAX_OPEN_POSITIONS = max_positions
-
-    last_ts = get_last_processed_timestamp()
-    now_ts = pd.Timestamp.now(tz=st.BERLIN_TZ)
-
-    if last_ts is None:
-        print("[Backfill] No previous state found - skipping")
-        return False
-
-    gap_hours = (now_ts - last_ts).total_seconds() / 3600
-    if gap_hours <= 1:
-        print(f"[Backfill] Gap is only {gap_hours:.1f} hours - skipping")
-        return False
-
-    print(f"[Backfill] Detected gap of {gap_hours:.1f} hours since {last_ts.strftime('%Y-%m-%d %H:%M')}")
-    print(f"[Backfill] Running simulation (capital={start_capital}, max_pos={max_positions})...")
-
-    try:
-        backfill_trades, backfill_state = run_simulation(
-            last_ts,
-            now_ts,
-            use_saved_state=True,
-            emit_entry_log=False,
-            allowed_symbols=None,
-            allowed_indicators=None,
-            fixed_stake=None,
-            use_testnet=True,
-            refresh_params=False,
-            reset_state=False,
-            clear_outputs=False,
-        )
-        print(f"[Backfill] Completed: {len(backfill_trades)} trades simulated")
-
-        # Write results to logs
-        if backfill_trades:
-            trades_df = trades_to_dataframe(backfill_trades)
-            write_closed_trades_report(trades_df, SIMULATION_LOG_FILE, SIMULATION_LOG_JSON)
-
-        open_positions = backfill_state.get("positions", [])
-        write_open_positions_report(open_positions, SIMULATION_OPEN_POSITIONS_FILE, SIMULATION_OPEN_POSITIONS_JSON)
-
-        # Load EXISTING trades from trading_summary.html first (preserve history)
-        summary_path = OUTPUT_DIR / "trading_summary.html"
-        existing_trades_df = pd.DataFrame()
-        if summary_path.exists():
-            try:
-                tables = pd.read_html(str(summary_path), encoding="utf-8")
-                for tbl in tables:
-                    cols = [str(c).lower() for c in tbl.columns]
-                    if "symbol" in cols and "pnl" in cols and "exit_time" in cols:
-                        existing_trades_df = tbl
-                        print(f"[Backfill] Loaded {len(existing_trades_df)} existing trades from {summary_path}")
-                        break
-            except Exception as e:
-                print(f"[Backfill] Could not load existing trades: {e}")
-
-        # Convert backfill trades to DataFrame and append to existing
-        if backfill_trades:
-            new_trades_df = trades_to_dataframe(backfill_trades)
-            if not existing_trades_df.empty:
-                # Merge: existing + new (avoid duplicates by entry_time + symbol)
-                all_trades_df = pd.concat([existing_trades_df, new_trades_df], ignore_index=True)
-                # Remove duplicates based on symbol + entry_time
-                if 'symbol' in all_trades_df.columns and 'entry_time' in all_trades_df.columns:
-                    all_trades_df = all_trades_df.drop_duplicates(
-                        subset=['symbol', 'entry_time'], keep='last'
-                    )
-                print(f"[Backfill] Merged to {len(all_trades_df)} total trades")
-            else:
-                all_trades_df = new_trades_df
-        else:
-            all_trades_df = existing_trades_df if not existing_trades_df.empty else pd.DataFrame()
-
-        open_df = open_positions_to_dataframe(open_positions)
-        start_ts, end_ts = _derive_summary_window(all_trades_df)
-        summary = build_summary_payload(all_trades_df, open_df, backfill_state, start_ts, end_ts)
-
-        # Ensure output directory exists
-        OUTPUT_DIR.mkdir(exist_ok=True)
-        summary_html_path = OUTPUT_DIR / "trading_summary.html"
-        summary_json_path = OUTPUT_DIR / "trading_summary.json"
-        generate_summary_html(summary, all_trades_df, open_df, str(summary_html_path))
-        write_summary_json(summary, str(summary_json_path))
-        print(f"[Backfill] Generated {summary_html_path}")
-
-        return True
-    except Exception as e:
-        print(f"[Backfill] Error: {e}")
-        return False
-
-
-def git_auto_push(files: list = None) -> bool:
-    """Commit and push changes to git repository.
-
-    Args:
-        files: List of files to add. If None, adds report_html/*.html
-
-    Returns:
-        True if push was successful, False otherwise.
-    """
-    import subprocess
-
-    if files is None:
-        files = [
-            "report_html/trading_summary.html",
-            "report_html/trading_summary.json",
-            "report_html/dashboard.html",
-            "report_html/dashboard_de.html",
-        ]
-
-    try:
-        # Check if there are changes to commit
-        result = subprocess.run(
-            ["git", "status", "--porcelain"] + files,
-            capture_output=True, text=True, timeout=30
-        )
-        if not result.stdout.strip():
-            print("[Git] No changes to push")
-            return True
-
-        # Add files
-        subprocess.run(["git", "add", "-f"] + files, check=True, timeout=30)
-
-        # Commit
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
-        subprocess.run(
-            ["git", "commit", "-m", f"Auto-update trading data {timestamp}"],
-            check=True, timeout=30
-        )
-
-        # Push
-        result = subprocess.run(
-            ["git", "push"],
-            capture_output=True, text=True, timeout=60
-        )
-        if result.returncode != 0:
-            print(f"[Git] Push failed: {result.stderr}")
-            return False
-
-        print(f"[Git] Successfully pushed updates")
-        return True
-
-    except subprocess.TimeoutExpired:
-        print("[Git] Operation timed out")
-        return False
-    except subprocess.CalledProcessError as e:
-        print(f"[Git] Error: {e}")
-        return False
-    except Exception as e:
-        print(f"[Git] Unexpected error: {e}")
-        return False
-
-
 def parse_args():
-    parser = argparse.ArgumentParser(description="Generate HTML dashboard for Binance Testnet trading")
-    parser.add_argument("--start", type=str, default=None,
-                        help="Only show trades from this date onwards (YYYY-MM-DD)")
-    parser.add_argument("--loop", action="store_true",
-                        help="Run continuously in a loop")
-    parser.add_argument("--interval", type=int, default=60,
-                        help="Refresh interval in seconds when using --loop (default: 60)")
-    parser.add_argument("--start-capital", type=float, default=16500.0,
-                        help="Starting capital for backfill simulation (default: 16500)")
-    parser.add_argument("--max-positions", type=int, default=10,
-                        help="Maximum open positions for backfill simulation (default: 10)")
-    parser.add_argument("--auto-push", action="store_true",
-                        help="Automatically commit and push changes to git after each update")
+    parser = argparse.ArgumentParser(
+        description="TestnetDashboard - READ-ONLY Dashboard für Paper Trading"
+    )
+    parser.add_argument(
+        "--start", type=str, default=None,
+        help="Only show trades from this date onwards (YYYY-MM-DD)"
+    )
+    parser.add_argument(
+        "--loop", action="store_true",
+        help="Run continuously in a loop"
+    )
+    parser.add_argument(
+        "--interval", type=int, default=60,
+        help="Refresh interval in seconds when using --loop (default: 60)"
+    )
+    parser.add_argument(
+        "--start-capital", type=float, default=16500.0,
+        help="Starting capital for display (default: 16500)"
+    )
+    parser.add_argument(
+        "--max-positions", type=int, default=10,
+        help="Maximum open positions for stake calculation (default: 10)"
+    )
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
 
-    if not API_KEY or not API_SECRET:
-        print("Error: BINANCE_API_KEY_TEST or BINANCE_API_SECRET_TEST not set")
-    else:
-        # Parse --start date if provided
-        trades_since = None
-        if args.start:
-            try:
-                trades_since = datetime.strptime(args.start, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-                print(f"Filtering trades since: {trades_since.strftime('%Y-%m-%d')}")
-            except ValueError:
-                print(f"Warning: Invalid date format '{args.start}', using default. Use YYYY-MM-DD.")
+    # Parse --start date if provided
+    trades_since = None
+    if args.start:
+        try:
+            trades_since = datetime.strptime(args.start, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            print(f"[Config] Filtering trades since: {trades_since.strftime('%Y-%m-%d')}")
+        except ValueError:
+            print(f"[Warning] Invalid date format '{args.start}', showing all trades. Use YYYY-MM-DD.")
 
-        if args.loop:
-            print(f"Running in loop mode, refreshing every {args.interval} seconds. Press Ctrl+C to stop.")
-            print(f"[Config] Start capital: {args.start_capital}, Max positions: {args.max_positions}")
-            if args.auto_push:
-                print("[Config] Auto-push enabled - will commit and push after each update")
-            try:
-                while True:
-                    # Run backfill simulation on every refresh to get latest trades
-                    run_backfill_simulation(trades_since, args.start_capital, args.max_positions)
-                    # Generate both English and German dashboards
-                    path_en = generate_dashboard(trades_since, args.start_capital, args.max_positions, lang="en")
-                    path_de = generate_dashboard(trades_since, args.start_capital, args.max_positions, lang="de")
-                    print(f"[{datetime.now().strftime('%H:%M:%S')}] Dashboards updated: {path_en}, {path_de}")
-                    # Auto-push if enabled
-                    if args.auto_push:
-                        git_auto_push()
-                    time.sleep(args.interval)
-            except KeyboardInterrupt:
-                print("\nStopped.")
-        else:
-            # Run backfill simulation to get latest trades
-            run_backfill_simulation(trades_since, args.start_capital, args.max_positions)
-            # Generate both English and German dashboards
-            path_en = generate_dashboard(trades_since, args.start_capital, args.max_positions, lang="en")
-            path_de = generate_dashboard(trades_since, args.start_capital, args.max_positions, lang="de")
-            # Auto-push if enabled
-            if args.auto_push:
-                git_auto_push()
+    print(f"[Config] Start capital: {args.start_capital}, Max positions: {args.max_positions}")
+
+    if args.loop:
+        print(f"[Config] Running in loop mode, refreshing every {args.interval} seconds. Press Ctrl+C to stop.")
+        try:
+            while True:
+                path_en = generate_dashboard(trades_since, args.start_capital, args.max_positions, lang="en")
+                path_de = generate_dashboard(trades_since, args.start_capital, args.max_positions, lang="de")
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] Dashboards updated")
+                time.sleep(args.interval)
+        except KeyboardInterrupt:
+            print("\nStopped.")
+    else:
+        path_en = generate_dashboard(trades_since, args.start_capital, args.max_positions, lang="en")
+        path_de = generate_dashboard(trades_since, args.start_capital, args.max_positions, lang="de")
+        if path_en:
             print(f"\nOpen with: start {path_en}")
             print(f"           start {path_de}")
