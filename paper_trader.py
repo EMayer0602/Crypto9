@@ -3965,11 +3965,10 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
         configure_exchange_flag = False
 
     if args.simulate:
-      first_run = True
       existing_trades_df = None
       last_end_ts = None
 
-      # ALWAYS load existing trades on startup (not just on loop iterations)
+      # Check if existing trades file has data - if yes, append; if no, start fresh from 2024-01-01
       summary_path = args.summary_json or SIMULATION_SUMMARY_JSON
       if os.path.exists(summary_path):
           try:
@@ -3981,10 +3980,14 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
                   last_exit = max(t.get("exit_time", "") for t in existing_trades if t.get("exit_time"))
                   if last_exit:
                       last_end_ts = pd.to_datetime(last_exit)
-                  print(f"[Simulation] Loaded {len(existing_trades)} existing trades from {summary_path}")
-                  print(f"[Simulation] Last trade exit: {last_end_ts}")
+                      if last_end_ts.tzinfo is None:
+                          last_end_ts = last_end_ts.tz_localize(st.BERLIN_TZ)
+                  print(f"[Simulation] Found {len(existing_trades)} existing trades in {summary_path}")
+                  print(f"[Simulation] Will append from: {last_end_ts}")
+              else:
+                  print(f"[Simulation] File {summary_path} exists but has no trades - starting fresh")
           except Exception as e:
-              print(f"[Simulation] Could not load existing trades: {e}")
+              print(f"[Simulation] Could not load existing trades: {e} - starting fresh")
 
       while True:  # Loop for --loop mode
         if args.loop:
@@ -4047,13 +4050,19 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
             default_end = cache_end if cache_end else pd.Timestamp.now(tz=st.BERLIN_TZ)
             end_ts = resolve_timestamp(args.end, default_end)
 
-            # On subsequent loop runs, start from last processed time
-            if args.loop and last_end_ts is not None:
+            # Determine start time:
+            # - If existing trades: continue from last trade exit (append mode)
+            # - If no existing trades: start from 2024-01-01 (fresh start)
+            if last_end_ts is not None:
                 start_ts = last_end_ts
-                print(f"[Simulation] Incremental update from {start_ts.strftime('%Y-%m-%d %H:%M')}")
+                print(f"[Simulation] Appending from last trade: {start_ts.strftime('%Y-%m-%d %H:%M')}")
+            elif args.start:
+                start_ts = resolve_timestamp(args.start, None)
+                print(f"[Simulation] Using provided start: {start_ts.strftime('%Y-%m-%d %H:%M')}")
             else:
-                default_start = end_ts - pd.Timedelta(days=1)
-                start_ts = resolve_timestamp(args.start, default_start)
+                # No existing trades and no --start provided: default to 2024-01-01
+                start_ts = pd.Timestamp("2024-01-01", tz=st.BERLIN_TZ)
+                print(f"[Simulation] Fresh start from: {start_ts.strftime('%Y-%m-%d %H:%M')}")
 
             print(f"[Simulation] Period: {start_ts.strftime('%Y-%m-%d %H:%M')} to {end_ts.strftime('%Y-%m-%d %H:%M')}")
             trades, final_state = run_simulation(
@@ -4203,7 +4212,7 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
 
         # Loop mode: sleep and repeat
         if args.loop:
-            first_run = False
+            # Update for next iteration
             last_end_ts = end_ts
             existing_trades_df = trades_df.copy() if not trades_df.empty else None
             print(f"\n[Loop] Next refresh in {args.signal_interval:.0f} minutes. Press Ctrl+C to stop.")
