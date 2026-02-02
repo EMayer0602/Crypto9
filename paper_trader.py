@@ -3969,29 +3969,28 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
       existing_trades_df = None
       last_end_ts = None
 
+      # ALWAYS load existing trades on startup (not just on loop iterations)
+      summary_path = args.summary_json or SIMULATION_SUMMARY_JSON
+      if os.path.exists(summary_path):
+          try:
+              with open(summary_path, "r", encoding="utf-8") as f:
+                  existing_summary = json.load(f)
+              existing_trades = existing_summary.get("trades", [])
+              if existing_trades:
+                  existing_trades_df = pd.DataFrame(existing_trades)
+                  last_exit = max(t.get("exit_time", "") for t in existing_trades if t.get("exit_time"))
+                  if last_exit:
+                      last_end_ts = pd.to_datetime(last_exit)
+                  print(f"[Simulation] Loaded {len(existing_trades)} existing trades from {summary_path}")
+                  print(f"[Simulation] Last trade exit: {last_end_ts}")
+          except Exception as e:
+              print(f"[Simulation] Could not load existing trades: {e}")
+
       while True:  # Loop for --loop mode
         if args.loop:
             print(f"\n{'='*60}")
             print(f"[Loop] Running at {pd.Timestamp.now(tz=st.BERLIN_TZ).strftime('%Y-%m-%d %H:%M:%S')}")
             print(f"{'='*60}")
-
-            # On subsequent runs, load existing trades and continue from last end
-            if not first_run:
-                try:
-                    summary_path = args.summary_json or SIMULATION_SUMMARY_JSON
-                    if os.path.exists(summary_path):
-                        with open(summary_path, "r", encoding="utf-8") as f:
-                            existing_summary = json.load(f)
-                        existing_trades = existing_summary.get("trades", [])
-                        if existing_trades:
-                            existing_trades_df = pd.DataFrame(existing_trades)
-                            # Get last trade exit time as new start
-                            last_exit = max(t.get("exit_time", "") for t in existing_trades if t.get("exit_time"))
-                            if last_exit:
-                                last_end_ts = pd.to_datetime(last_exit)
-                                print(f"[Loop] Continuing from last trade: {last_end_ts}")
-                except Exception as e:
-                    print(f"[Loop] Could not load existing trades: {e}")
 
         trades: List[TradeResult] = []
         open_positions: List[Dict[str, Any]] = []
@@ -4073,17 +4072,20 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
             trades_df = trades_to_dataframe(trades)
             open_positions = final_state.get("positions", [])
 
-            # Merge with existing trades on subsequent loop runs
-            if args.loop and existing_trades_df is not None and not existing_trades_df.empty:
+            # ALWAYS merge with existing trades (append mode)
+            if existing_trades_df is not None and not existing_trades_df.empty:
                 if not trades_df.empty:
-                    print(f"[Loop] Merging {len(trades_df)} new trades with {len(existing_trades_df)} existing")
+                    print(f"[Simulation] Merging {len(trades_df)} new trades with {len(existing_trades_df)} existing")
                     trades_df = pd.concat([existing_trades_df, trades_df], ignore_index=True)
                     # Remove duplicates based on symbol + entry_time
                     if "symbol" in trades_df.columns and "entry_time" in trades_df.columns:
+                        before_dedup = len(trades_df)
                         trades_df = trades_df.drop_duplicates(subset=["symbol", "entry_time"], keep="last")
+                        if before_dedup != len(trades_df):
+                            print(f"[Simulation] Removed {before_dedup - len(trades_df)} duplicate trades")
                 else:
                     trades_df = existing_trades_df
-                print(f"[Loop] Total trades after merge: {len(trades_df)}")
+                print(f"[Simulation] Total trades after merge: {len(trades_df)}")
 
             # Force close all open positions at simulation end if requested
             if args.close_at_end and open_positions:
