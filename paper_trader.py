@@ -3270,8 +3270,9 @@ def write_live_reports(final_state: Dict, closed_trades: List[TradeResult]) -> N
     if _TESTNET_ACTIVE:
         try:
             from TestnetDashboard import generate_dashboard
-            generate_dashboard()
-            print("[Dashboard] Testnet dashboard updated")
+            generate_dashboard(output_dir="report_testnet")
+            generate_dashboard(output_dir="report_testnet", lang="de")
+            print("[Dashboard] Testnet dashboard updated (EN + DE)")
         except Exception as e:
             print(f"[Dashboard] Failed to update: {e}")
 

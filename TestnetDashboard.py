@@ -24,12 +24,12 @@ load_dotenv()
 # Binance API for live prices (real, not testnet)
 BINANCE_PUBLIC_URL = "https://api.binance.com"
 
-# Input files (READ ONLY)
-TRADING_SUMMARY_JSON = Path("report_html/trading_summary.json")
+# Default input files (READ ONLY)
+DEFAULT_TRADING_SUMMARY_JSON = Path("report_html/trading_summary.json")
 PAPER_TRADING_STATE = Path("paper_trading_state.json")
 
-# Output directory for dashboards
-OUTPUT_DIR = Path("report_html")
+# Default output directory for dashboards
+DEFAULT_OUTPUT_DIR = Path("report_html")
 
 
 def format_number(value: float, decimals: int = 2, lang: str = "en") -> str:
@@ -94,17 +94,20 @@ def get_all_current_prices(symbols: list) -> dict:
     return prices
 
 
-def load_trading_summary() -> dict:
+def load_trading_summary(summary_path: Path = None) -> dict:
     """Load trading summary from JSON file."""
-    if not TRADING_SUMMARY_JSON.exists():
-        print(f"[Warning] {TRADING_SUMMARY_JSON} not found")
+    if summary_path is None:
+        summary_path = DEFAULT_TRADING_SUMMARY_JSON
+
+    if not summary_path.exists():
+        print(f"[Warning] {summary_path} not found")
         return {}
 
     try:
-        with open(TRADING_SUMMARY_JSON, "r", encoding="utf-8") as f:
+        with open(summary_path, "r", encoding="utf-8") as f:
             return json.load(f)
     except Exception as e:
-        print(f"[Error] Failed to load {TRADING_SUMMARY_JSON}: {e}")
+        print(f"[Error] Failed to load {summary_path}: {e}")
         return {}
 
 
@@ -126,7 +129,8 @@ def generate_dashboard(
     trades_since: datetime = None,
     start_capital: float = 16500.0,
     max_positions: int = 10,
-    lang: str = "en"
+    lang: str = "en",
+    output_dir: Path = None
 ) -> Path:
     """Generate HTML dashboard from trading_summary.json.
 
@@ -135,11 +139,21 @@ def generate_dashboard(
         start_capital: Starting capital for display
         max_positions: Maximum positions for stake calculation
         lang: Language for dashboard ("en" or "de")
+        output_dir: Output directory for dashboard files (default: report_html)
     """
-    print(f"[Dashboard] Loading data (lang={lang})...")
+    # Use defaults if not specified
+    if output_dir is None:
+        output_dir = DEFAULT_OUTPUT_DIR
+    else:
+        output_dir = Path(output_dir)
+
+    # Input summary JSON is in the same directory as output
+    trading_summary_json = output_dir / "trading_summary.json"
+
+    print(f"[Dashboard] Loading data (lang={lang}, dir={output_dir})...")
 
     # Load trading summary
-    summary = load_trading_summary()
+    summary = load_trading_summary(trading_summary_json)
     if not summary:
         print("[Dashboard] No trading summary data available")
         return None
@@ -398,9 +412,9 @@ def generate_dashboard(
 </html>"""
 
     # Write to file
-    OUTPUT_DIR.mkdir(exist_ok=True)
+    output_dir.mkdir(exist_ok=True)
     suffix = "_de" if lang == "de" else ""
-    output_path = OUTPUT_DIR / f"dashboard{suffix}.html"
+    output_path = output_dir / f"dashboard{suffix}.html"
     output_path.write_text(html, encoding="utf-8")
     print(f"[Dashboard] Saved to: {output_path}")
     return output_path
