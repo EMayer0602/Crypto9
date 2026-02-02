@@ -2275,12 +2275,35 @@ def build_summary_payload(
     # Per-symbol statistics
     symbol_stats = calc_symbol_stats(trades_df)
 
+    # Convert trades DataFrame to list of dicts for JSON export
+    trades_list = []
+    if not trades_df.empty:
+        # Convert timestamps to ISO strings for JSON serialization
+        trades_export = trades_df.copy()
+        for col in trades_export.columns:
+            if pd.api.types.is_datetime64_any_dtype(trades_export[col]):
+                trades_export[col] = trades_export[col].apply(
+                    lambda x: x.isoformat() if pd.notna(x) else None
+                )
+        trades_list = trades_export.to_dict(orient="records")
+
+    # Convert open positions DataFrame to list of dicts
+    open_positions_list = []
+    if not open_positions_df.empty:
+        positions_export = open_positions_df.copy()
+        for col in positions_export.columns:
+            if pd.api.types.is_datetime64_any_dtype(positions_export[col]):
+                positions_export[col] = positions_export[col].apply(
+                    lambda x: x.isoformat() if pd.notna(x) else None
+                )
+        open_positions_list = positions_export.to_dict(orient="records")
+
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "start": start_ts.isoformat(),
         "end": end_ts.isoformat(),
         "closed_trades": int(total_trades),
-        "open_positions": int(open_count),
+        "open_positions_count": int(open_count),
         "closed_pnl": round(pnl_sum, 6),
         "avg_trade_pnl": round(avg_pnl, 6),
         "win_rate_pct": round(win_rate, 4),
@@ -2293,6 +2316,8 @@ def build_summary_payload(
         **long_open_stats,
         **short_open_stats,
         "symbol_stats": symbol_stats,
+        "trades": trades_list,
+        "open_positions": open_positions_list,
     }
 
 
