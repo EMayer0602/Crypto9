@@ -2527,6 +2527,100 @@ def write_summary_json(summary: Dict[str, Any], path: str) -> None:
     print(f"[Simulation] Summary JSON saved to {path}")
 
 
+def generate_testnet_dashboard(
+    trades_df: pd.DataFrame,
+    open_positions: List[Dict[str, Any]],
+    final_state: Dict[str, Any],
+    dashboard_start: pd.Timestamp,
+    output_dir: str = "report_testnet",
+) -> None:
+    """Generate testnet dashboard HTML files (English and German)."""
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Filter trades from dashboard_start onwards
+    filtered_trades = []
+    if trades_df is not None and not trades_df.empty:
+        for _, row in trades_df.iterrows():
+            entry_time = row.get("entry_time")
+            if entry_time is not None:
+                try:
+                    entry_ts = pd.to_datetime(entry_time) if isinstance(entry_time, str) else entry_time
+                    if entry_ts >= dashboard_start:
+                        filtered_trades.append(row.to_dict())
+                except Exception:
+                    pass
+
+    # Fetch live prices
+    live_prices = {}
+    if open_positions:
+        for sym in set(p.get("symbol", "") for p in open_positions):
+            try:
+                binance_sym = sym.replace("/", "")
+                for s in [binance_sym, binance_sym.replace("USDC", "USDT")]:
+                    resp = requests.get(f"https://api.binance.com/api/v3/ticker/price?symbol={s}", timeout=5)
+                    if resp.status_code == 200:
+                        live_prices[sym] = float(resp.json().get("price", 0))
+                        break
+            except Exception:
+                pass
+
+    current_capital = final_state.get("total_capital", START_TOTAL_CAPITAL)
+
+    # Calculate totals
+    total_realized = sum(float(t.get("pnl", 0) or 0) for t in filtered_trades)
+    total_unrealized = 0
+    open_display = []
+    for p in open_positions:
+        entry = float(p.get("entry_price", 0) or 0)
+        live = live_prices.get(p.get("symbol", ""), entry)
+        stake = float(p.get("stake", current_capital / 10) or current_capital / 10)
+        if entry > 0:
+            pnl = (live - entry) / entry * stake
+        else:
+            pnl = 0
+        total_unrealized += pnl
+        open_display.append({**p, "last_price": live, "unrealized_pnl": pnl})
+
+    wins = sum(1 for t in filtered_trades if float(t.get("pnl", 0) or 0) > 0)
+    win_rate = wins / len(filtered_trades) * 100 if filtered_trades else 0
+
+    for lang in ["en", "de"]:
+        def fmt(v, d=2):
+            if pd.isna(v): return "N/A"
+            s = f"{v:,.{d}f}"
+            return s.replace(",", "X").replace(".", ",").replace("X", ".") if lang == "de" else s
+
+        L = {"title": "Paper Trading Dashboard", "since": dashboard_start.strftime('%Y-%m-%d')}
+        html = f"""<!DOCTYPE html><html><head><meta charset="utf-8"><title>{L['title']}</title>
+<meta http-equiv="refresh" content="60">
+<style>body{{font-family:Arial;margin:20px;background:#f5f5f5}}.box{{display:inline-block;background:white;padding:15px;margin:8px;border-radius:5px;box-shadow:0 1px 3px rgba(0,0,0,.1);min-width:130px;text-align:center}}.box h3{{margin:0 0 8px;color:#666;font-size:12px}}.box .v{{font-size:20px;font-weight:bold}}.pos{{color:green}}.neg{{color:red}}table{{border-collapse:collapse;width:100%;margin:10px 0;background:white}}th,td{{border:1px solid #ddd;padding:6px;text-align:right}}th{{background:#007bff;color:white}}</style></head>
+<body><h1>{L['title']}</h1><p>Since: {L['since']} | Capital: {fmt(START_TOTAL_CAPITAL)}</p>
+<div class="boxes">
+<div class="box"><h3>{"Kapital" if lang=="de" else "Capital"}</h3><div class="v {'pos' if current_capital >= START_TOTAL_CAPITAL else 'neg'}">{fmt(current_capital)}</div></div>
+<div class="box"><h3>Trades</h3><div class="v">{len(filtered_trades)}</div></div>
+<div class="box"><h3>{"Realisiert" if lang=="de" else "Realized"}</h3><div class="v {'pos' if total_realized >= 0 else 'neg'}">{fmt(total_realized)}</div></div>
+<div class="box"><h3>Win%</h3><div class="v">{fmt(win_rate,1)}%</div></div>
+<div class="box"><h3>{"Offen" if lang=="de" else "Open"}</h3><div class="v">{len(open_positions)}</div></div>
+<div class="box"><h3>{"Unrealisiert" if lang=="de" else "Unrealized"}</h3><div class="v {'pos' if total_unrealized >= 0 else 'neg'}">{fmt(total_unrealized)}</div></div>
+</div>
+<h2>{"Offene Positionen" if lang=="de" else "Open Positions"} ({len(open_positions)})</h2>
+<table><tr><th>Symbol</th><th>Entry</th><th>{"Preis" if lang=="de" else "Price"}</th><th>{"Aktuell" if lang=="de" else "Last"}</th><th>PnL</th></tr>"""
+        for p in open_display:
+            pnl = p.get("unrealized_pnl", 0)
+            html += f"<tr><td>{p.get('symbol','?')}</td><td>{p.get('entry_time','')[:16]}</td><td>{fmt(float(p.get('entry_price',0)),6)}</td><td>{fmt(p.get('last_price',0),6)}</td><td class='{'pos' if pnl>=0 else 'neg'}'>{fmt(pnl)}</td></tr>"
+        html += f"</table><h2>Trades ({len(filtered_trades)})</h2><table><tr><th>Symbol</th><th>Entry</th><th>Exit</th><th>PnL</th><th>{'Grund' if lang=='de' else 'Reason'}</th></tr>"
+        for t in sorted(filtered_trades, key=lambda x: x.get("entry_time",""), reverse=True)[:50]:
+            pnl = float(t.get("pnl", 0) or 0)
+            html += f"<tr><td>{t.get('symbol','?')}</td><td>{str(t.get('entry_time',''))[:16]}</td><td>{str(t.get('exit_time',''))[:16]}</td><td class='{'pos' if pnl>=0 else 'neg'}'>{fmt(pnl)}</td><td>{t.get('reason','')}</td></tr>"
+        html += f"</table><p style='color:#666;font-size:12px'>Generated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC</p></body></html>"
+
+        suffix = "_de" if lang == "de" else ""
+        path = os.path.join(output_dir, f"dashboard{suffix}.html")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(html)
+        print(f"[Dashboard] Saved: {path}")
+
+
 def generate_trade_charts(trades_df: pd.DataFrame, open_positions_df: pd.DataFrame = None, output_dir: str = os.path.join("report_html", "charts")) -> None:
     if (trades_df is None or trades_df.empty) and (open_positions_df is None or open_positions_df.empty):
         print("[Chart] No trades or open positions available for chart generation.")
@@ -3676,7 +3770,13 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--loop",
         action="store_true",
-        help="Run simulation in continuous loop, refreshing every --signal-interval minutes (default 15)",
+        help="Run simulation continuously, refreshing every --signal-interval minutes",
+    )
+    parser.add_argument(
+        "--dashboard-start",
+        type=str,
+        default="2025-12-01",
+        help="Start date for testnet dashboard (YYYY-MM-DD, default: 2025-12-01)",
     )
     return parser.parse_args(argv)
 
@@ -3786,23 +3886,15 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
         configure_exchange_flag = False
 
     if args.simulate:
-        loop_mode = args.loop
-        loop_interval = args.signal_interval * 60  # Convert minutes to seconds
-        iteration = 0
+      while True:  # Loop for --loop mode
+        if args.loop:
+            print(f"\n{'='*60}")
+            print(f"[Loop] Running at {pd.Timestamp.now(tz=st.BERLIN_TZ).strftime('%Y-%m-%d %H:%M:%S')}")
+            print(f"{'='*60}")
 
-        while True:
-            iteration += 1
-            if loop_mode:
-                print(f"\n{'='*60}")
-                print(f"[Loop] Iteration {iteration} at {pd.Timestamp.now(tz=st.BERLIN_TZ).strftime('%Y-%m-%d %H:%M:%S')}")
-                print(f"{'='*60}")
-                # Clear data cache to force fresh data fetch on subsequent iterations
-                if iteration > 1:
-                    st.clear_data_cache()
-
-            trades: List[TradeResult] = []
-            open_positions: List[Dict[str, Any]] = []
-            if args.replay_trades_csv:
+        trades: List[TradeResult] = []
+        open_positions: List[Dict[str, Any]] = []
+        if args.replay_trades_csv:
             if args.clear_outputs:
                 clear_output_artifacts(include_state=args.reset_state)
             elif args.reset_state:
@@ -3841,13 +3933,7 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
                 else {},
             }
         else:
-            # In loop mode, always use current time as end; keep start fixed
-            current_time = pd.Timestamp.now(tz=st.BERLIN_TZ)
-            if loop_mode and iteration > 1:
-                # Subsequent iterations: refresh to current time
-                end_ts = current_time
-            else:
-                end_ts = resolve_timestamp(args.end, current_time)
+            end_ts = resolve_timestamp(args.end, pd.Timestamp.now(tz=st.BERLIN_TZ))
             default_start = end_ts - pd.Timedelta(days=1)
             start_ts = resolve_timestamp(args.start, default_start)
             print(f"[Simulation] Period: {start_ts.strftime('%Y-%m-%d %H:%M')} to {end_ts.strftime('%Y-%m-%d %H:%M')}")
@@ -3944,6 +4030,13 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
         summary_json_path = args.summary_json or SIMULATION_SUMMARY_JSON
         write_summary_json(summary_data, summary_json_path)
 
+        # Generate testnet dashboards
+        try:
+            dashboard_start = pd.to_datetime(args.dashboard_start).tz_localize(st.BERLIN_TZ)
+        except Exception:
+            dashboard_start = pd.Timestamp("2025-12-01", tz=st.BERLIN_TZ)
+        generate_testnet_dashboard(trades_df, open_positions, final_state, dashboard_start)
+
         # Print per-symbol statistics to console
         symbol_stats = summary_data.get("symbol_stats", [])
         if symbol_stats:
@@ -3974,16 +4067,16 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
                 last_trade = trades[-1]
                 print(f"[Simulation] Last trade: {last_trade.symbol} {last_trade.direction} exited {last_trade.exit_time}")
 
-            # Loop control: break if not in loop mode, otherwise sleep and continue
-            if not loop_mode:
-                break
-
+        # Loop mode: sleep and repeat
+        if args.loop:
             print(f"\n[Loop] Next refresh in {args.signal_interval:.0f} minutes. Press Ctrl+C to stop.")
             try:
-                time.sleep(loop_interval)
+                time.sleep(args.signal_interval * 60)
+                st.clear_data_cache()  # Clear cache for fresh data
+                continue  # Restart the simulation
             except KeyboardInterrupt:
                 print("\n[Loop] Stopped by user.")
-                break
+        break  # Exit loop if not in loop mode
     else:
         main(
             allowed_symbols=allowed_symbols,
