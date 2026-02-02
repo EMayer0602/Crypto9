@@ -2698,7 +2698,7 @@ tr:hover{{background:#1f4068}}
 <div class="box"><h3>{lbl_unrealized}</h3><div class="v {unreal_cls}">{fmt(total_unrealized)}</div></div>
 </div>
 <h2>{lbl_open_pos} ({len(open_positions)})</h2>
-<table><tr><th>Symbol</th><th>{lbl_strategy}</th><th>{lbl_entry}</th><th>{lbl_entry_price}</th><th>{lbl_current}</th><th>Amount</th><th>Stake</th><th>{lbl_unrealized}</th></tr>"""
+<table><tr><th>Symbol</th><th>{lbl_strategy}</th><th>{lbl_entry}</th><th>{lbl_entry_price}</th><th>{lbl_current}</th><th>{"Menge" if lang=="de" else "Amount"}</th><th>Stake</th><th>{lbl_unrealized}</th></tr>"""
         for p in open_display:
             pnl = p.get("unrealized_pnl", 0)
             stake = p.get("calc_stake", capital / max_pos)
