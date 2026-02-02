@@ -3673,6 +3673,11 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         action="store_true",
         help="Use futures data for signal generation (entries/exits from futures, trades on spot prices)",
     )
+    parser.add_argument(
+        "--loop",
+        action="store_true",
+        help="Run simulation in continuous loop, refreshing every --signal-interval minutes (default 15)",
+    )
     return parser.parse_args(argv)
 
 
@@ -3781,9 +3786,23 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
         configure_exchange_flag = False
 
     if args.simulate:
-        trades: List[TradeResult] = []
-        open_positions: List[Dict[str, Any]] = []
-        if args.replay_trades_csv:
+        loop_mode = args.loop
+        loop_interval = args.signal_interval * 60  # Convert minutes to seconds
+        iteration = 0
+
+        while True:
+            iteration += 1
+            if loop_mode:
+                print(f"\n{'='*60}")
+                print(f"[Loop] Iteration {iteration} at {pd.Timestamp.now(tz=st.BERLIN_TZ).strftime('%Y-%m-%d %H:%M:%S')}")
+                print(f"{'='*60}")
+                # Clear data cache to force fresh data fetch on subsequent iterations
+                if iteration > 1:
+                    st.clear_data_cache()
+
+            trades: List[TradeResult] = []
+            open_positions: List[Dict[str, Any]] = []
+            if args.replay_trades_csv:
             if args.clear_outputs:
                 clear_output_artifacts(include_state=args.reset_state)
             elif args.reset_state:
@@ -3822,7 +3841,13 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
                 else {},
             }
         else:
-            end_ts = resolve_timestamp(args.end, pd.Timestamp.now(tz=st.BERLIN_TZ))
+            # In loop mode, always use current time as end; keep start fixed
+            current_time = pd.Timestamp.now(tz=st.BERLIN_TZ)
+            if loop_mode and iteration > 1:
+                # Subsequent iterations: refresh to current time
+                end_ts = current_time
+            else:
+                end_ts = resolve_timestamp(args.end, current_time)
             default_start = end_ts - pd.Timedelta(days=1)
             start_ts = resolve_timestamp(args.start, default_start)
             print(f"[Simulation] Period: {start_ts.strftime('%Y-%m-%d %H:%M')} to {end_ts.strftime('%Y-%m-%d %H:%M')}")
@@ -3948,6 +3973,17 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
             else:
                 last_trade = trades[-1]
                 print(f"[Simulation] Last trade: {last_trade.symbol} {last_trade.direction} exited {last_trade.exit_time}")
+
+            # Loop control: break if not in loop mode, otherwise sleep and continue
+            if not loop_mode:
+                break
+
+            print(f"\n[Loop] Next refresh in {args.signal_interval:.0f} minutes. Press Ctrl+C to stop.")
+            try:
+                time.sleep(loop_interval)
+            except KeyboardInterrupt:
+                print("\n[Loop] Stopped by user.")
+                break
     else:
         main(
             allowed_symbols=allowed_symbols,
