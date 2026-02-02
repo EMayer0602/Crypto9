@@ -4200,15 +4200,12 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
         else:
             print("[Simulation] No open positions remaining.")
         if not trades_df.empty:
-            if args.replay_trades_csv:
-                last_row = trades_df.tail(1).iloc[0]
-                sym_val = last_row.get("symbol") or last_row.get("Symbol") or "?"
-                dir_val = last_row.get("direction") or last_row.get("Direction") or "?"
-                exit_val = last_row.get("exit_time") or last_row.get("ExitZeit") or "?"
-                print(f"[Replay] Last trade: {sym_val} {dir_val} exited {exit_val}")
-            else:
-                last_trade = trades[-1]
-                print(f"[Simulation] Last trade: {last_trade.symbol} {last_trade.direction} exited {last_trade.exit_time}")
+            # Show last trade from DataFrame (works for both new and merged trades)
+            last_row = trades_df.tail(1).iloc[0]
+            sym_val = last_row.get("symbol") or last_row.get("Symbol") or "?"
+            dir_val = last_row.get("direction") or last_row.get("Direction") or "?"
+            exit_val = last_row.get("exit_time") or last_row.get("ExitZeit") or "?"
+            print(f"[Simulation] Last trade: {sym_val} {dir_val} exited {exit_val}")
 
         # Loop mode: sleep and repeat
         if args.loop:
