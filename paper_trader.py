@@ -2303,7 +2303,7 @@ def build_summary_payload(
         "start": start_ts.isoformat(),
         "end": end_ts.isoformat(),
         "closed_trades": int(total_trades),
-        "open_positions_count": int(open_count),
+        "open_positions": int(open_count),
         "closed_pnl": round(pnl_sum, 6),
         "avg_trade_pnl": round(avg_pnl, 6),
         "win_rate_pct": round(win_rate, 4),
@@ -2317,7 +2317,7 @@ def build_summary_payload(
         **short_open_stats,
         "symbol_stats": symbol_stats,
         "trades": trades_list,
-        "open_positions": open_positions_list,
+        "open_positions_data": open_positions_list,
     }
 
 
