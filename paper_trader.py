@@ -20,6 +20,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+from dotenv import load_dotenv
+load_dotenv()  # Load .env file for API keys
+
 import requests
 import plotly.graph_objects as go
 
