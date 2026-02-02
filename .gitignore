@@ -24,11 +24,9 @@ ENV/
 # OS
 .DS_Store
 Thumbs.db
-report_testnet/
 
 # Generated data files
 ohlcv_cache/
-report_html/
 paper_trading_state.json
 paper_trading_config.csv
 paper_trading_log.csv
