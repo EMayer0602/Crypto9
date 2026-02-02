@@ -2590,6 +2590,21 @@ def generate_testnet_dashboard(
             s = f"{v:,.{d}f}"
             return s.replace(",", "X").replace(".", ",").replace("X", ".") if lang == "de" else s
 
+        def fmt_price(v):
+            """Format price with appropriate decimals based on magnitude."""
+            if pd.isna(v): return "N/A"
+            v = float(v)
+            if v < 0.0001:
+                d = 8  # LUNC-type prices
+            elif v < 0.01:
+                d = 6
+            elif v < 1:
+                d = 4
+            else:
+                d = 2
+            s = f"{v:,.{d}f}"
+            return s.replace(",", "X").replace(".", ",").replace("X", ".") if lang == "de" else s
+
         # Labels for German/English
         lbl_since = "Seit" if lang == "de" else "Since"
         lbl_start_cap = "Startkapital" if lang == "de" else "Start Capital"
@@ -2642,7 +2657,7 @@ tr:hover{{background:#1f4068}}
             strategy = f"{p.get('indicator', 'jma')}/{p.get('htf', '12h')}"
             stake = float(p.get("stake", current_capital / 10) or current_capital / 10)
             pnl_cls = "pos" if pnl >= 0 else "neg"
-            html += f"<tr><td>{p.get('symbol','?')}</td><td class='strategy'>{strategy}</td><td>{p.get('entry_time','')[:16]}</td><td>{fmt(float(p.get('entry_price',0)),6)}</td><td>{fmt(p.get('last_price',0),6)}</td><td>{fmt(stake)}</td><td class='{pnl_cls}'>{fmt(pnl)}</td></tr>"
+            html += f"<tr><td>{p.get('symbol','?')}</td><td class='strategy'>{strategy}</td><td>{p.get('entry_time','')[:16]}</td><td>{fmt_price(p.get('entry_price',0))}</td><td>{fmt_price(p.get('last_price',0))}</td><td>{fmt(stake)}</td><td class='{pnl_cls}'>{fmt(pnl)}</td></tr>"
         lbl_strat = "Strategie" if lang == "de" else "Strategy"
         lbl_entry = "Einstieg" if lang == "de" else "Entry"
         lbl_eprice = "Einstiegspreis" if lang == "de" else "Entry Price"
@@ -2658,7 +2673,7 @@ tr:hover{{background:#1f4068}}
             pnl_pct = (pnl / stake * 100) if stake > 0 else 0
             strategy = f"{t.get('indicator', 'jma')}/{t.get('htf', '12h')}"
             pnl_cls = "pos" if pnl >= 0 else "neg"
-            html += f"<tr><td>{t.get('symbol','?')}</td><td class='strategy'>{strategy}</td><td>{str(t.get('entry_time',''))[:16]}</td><td>{fmt(entry_price, 6)}</td><td>{str(t.get('exit_time',''))[:16]}</td><td>{fmt(exit_price, 6)}</td><td>{fmt(stake)}</td><td class='{pnl_cls}'>{fmt(pnl)}</td><td class='{pnl_cls}'>{fmt(pnl_pct,1)}%</td><td>{t.get('reason','')}</td></tr>"
+            html += f"<tr><td>{t.get('symbol','?')}</td><td class='strategy'>{strategy}</td><td>{str(t.get('entry_time',''))[:16]}</td><td>{fmt_price(entry_price)}</td><td>{str(t.get('exit_time',''))[:16]}</td><td>{fmt_price(exit_price)}</td><td>{fmt(stake)}</td><td class='{pnl_cls}'>{fmt(pnl)}</td><td class='{pnl_cls}'>{fmt(pnl_pct,1)}%</td><td>{t.get('reason','')}</td></tr>"
         html += f"</table><p style='color:#8892b0;font-size:12px'>Generated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC</p></body></html>"
 
         suffix = "_de" if lang == "de" else ""
