@@ -2572,26 +2572,50 @@ def generate_testnet_dashboard(
             except Exception:
                 pass
 
-    # Calculate totals using fixed stake = START_TOTAL_CAPITAL / MAX_OPEN_POSITIONS = 1650
-    dashboard_stake = START_TOTAL_CAPITAL / MAX_OPEN_POSITIONS
-    total_realized = sum(float(t.get("pnl", 0) or 0) for t in filtered_trades)
+    # Dynamic stake calculation with compound growth
+    # Start with initial capital, each trade uses capital/10 as stake
+    # PnL is added to capital for next trade
+    capital = START_TOTAL_CAPITAL
+    max_pos = MAX_OPEN_POSITIONS
+
+    # Sort trades chronologically by exit_time
+    sorted_trades = sorted(filtered_trades, key=lambda x: x.get("exit_time", "") or "")
+
+    # Process closed trades with dynamic stake
+    processed_trades = []
+    total_realized = 0
+    for t in sorted_trades:
+        stake = capital / max_pos
+        entry_price = float(t.get("entry_price", 0) or 0)
+        exit_price = float(t.get("exit_price", 0) or 0)
+        # Recalculate PnL with dynamic stake
+        if entry_price > 0:
+            pnl = (exit_price - entry_price) / entry_price * stake
+        else:
+            pnl = float(t.get("pnl", 0) or 0)
+        capital += pnl
+        total_realized += pnl
+        processed_trades.append({**t, "calc_stake": stake, "calc_pnl": pnl})
+
+    # Process open positions with current capital
     total_unrealized = 0
     open_display = []
     for p in open_positions:
+        stake = capital / max_pos
         entry = float(p.get("entry_price", 0) or 0)
         live = live_prices.get(p.get("symbol", ""), entry)
         if entry > 0:
-            pnl = (live - entry) / entry * dashboard_stake
+            pnl = (live - entry) / entry * stake
         else:
             pnl = 0
         total_unrealized += pnl
-        open_display.append({**p, "last_price": live, "unrealized_pnl": pnl})
+        open_display.append({**p, "last_price": live, "unrealized_pnl": pnl, "calc_stake": stake})
 
-    # Capital = Start + Realized PnL (dashboard shows performance from dashboard_start)
-    current_capital = START_TOTAL_CAPITAL + total_realized
+    # Final capital includes unrealized
+    current_capital = capital + total_unrealized
 
-    wins = sum(1 for t in filtered_trades if float(t.get("pnl", 0) or 0) > 0)
-    win_rate = wins / len(filtered_trades) * 100 if filtered_trades else 0
+    wins = sum(1 for t in processed_trades if float(t.get("calc_pnl", 0) or 0) > 0)
+    win_rate = wins / len(processed_trades) * 100 if processed_trades else 0
 
     for lang in ["en", "de"]:
         def fmt(v, d=2):
@@ -2650,10 +2674,10 @@ th,td{{border:1px solid #2a3f5f;padding:8px 10px;text-align:right}}
 th{{background:#0f3460;color:#fff;font-weight:bold}}
 tr:hover{{background:#1f4068}}
 </style></head>
-<body><h1>{title}</h1><p style="color:#8892b0">{lbl_since}: {since_str} | {lbl_start_cap}: {fmt(START_TOTAL_CAPITAL)} | Stake: {fmt(fixed_stake)}</p>
+<body><h1>{title}</h1><p style="color:#8892b0">{lbl_since}: {since_str} | {lbl_start_cap}: {fmt(START_TOTAL_CAPITAL)} | {"Dynamischer Stake" if lang=="de" else "Dynamic Stake"}: Capital/{max_pos}</p>
 <div class="boxes">
 <div class="box"><h3>{lbl_capital}</h3><div class="v {cap_cls}">{fmt(current_capital)}</div></div>
-<div class="box"><h3>Trades</h3><div class="v">{len(filtered_trades)}</div></div>
+<div class="box"><h3>Trades</h3><div class="v">{len(processed_trades)}</div></div>
 <div class="box"><h3>{lbl_realized}</h3><div class="v {real_cls}">{fmt(total_realized)}</div></div>
 <div class="box"><h3>Win%</h3><div class="v">{fmt(win_rate,1)}%</div></div>
 <div class="box"><h3>{lbl_open}</h3><div class="v">{len(open_positions)}</div></div>
@@ -2663,24 +2687,27 @@ tr:hover{{background:#1f4068}}
 <table><tr><th>Symbol</th><th>{lbl_strategy}</th><th>{lbl_entry}</th><th>{lbl_entry_price}</th><th>{lbl_current}</th><th>Stake</th><th>{lbl_unrealized}</th></tr>"""
         for p in open_display:
             pnl = p.get("unrealized_pnl", 0)
+            stake = p.get("calc_stake", capital / max_pos)
             strategy = f"{p.get('indicator', 'jma')}/{p.get('htf', '12h')}"
             pnl_cls = "pos" if pnl >= 0 else "neg"
-            html += f"<tr><td>{p.get('symbol','?')}</td><td>{strategy}</td><td>{p.get('entry_time','')[:16]}</td><td>{fmt_price(p.get('entry_price',0))}</td><td>{fmt_price(p.get('last_price',0))}</td><td>{fmt(fixed_stake)}</td><td class='{pnl_cls}'>{fmt(pnl)}</td></tr>"
+            html += f"<tr><td>{p.get('symbol','?')}</td><td>{strategy}</td><td>{p.get('entry_time','')[:16]}</td><td>{fmt_price(p.get('entry_price',0))}</td><td>{fmt_price(p.get('last_price',0))}</td><td>{fmt(stake)}</td><td class='{pnl_cls}'>{fmt(pnl)}</td></tr>"
         lbl_strat = "Strategie" if lang == "de" else "Strategy"
         lbl_entry = "Einstieg" if lang == "de" else "Entry"
         lbl_eprice = "Einstiegspreis" if lang == "de" else "Entry Price"
         lbl_exit = "Ausstieg" if lang == "de" else "Exit"
         lbl_xprice = "Ausstiegspreis" if lang == "de" else "Exit Price"
         lbl_reason = "Grund" if lang == "de" else "Reason"
-        html += f"</table><h2>Trades ({len(filtered_trades)})</h2><table><tr><th>Symbol</th><th>{lbl_strat}</th><th>{lbl_entry}</th><th>{lbl_eprice}</th><th>{lbl_exit}</th><th>{lbl_xprice}</th><th>Stake</th><th>PnL</th><th>PnL%</th><th>{lbl_reason}</th></tr>"
-        for t in sorted(filtered_trades, key=lambda x: x.get("entry_time",""), reverse=True)[:50]:
-            pnl = float(t.get("pnl", 0) or 0)
+        html += f"</table><h2>Trades ({len(processed_trades)})</h2><table><tr><th>Symbol</th><th>{lbl_strat}</th><th>{lbl_entry}</th><th>{lbl_eprice}</th><th>{lbl_exit}</th><th>{lbl_xprice}</th><th>Stake</th><th>PnL</th><th>PnL%</th><th>{lbl_reason}</th></tr>"
+        # Show trades in reverse chronological order (newest first)
+        for t in sorted(processed_trades, key=lambda x: x.get("exit_time",""), reverse=True)[:50]:
+            pnl = float(t.get("calc_pnl", 0) or 0)
+            stake = float(t.get("calc_stake", START_TOTAL_CAPITAL / max_pos) or 0)
             entry_price = float(t.get("entry_price", 0) or 0)
             exit_price = float(t.get("exit_price", 0) or 0)
-            pnl_pct = (pnl / fixed_stake * 100) if fixed_stake > 0 else 0
+            pnl_pct = (pnl / stake * 100) if stake > 0 else 0
             strategy = f"{t.get('indicator', 'jma')}/{t.get('htf', '12h')}"
             pnl_cls = "pos" if pnl >= 0 else "neg"
-            html += f"<tr><td>{t.get('symbol','?')}</td><td>{strategy}</td><td>{str(t.get('entry_time',''))[:16]}</td><td>{fmt_price(entry_price)}</td><td>{str(t.get('exit_time',''))[:16]}</td><td>{fmt_price(exit_price)}</td><td>{fmt(fixed_stake)}</td><td class='{pnl_cls}'>{fmt(pnl)}</td><td class='{pnl_cls}'>{fmt(pnl_pct,1)}%</td><td>{t.get('reason','')}</td></tr>"
+            html += f"<tr><td>{t.get('symbol','?')}</td><td>{strategy}</td><td>{str(t.get('entry_time',''))[:16]}</td><td>{fmt_price(entry_price)}</td><td>{str(t.get('exit_time',''))[:16]}</td><td>{fmt_price(exit_price)}</td><td>{fmt(stake)}</td><td class='{pnl_cls}'>{fmt(pnl)}</td><td class='{pnl_cls}'>{fmt(pnl_pct,1)}%</td><td>{t.get('reason','')}</td></tr>"
         html += f"</table><p style='color:#8892b0;font-size:12px'>Generated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC</p></body></html>"
 
         suffix = "_de" if lang == "de" else ""
