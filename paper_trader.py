@@ -3886,11 +3886,33 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
         configure_exchange_flag = False
 
     if args.simulate:
+      first_run = True
+      existing_trades_df = None
+      last_end_ts = None
+
       while True:  # Loop for --loop mode
         if args.loop:
             print(f"\n{'='*60}")
             print(f"[Loop] Running at {pd.Timestamp.now(tz=st.BERLIN_TZ).strftime('%Y-%m-%d %H:%M:%S')}")
             print(f"{'='*60}")
+
+            # On subsequent runs, load existing trades and continue from last end
+            if not first_run:
+                try:
+                    summary_path = args.summary_json or SIMULATION_SUMMARY_JSON
+                    if os.path.exists(summary_path):
+                        with open(summary_path, "r", encoding="utf-8") as f:
+                            existing_summary = json.load(f)
+                        existing_trades = existing_summary.get("trades", [])
+                        if existing_trades:
+                            existing_trades_df = pd.DataFrame(existing_trades)
+                            # Get last trade exit time as new start
+                            last_exit = max(t.get("exit_time", "") for t in existing_trades if t.get("exit_time"))
+                            if last_exit:
+                                last_end_ts = pd.to_datetime(last_exit)
+                                print(f"[Loop] Continuing from last trade: {last_end_ts}")
+                except Exception as e:
+                    print(f"[Loop] Could not load existing trades: {e}")
 
         trades: List[TradeResult] = []
         open_positions: List[Dict[str, Any]] = []
@@ -3933,9 +3955,28 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
                 else {},
             }
         else:
-            end_ts = resolve_timestamp(args.end, pd.Timestamp.now(tz=st.BERLIN_TZ))
-            default_start = end_ts - pd.Timedelta(days=1)
-            start_ts = resolve_timestamp(args.start, default_start)
+            # Determine data end time based on available cache
+            cache_end = None
+            try:
+                test_df = st.load_ohlcv_from_cache("BTC/USDC", "1h")
+                if test_df is not None and not test_df.empty:
+                    cache_end = test_df.index.max()
+                    print(f"[Simulation] Historical data available until: {cache_end}")
+            except Exception:
+                pass
+
+            # Use cache end or current time as default end
+            default_end = cache_end if cache_end else pd.Timestamp.now(tz=st.BERLIN_TZ)
+            end_ts = resolve_timestamp(args.end, default_end)
+
+            # On subsequent loop runs, start from last processed time
+            if args.loop and last_end_ts is not None:
+                start_ts = last_end_ts
+                print(f"[Simulation] Incremental update from {start_ts.strftime('%Y-%m-%d %H:%M')}")
+            else:
+                default_start = end_ts - pd.Timedelta(days=1)
+                start_ts = resolve_timestamp(args.start, default_start)
+
             print(f"[Simulation] Period: {start_ts.strftime('%Y-%m-%d %H:%M')} to {end_ts.strftime('%Y-%m-%d %H:%M')}")
             trades, final_state = run_simulation(
                 start_ts,
@@ -3952,6 +3993,18 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
             )
             trades_df = trades_to_dataframe(trades)
             open_positions = final_state.get("positions", [])
+
+            # Merge with existing trades on subsequent loop runs
+            if args.loop and existing_trades_df is not None and not existing_trades_df.empty:
+                if not trades_df.empty:
+                    print(f"[Loop] Merging {len(trades_df)} new trades with {len(existing_trades_df)} existing")
+                    trades_df = pd.concat([existing_trades_df, trades_df], ignore_index=True)
+                    # Remove duplicates based on symbol + entry_time
+                    if "symbol" in trades_df.columns and "entry_time" in trades_df.columns:
+                        trades_df = trades_df.drop_duplicates(subset=["symbol", "entry_time"], keep="last")
+                else:
+                    trades_df = existing_trades_df
+                print(f"[Loop] Total trades after merge: {len(trades_df)}")
 
             # Force close all open positions at simulation end if requested
             if args.close_at_end and open_positions:
@@ -4069,6 +4122,9 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
 
         # Loop mode: sleep and repeat
         if args.loop:
+            first_run = False
+            last_end_ts = end_ts
+            existing_trades_df = trades_df.copy() if not trades_df.empty else None
             print(f"\n[Loop] Next refresh in {args.signal_interval:.0f} minutes. Press Ctrl+C to stop.")
             try:
                 time.sleep(args.signal_interval * 60)
