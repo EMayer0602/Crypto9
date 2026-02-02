@@ -2590,29 +2590,76 @@ def generate_testnet_dashboard(
             s = f"{v:,.{d}f}"
             return s.replace(",", "X").replace(".", ",").replace("X", ".") if lang == "de" else s
 
-        L = {"title": "Paper Trading Dashboard", "since": dashboard_start.strftime('%Y-%m-%d')}
-        html = f"""<!DOCTYPE html><html><head><meta charset="utf-8"><title>{L['title']}</title>
+        # Labels for German/English
+        lbl_since = "Seit" if lang == "de" else "Since"
+        lbl_start_cap = "Startkapital" if lang == "de" else "Start Capital"
+        lbl_capital = "Kapital" if lang == "de" else "Capital"
+        lbl_realized = "Realisiert" if lang == "de" else "Realized"
+        lbl_open = "Offen" if lang == "de" else "Open"
+        lbl_unrealized = "Unrealisiert" if lang == "de" else "Unrealized"
+        lbl_open_pos = "Offene Positionen" if lang == "de" else "Open Positions"
+        lbl_strategy = "Strategie" if lang == "de" else "Strategy"
+        lbl_entry = "Einstieg" if lang == "de" else "Entry"
+        lbl_entry_price = "Einstiegspreis" if lang == "de" else "Entry Price"
+        lbl_current = "Aktuell" if lang == "de" else "Current"
+
+        cap_cls = "pos" if current_capital >= START_TOTAL_CAPITAL else "neg"
+        real_cls = "pos" if total_realized >= 0 else "neg"
+        unreal_cls = "pos" if total_unrealized >= 0 else "neg"
+
+        title = "Paper Trading Dashboard"
+        since_str = dashboard_start.strftime('%Y-%m-%d')
+        # Dark theme styling
+        html = f"""<!DOCTYPE html><html><head><meta charset="utf-8"><title>{title}</title>
 <meta http-equiv="refresh" content="60">
-<style>body{{font-family:Arial;margin:20px;background:#f5f5f5}}.box{{display:inline-block;background:white;padding:15px;margin:8px;border-radius:5px;box-shadow:0 1px 3px rgba(0,0,0,.1);min-width:130px;text-align:center}}.box h3{{margin:0 0 8px;color:#666;font-size:12px}}.box .v{{font-size:20px;font-weight:bold}}.pos{{color:green}}.neg{{color:red}}table{{border-collapse:collapse;width:100%;margin:10px 0;background:white}}th,td{{border:1px solid #ddd;padding:6px;text-align:right}}th{{background:#007bff;color:white}}</style></head>
-<body><h1>{L['title']}</h1><p>Since: {L['since']} | Capital: {fmt(START_TOTAL_CAPITAL)}</p>
+<style>
+body{{font-family:Arial,sans-serif;margin:20px;background:#1a1a2e;color:#eee}}
+h1,h2{{color:#fff}}
+.box{{display:inline-block;background:#16213e;padding:15px;margin:8px;border-radius:8px;min-width:130px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,.3)}}
+.box h3{{margin:0 0 8px;color:#8892b0;font-size:12px}}
+.box .v{{font-size:20px;font-weight:bold;color:#eee}}
+.pos{{color:#4ade80}}.neg{{color:#f87171}}
+table{{border-collapse:collapse;width:100%;margin:15px 0;background:#16213e;border-radius:8px;overflow:hidden}}
+th,td{{border:1px solid #2a3f5f;padding:8px 10px;text-align:right}}
+th{{background:#0f3460;color:#fff;font-weight:bold}}
+td:first-child{{text-align:left}}
+tr:hover{{background:#1f4068}}
+.strategy{{color:#8892b0;font-size:11px}}
+</style></head>
+<body><h1>{title}</h1><p style="color:#8892b0">{lbl_since}: {since_str} | {lbl_start_cap}: {fmt(START_TOTAL_CAPITAL)}</p>
 <div class="boxes">
-<div class="box"><h3>{"Kapital" if lang=="de" else "Capital"}</h3><div class="v {'pos' if current_capital >= START_TOTAL_CAPITAL else 'neg'}">{fmt(current_capital)}</div></div>
+<div class="box"><h3>{lbl_capital}</h3><div class="v {cap_cls}">{fmt(current_capital)}</div></div>
 <div class="box"><h3>Trades</h3><div class="v">{len(filtered_trades)}</div></div>
-<div class="box"><h3>{"Realisiert" if lang=="de" else "Realized"}</h3><div class="v {'pos' if total_realized >= 0 else 'neg'}">{fmt(total_realized)}</div></div>
+<div class="box"><h3>{lbl_realized}</h3><div class="v {real_cls}">{fmt(total_realized)}</div></div>
 <div class="box"><h3>Win%</h3><div class="v">{fmt(win_rate,1)}%</div></div>
-<div class="box"><h3>{"Offen" if lang=="de" else "Open"}</h3><div class="v">{len(open_positions)}</div></div>
-<div class="box"><h3>{"Unrealisiert" if lang=="de" else "Unrealized"}</h3><div class="v {'pos' if total_unrealized >= 0 else 'neg'}">{fmt(total_unrealized)}</div></div>
+<div class="box"><h3>{lbl_open}</h3><div class="v">{len(open_positions)}</div></div>
+<div class="box"><h3>{lbl_unrealized}</h3><div class="v {unreal_cls}">{fmt(total_unrealized)}</div></div>
 </div>
-<h2>{"Offene Positionen" if lang=="de" else "Open Positions"} ({len(open_positions)})</h2>
-<table><tr><th>Symbol</th><th>Entry</th><th>{"Preis" if lang=="de" else "Price"}</th><th>{"Aktuell" if lang=="de" else "Last"}</th><th>PnL</th></tr>"""
+<h2>{lbl_open_pos} ({len(open_positions)})</h2>
+<table><tr><th>Symbol</th><th>{lbl_strategy}</th><th>{lbl_entry}</th><th>{lbl_entry_price}</th><th>{lbl_current}</th><th>Stake</th><th>{lbl_unrealized}</th></tr>"""
         for p in open_display:
             pnl = p.get("unrealized_pnl", 0)
-            html += f"<tr><td>{p.get('symbol','?')}</td><td>{p.get('entry_time','')[:16]}</td><td>{fmt(float(p.get('entry_price',0)),6)}</td><td>{fmt(p.get('last_price',0),6)}</td><td class='{'pos' if pnl>=0 else 'neg'}'>{fmt(pnl)}</td></tr>"
-        html += f"</table><h2>Trades ({len(filtered_trades)})</h2><table><tr><th>Symbol</th><th>Entry</th><th>Exit</th><th>PnL</th><th>{'Grund' if lang=='de' else 'Reason'}</th></tr>"
+            strategy = f"{p.get('indicator', 'jma')}/{p.get('htf', '12h')}"
+            stake = float(p.get("stake", current_capital / 10) or current_capital / 10)
+            pnl_cls = "pos" if pnl >= 0 else "neg"
+            html += f"<tr><td>{p.get('symbol','?')}</td><td class='strategy'>{strategy}</td><td>{p.get('entry_time','')[:16]}</td><td>{fmt(float(p.get('entry_price',0)),6)}</td><td>{fmt(p.get('last_price',0),6)}</td><td>{fmt(stake)}</td><td class='{pnl_cls}'>{fmt(pnl)}</td></tr>"
+        lbl_strat = "Strategie" if lang == "de" else "Strategy"
+        lbl_entry = "Einstieg" if lang == "de" else "Entry"
+        lbl_eprice = "Einstiegspreis" if lang == "de" else "Entry Price"
+        lbl_exit = "Ausstieg" if lang == "de" else "Exit"
+        lbl_xprice = "Ausstiegspreis" if lang == "de" else "Exit Price"
+        lbl_reason = "Grund" if lang == "de" else "Reason"
+        html += f"</table><h2>Trades ({len(filtered_trades)})</h2><table><tr><th>Symbol</th><th>{lbl_strat}</th><th>{lbl_entry}</th><th>{lbl_eprice}</th><th>{lbl_exit}</th><th>{lbl_xprice}</th><th>Stake</th><th>PnL</th><th>PnL%</th><th>{lbl_reason}</th></tr>"
         for t in sorted(filtered_trades, key=lambda x: x.get("entry_time",""), reverse=True)[:50]:
             pnl = float(t.get("pnl", 0) or 0)
-            html += f"<tr><td>{t.get('symbol','?')}</td><td>{str(t.get('entry_time',''))[:16]}</td><td>{str(t.get('exit_time',''))[:16]}</td><td class='{'pos' if pnl>=0 else 'neg'}'>{fmt(pnl)}</td><td>{t.get('reason','')}</td></tr>"
-        html += f"</table><p style='color:#666;font-size:12px'>Generated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC</p></body></html>"
+            stake = float(t.get("stake", 0) or current_capital / 10)
+            entry_price = float(t.get("entry_price", 0) or 0)
+            exit_price = float(t.get("exit_price", 0) or 0)
+            pnl_pct = (pnl / stake * 100) if stake > 0 else 0
+            strategy = f"{t.get('indicator', 'jma')}/{t.get('htf', '12h')}"
+            pnl_cls = "pos" if pnl >= 0 else "neg"
+            html += f"<tr><td>{t.get('symbol','?')}</td><td class='strategy'>{strategy}</td><td>{str(t.get('entry_time',''))[:16]}</td><td>{fmt(entry_price, 6)}</td><td>{str(t.get('exit_time',''))[:16]}</td><td>{fmt(exit_price, 6)}</td><td>{fmt(stake)}</td><td class='{pnl_cls}'>{fmt(pnl)}</td><td class='{pnl_cls}'>{fmt(pnl_pct,1)}%</td><td>{t.get('reason','')}</td></tr>"
+        html += f"</table><p style='color:#8892b0;font-size:12px'>Generated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC</p></body></html>"
 
         suffix = "_de" if lang == "de" else ""
         path = os.path.join(output_dir, f"dashboard{suffix}.html")
