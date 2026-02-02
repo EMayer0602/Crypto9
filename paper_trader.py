@@ -213,13 +213,21 @@ REPORT_DIR = "report_html"
 SIMULATION_SUMMARY_HTML = os.path.join("report_html", "trading_summary.html")
 SIMULATION_SUMMARY_JSON = os.path.join("report_html", "trading_summary.json")
 
+# Separate output directories for --simulate mode (to not overwrite real trading data)
+SIMULATION_OUTPUT_DIR = "report_simulation"
+SIMULATION_TESTNET_DIR = "report_simulation_testnet"
 
-def get_report_dir(use_testnet: bool = False) -> str:
-    """Return the appropriate report directory based on testnet mode.
 
-    - Testnet mode: report_testnet/ (for dashboards)
-    - Normal mode: report_html/ (for simulation output)
+def get_report_dir(use_testnet: bool = False, is_simulation: bool = False) -> str:
+    """Return the appropriate report directory based on mode.
+
+    - Simulation + Testnet: report_simulation_testnet/ (simulation dashboards)
+    - Simulation: report_simulation/ (simulation reports)
+    - Testnet mode: report_testnet/ (for real trading dashboards)
+    - Normal mode: report_html/ (for real trading output)
     """
+    if is_simulation:
+        return SIMULATION_TESTNET_DIR if use_testnet else SIMULATION_OUTPUT_DIR
     return "report_testnet" if use_testnet else "report_html"
 
 
@@ -3860,12 +3868,21 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
         stake_value = None  # None triggers dynamic sizing
         print(f"[Config] Using dynamic position sizing: stake = total_capital / {STAKE_DIVISOR}")
 
-    # Update output paths based on testnet mode
+    # Update output paths based on testnet mode and simulation mode
+    # Simulation mode uses separate directories to not overwrite real trading data
     global SIMULATION_SUMMARY_HTML, SIMULATION_SUMMARY_JSON, REPORT_DIR
-    REPORT_DIR = get_report_dir(use_testnet)
+    is_simulation = bool(args.simulate)
+    REPORT_DIR = get_report_dir(use_testnet, is_simulation)
     SIMULATION_SUMMARY_HTML = os.path.join(REPORT_DIR, "trading_summary.html")
     SIMULATION_SUMMARY_JSON = os.path.join(REPORT_DIR, "trading_summary.json")
-    if use_testnet:
+
+    # Create simulation directories if needed
+    if is_simulation:
+        os.makedirs(SIMULATION_OUTPUT_DIR, exist_ok=True)
+        os.makedirs(SIMULATION_TESTNET_DIR, exist_ok=True)
+        os.makedirs(os.path.join(SIMULATION_OUTPUT_DIR, "charts"), exist_ok=True)
+        print(f"[Config] Simulation mode: output to {REPORT_DIR}")
+    elif use_testnet:
         print(f"[Config] Using testnet report directory: {REPORT_DIR}")
 
     set_signal_debug(args.debug_signals)
@@ -4145,12 +4162,12 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
         summary_json_path = args.summary_json or SIMULATION_SUMMARY_JSON
         write_summary_json(summary_data, summary_json_path)
 
-        # Generate testnet dashboards
+        # Generate testnet dashboards (to simulation directory)
         try:
             dashboard_start = pd.to_datetime(args.dashboard_start).tz_localize(st.BERLIN_TZ)
         except Exception:
             dashboard_start = pd.Timestamp("2025-12-01", tz=st.BERLIN_TZ)
-        generate_testnet_dashboard(trades_df, open_positions, final_state, dashboard_start)
+        generate_testnet_dashboard(trades_df, open_positions, final_state, dashboard_start, output_dir=SIMULATION_TESTNET_DIR)
 
         # Print per-symbol statistics to console
         symbol_stats = summary_data.get("symbol_stats", [])
