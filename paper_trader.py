@@ -2327,6 +2327,16 @@ def generate_summary_html(
     open_positions_df: pd.DataFrame,
     path: str,
 ) -> None:
+    # German number format helper
+    def fmt_de(value, decimals=2):
+        """Format number in German style: 1.234,56"""
+        if pd.isna(value):
+            return ""
+        formatted = f"{value:,.{decimals}f}"
+        # Swap . and , for German format
+        formatted = formatted.replace(",", "X").replace(".", ",").replace("X", ".")
+        return formatted
+
     html_parts = [
         "<html><head><meta charset='utf-8'>",
         "<title>Paper Trading Simulation Summary</title>",
@@ -2340,13 +2350,13 @@ def generate_summary_html(
         "<tr><th>Metric</th><th>Overall</th><th>Long</th><th>Short</th></tr>",
         f"<tr><td>Closed trades</td><td>{summary['closed_trades']}</td><td>{summary.get('long_trades', 0)}</td><td>{summary.get('short_trades', 0)}</td></tr>",
         f"<tr><td>Open positions</td><td>{summary['open_positions']}</td><td>{summary.get('long_open', 0)}</td><td>{summary.get('short_open', 0)}</td></tr>",
-        f"<tr><td>PnL (USDT)</td><td>{summary['closed_pnl']:.2f}</td><td>{summary.get('long_pnl', 0):.2f}</td><td>{summary.get('short_pnl', 0):.2f}</td></tr>",
-        f"<tr><td>Avg PnL (USDT)</td><td>{summary['avg_trade_pnl']:.2f}</td><td>{summary.get('long_avg_pnl', 0):.2f}</td><td>{summary.get('short_avg_pnl', 0):.2f}</td></tr>",
-        f"<tr><td>Win rate (%)</td><td>{summary['win_rate_pct']:.2f}</td><td>{summary.get('long_win_rate', 0):.2f}</td><td>{summary.get('short_win_rate', 0):.2f}</td></tr>",
+        f"<tr><td>PnL (USDT)</td><td>{fmt_de(summary['closed_pnl'])}</td><td>{fmt_de(summary.get('long_pnl', 0))}</td><td>{fmt_de(summary.get('short_pnl', 0))}</td></tr>",
+        f"<tr><td>Avg PnL (USDT)</td><td>{fmt_de(summary['avg_trade_pnl'])}</td><td>{fmt_de(summary.get('long_avg_pnl', 0))}</td><td>{fmt_de(summary.get('short_avg_pnl', 0))}</td></tr>",
+        f"<tr><td>Win rate (%)</td><td>{fmt_de(summary['win_rate_pct'])}</td><td>{fmt_de(summary.get('long_win_rate', 0))}</td><td>{fmt_de(summary.get('short_win_rate', 0))}</td></tr>",
         f"<tr><td>Winners</td><td>{summary['winners']}</td><td>{summary.get('long_winners', 0)}</td><td>{summary.get('short_winners', 0)}</td></tr>",
         f"<tr><td>Losers</td><td>{summary['losers']}</td><td>{summary.get('long_losers', 0)}</td><td>{summary.get('short_losers', 0)}</td></tr>",
-        f"<tr><td>Open equity (USDT)</td><td>{summary['open_equity']:.2f}</td><td>{summary.get('long_open_equity', 0):.2f}</td><td>{summary.get('short_open_equity', 0):.2f}</td></tr>",
-        f"<tr style='font-weight:bold;'><td>Final capital (USDT)</td><td>{summary['final_capital']:.2f}</td><td>-</td><td>-</td></tr>",
+        f"<tr><td>Open equity (USDT)</td><td>{fmt_de(summary['open_equity'])}</td><td>{fmt_de(summary.get('long_open_equity', 0))}</td><td>{fmt_de(summary.get('short_open_equity', 0))}</td></tr>",
+        f"<tr style='font-weight:bold;'><td>Final capital (USDT)</td><td>{fmt_de(summary['final_capital'])}</td><td>-</td><td>-</td></tr>",
         "</table>",
     ]
 
@@ -2364,17 +2374,17 @@ def generate_summary_html(
                 f"<td>{ss['trades']}</td>"
                 f"<td>{ss['winners']}</td>"
                 f"<td>{ss['losers']}</td>"
-                f"<td>{ss['win_rate']:.1f}%</td>"
-                f"<td style='color:{pnl_color}'>{ss['total_pnl']:.2f}</td>"
-                f"<td>{ss['avg_pnl']:.2f}</td>"
-                f"<td style='color:green'>{ss['best_trade']:.2f}</td>"
-                f"<td style='color:red'>{ss['worst_trade']:.2f}</td>"
-                f"<td style='color:orange'>{ss['max_drawdown']:.2f}</td>"
+                f"<td>{fmt_de(ss['win_rate'], 1)}%</td>"
+                f"<td style='color:{pnl_color}'>{fmt_de(ss['total_pnl'])}</td>"
+                f"<td>{fmt_de(ss['avg_pnl'])}</td>"
+                f"<td style='color:green'>{fmt_de(ss['best_trade'])}</td>"
+                f"<td style='color:red'>{fmt_de(ss['worst_trade'])}</td>"
+                f"<td style='color:orange'>{fmt_de(ss['max_drawdown'])}</td>"
                 f"<td>{ss['profit_factor']}</td>"
                 f"<td>{ss['long_trades']}</td>"
                 f"<td>{ss['short_trades']}</td>"
-                f"<td>{ss['long_pnl']:.2f}</td>"
-                f"<td>{ss['short_pnl']:.2f}</td>"
+                f"<td>{fmt_de(ss['long_pnl'])}</td>"
+                f"<td>{fmt_de(ss['short_pnl'])}</td>"
                 f"</tr>"
             )
         html_parts.append("</table>")
@@ -2396,14 +2406,19 @@ def generate_summary_html(
                 trades_display[col] = pd.to_numeric(trades_display[col], errors="coerce")
 
         # Use formatters parameter to format specific columns during HTML generation
-        # Note: Must use default parameter to avoid closure bug with lambda in loop
-        def make_formatter(precision):
-            return lambda x: f"{x:.{precision}f}" if pd.notna(x) else ""
+        # German number format for trade table columns
+        def make_formatter_de(precision):
+            def formatter(x):
+                if pd.isna(x):
+                    return ""
+                formatted = f"{x:,.{precision}f}"
+                return formatted.replace(",", "X").replace(".", ",").replace("X", ".")
+            return formatter
 
         formatters = {}
         for col in ["entry_price", "exit_price", "stake", "pnl"]:
             if col in trades_display.columns:
-                formatters[col] = make_formatter(8)
+                formatters[col] = make_formatter_de(8)
 
         # Separate Long and Short trades
         if "direction" in trades_display.columns:
@@ -2413,13 +2428,13 @@ def generate_summary_html(
             # Display Long Trades
             if not long_trades.empty:
                 long_pnl = long_trades["pnl"].sum() if "pnl" in long_trades.columns else 0
-                html_parts.append(f"<h2>Long Trades ({len(long_trades)} trades, PnL: {long_pnl:.2f} USDT)</h2>")
+                html_parts.append(f"<h2>Long Trades ({len(long_trades)} trades, PnL: {fmt_de(long_pnl)} USDT)</h2>")
                 html_parts.append(long_trades.to_html(index=False, escape=False, formatters=formatters))
 
             # Display Short Trades
             if not short_trades.empty:
                 short_pnl = short_trades["pnl"].sum() if "pnl" in short_trades.columns else 0
-                html_parts.append(f"<h2>Short Trades ({len(short_trades)} trades, PnL: {short_pnl:.2f} USDT)</h2>")
+                html_parts.append(f"<h2>Short Trades ({len(short_trades)} trades, PnL: {fmt_de(short_pnl)} USDT)</h2>")
                 html_parts.append(short_trades.to_html(index=False, escape=False, formatters=formatters))
         else:
             # Fallback if no direction column
@@ -2448,9 +2463,14 @@ def generate_summary_html(
                 open_display[col] = pd.to_numeric(open_display[col], errors="coerce")
 
         # Use formatters parameter to format specific columns during HTML generation
-        # Note: Must use factory function to avoid closure bug with lambda in loop
-        def make_float_formatter(precision):
-            return lambda x: f"{x:.{precision}f}" if pd.notna(x) else ""
+        # German number format
+        def make_float_formatter_de(precision):
+            def formatter(x):
+                if pd.isna(x):
+                    return ""
+                formatted = f"{x:,.{precision}f}"
+                return formatted.replace(",", "X").replace(".", ",").replace("X", ".")
+            return formatter
 
         def make_int_formatter():
             return lambda x: f"{int(x)}" if pd.notna(x) else "0"
@@ -2460,12 +2480,12 @@ def generate_summary_html(
         # 8 decimal places for prices and amounts
         for col in ["entry_price", "stake", "last_price", "unrealized_pnl", "unrealized_pct"]:
             if col in open_display.columns:
-                formatters[col] = make_float_formatter(8)
+                formatters[col] = make_float_formatter_de(8)
 
         # 2 decimal places for float params
         for col in ["param_a", "param_b", "atr_mult"]:
             if col in open_display.columns:
-                formatters[col] = make_float_formatter(2)
+                formatters[col] = make_float_formatter_de(2)
 
         # Integers for counts
         for col in ["min_hold_bars", "bars_held"]:
@@ -2480,13 +2500,13 @@ def generate_summary_html(
             # Display Long Open Positions
             if not long_open.empty:
                 long_equity = compute_net_open_equity(long_open)
-                html_parts.append(f"<h2>Long Open Positions ({len(long_open)} positions, Equity: {long_equity:.2f} USDT)</h2>")
+                html_parts.append(f"<h2>Long Open Positions ({len(long_open)} positions, Equity: {fmt_de(long_equity)} USDT)</h2>")
                 html_parts.append(long_open.to_html(index=False, escape=False, formatters=formatters))
 
             # Display Short Open Positions
             if not short_open.empty:
                 short_equity = compute_net_open_equity(short_open)
-                html_parts.append(f"<h2>Short Open Positions ({len(short_open)} positions, Equity: {short_equity:.2f} USDT)</h2>")
+                html_parts.append(f"<h2>Short Open Positions ({len(short_open)} positions, Equity: {fmt_de(short_equity)} USDT)</h2>")
                 html_parts.append(short_open.to_html(index=False, escape=False, formatters=formatters))
         else:
             # Fallback if no direction column
