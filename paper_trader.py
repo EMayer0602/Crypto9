@@ -2398,12 +2398,8 @@ def generate_summary_html(
         html_parts.append("</table>")
 
     if not trades_df.empty:
-        full_cols = [c for c in [
-            "symbol","direction","indicator","htf","entry_time","entry_price","exit_time","exit_price","stake","pnl","reason"
-        ] if c in trades_df.columns]
-
         # Prepare display DataFrame - ensure numeric columns are actually numeric
-        trades_display = trades_df[full_cols].copy()
+        trades_display = trades_df.copy()
 
         # Remove rows where essential columns are NaN (filter out empty rows)
         if "symbol" in trades_display.columns:
@@ -2412,6 +2408,15 @@ def generate_summary_html(
         for col in ["entry_price", "exit_price", "stake", "pnl"]:
             if col in trades_display.columns:
                 trades_display[col] = pd.to_numeric(trades_display[col], errors="coerce")
+
+        # Calculate Amount = Stake / Entry Price
+        if "stake" in trades_display.columns and "entry_price" in trades_display.columns:
+            trades_display["amount"] = trades_display["stake"] / trades_display["entry_price"].replace(0, pd.NA)
+
+        full_cols = [c for c in [
+            "symbol","direction","indicator","htf","entry_time","entry_price","exit_time","exit_price","amount","stake","pnl","reason"
+        ] if c in trades_display.columns]
+        trades_display = trades_display[full_cols]
 
         # Use formatters parameter to format specific columns during HTML generation
         # German number format for trade table columns
@@ -2427,6 +2432,8 @@ def generate_summary_html(
         for col in ["entry_price", "exit_price", "stake", "pnl"]:
             if col in trades_display.columns:
                 formatters[col] = make_formatter_de(8)
+        if "amount" in trades_display.columns:
+            formatters["amount"] = make_formatter_de(4)
 
         # Separate Long and Short trades
         if "direction" in trades_display.columns:
@@ -2470,6 +2477,10 @@ def generate_summary_html(
             if col in open_display.columns:
                 open_display[col] = pd.to_numeric(open_display[col], errors="coerce")
 
+        # Calculate Amount = Stake / Entry Price
+        if "stake" in open_display.columns and "entry_price" in open_display.columns:
+            open_display["amount"] = open_display["stake"] / open_display["entry_price"].replace(0, pd.NA)
+
         # Use formatters parameter to format specific columns during HTML generation
         # German number format
         def make_float_formatter_de(precision):
@@ -2485,10 +2496,13 @@ def generate_summary_html(
 
         formatters = {}
 
-        # 8 decimal places for prices and amounts
+        # 8 decimal places for prices and stake
         for col in ["entry_price", "stake", "last_price", "unrealized_pnl", "unrealized_pct"]:
             if col in open_display.columns:
                 formatters[col] = make_float_formatter_de(8)
+        # 4 decimal places for amount
+        if "amount" in open_display.columns:
+            formatters["amount"] = make_float_formatter_de(4)
 
         # 2 decimal places for float params
         for col in ["param_a", "param_b", "atr_mult"]:
@@ -2684,30 +2698,34 @@ tr:hover{{background:#1f4068}}
 <div class="box"><h3>{lbl_unrealized}</h3><div class="v {unreal_cls}">{fmt(total_unrealized)}</div></div>
 </div>
 <h2>{lbl_open_pos} ({len(open_positions)})</h2>
-<table><tr><th>Symbol</th><th>{lbl_strategy}</th><th>{lbl_entry}</th><th>{lbl_entry_price}</th><th>{lbl_current}</th><th>Stake</th><th>{lbl_unrealized}</th></tr>"""
+<table><tr><th>Symbol</th><th>{lbl_strategy}</th><th>{lbl_entry}</th><th>{lbl_entry_price}</th><th>{lbl_current}</th><th>Amount</th><th>Stake</th><th>{lbl_unrealized}</th></tr>"""
         for p in open_display:
             pnl = p.get("unrealized_pnl", 0)
             stake = p.get("calc_stake", capital / max_pos)
+            entry_price = float(p.get("entry_price", 0) or 0)
+            amount = stake / entry_price if entry_price > 0 else 0
             strategy = f"{p.get('indicator', 'jma')}/{p.get('htf', '12h')}"
             pnl_cls = "pos" if pnl >= 0 else "neg"
-            html += f"<tr><td>{p.get('symbol','?')}</td><td>{strategy}</td><td>{p.get('entry_time','')[:16]}</td><td>{fmt_price(p.get('entry_price',0))}</td><td>{fmt_price(p.get('last_price',0))}</td><td>{fmt(stake)}</td><td class='{pnl_cls}'>{fmt(pnl)}</td></tr>"
+            html += f"<tr><td>{p.get('symbol','?')}</td><td>{strategy}</td><td>{p.get('entry_time','')[:16]}</td><td>{fmt_price(entry_price)}</td><td>{fmt_price(p.get('last_price',0))}</td><td>{fmt(amount, 4)}</td><td>{fmt(stake)}</td><td class='{pnl_cls}'>{fmt(pnl)}</td></tr>"
         lbl_strat = "Strategie" if lang == "de" else "Strategy"
         lbl_entry = "Einstieg" if lang == "de" else "Entry"
         lbl_eprice = "Einstiegspreis" if lang == "de" else "Entry Price"
         lbl_exit = "Ausstieg" if lang == "de" else "Exit"
         lbl_xprice = "Ausstiegspreis" if lang == "de" else "Exit Price"
         lbl_reason = "Grund" if lang == "de" else "Reason"
-        html += f"</table><h2>Trades ({len(processed_trades)})</h2><table><tr><th>Symbol</th><th>{lbl_strat}</th><th>{lbl_entry}</th><th>{lbl_eprice}</th><th>{lbl_exit}</th><th>{lbl_xprice}</th><th>Stake</th><th>PnL</th><th>PnL%</th><th>{lbl_reason}</th></tr>"
+        lbl_amount = "Menge" if lang == "de" else "Amount"
+        html += f"</table><h2>Trades ({len(processed_trades)})</h2><table><tr><th>Symbol</th><th>{lbl_strat}</th><th>{lbl_entry}</th><th>{lbl_eprice}</th><th>{lbl_exit}</th><th>{lbl_xprice}</th><th>{lbl_amount}</th><th>Stake</th><th>PnL</th><th>PnL%</th><th>{lbl_reason}</th></tr>"
         # Show trades in reverse chronological order (newest first)
         for t in sorted(processed_trades, key=lambda x: x.get("exit_time",""), reverse=True)[:50]:
             pnl = float(t.get("calc_pnl", 0) or 0)
             stake = float(t.get("calc_stake", START_TOTAL_CAPITAL / max_pos) or 0)
             entry_price = float(t.get("entry_price", 0) or 0)
             exit_price = float(t.get("exit_price", 0) or 0)
+            amount = stake / entry_price if entry_price > 0 else 0
             pnl_pct = (pnl / stake * 100) if stake > 0 else 0
             strategy = f"{t.get('indicator', 'jma')}/{t.get('htf', '12h')}"
             pnl_cls = "pos" if pnl >= 0 else "neg"
-            html += f"<tr><td>{t.get('symbol','?')}</td><td>{strategy}</td><td>{str(t.get('entry_time',''))[:16]}</td><td>{fmt_price(entry_price)}</td><td>{str(t.get('exit_time',''))[:16]}</td><td>{fmt_price(exit_price)}</td><td>{fmt(stake)}</td><td class='{pnl_cls}'>{fmt(pnl)}</td><td class='{pnl_cls}'>{fmt(pnl_pct,1)}%</td><td>{t.get('reason','')}</td></tr>"
+            html += f"<tr><td>{t.get('symbol','?')}</td><td>{strategy}</td><td>{str(t.get('entry_time',''))[:16]}</td><td>{fmt_price(entry_price)}</td><td>{str(t.get('exit_time',''))[:16]}</td><td>{fmt_price(exit_price)}</td><td>{fmt(amount, 4)}</td><td>{fmt(stake)}</td><td class='{pnl_cls}'>{fmt(pnl)}</td><td class='{pnl_cls}'>{fmt(pnl_pct,1)}%</td><td>{t.get('reason','')}</td></tr>"
         html += f"</table><p style='color:#8892b0;font-size:12px'>Generated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC</p></body></html>"
 
         suffix = "_de" if lang == "de" else ""
