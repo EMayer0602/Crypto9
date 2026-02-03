@@ -258,6 +258,7 @@ USE_FUTURES_SIGNALS = False  # Use futures data for signal generation (Option 1 
 USE_TREND_STRENGTH_FILTER = False  # Only enter if price is far enough from HTF indicator
 TREND_STRENGTH_MIN_PCT = 0.5  # Minimum distance from HTF indicator in % (0.5 = 0.5%)
 _TESTNET_ACTIVE = False  # Track if testnet mode is active for dashboard updates
+_DASHBOARD_START = None  # Dashboard start date for filtering trades (datetime object)
 DEFAULT_SIGNAL_INTERVAL_MIN = 15
 DEFAULT_SPIKE_INTERVAL_MIN = 5
 DEFAULT_ATR_SPIKE_MULT = 2.5
@@ -381,6 +382,12 @@ def set_testnet_active(enabled: bool) -> None:
     """Track if testnet mode is active for dashboard updates."""
     global _TESTNET_ACTIVE
     _TESTNET_ACTIVE = bool(enabled)
+
+
+def set_dashboard_start(start_date) -> None:
+    """Set dashboard start date for filtering trades."""
+    global _DASHBOARD_START
+    _DASHBOARD_START = start_date
 
 
 def load_env_file(path: str = ".env") -> None:
@@ -3270,9 +3277,10 @@ def write_live_reports(final_state: Dict, closed_trades: List[TradeResult]) -> N
     if _TESTNET_ACTIVE:
         try:
             from TestnetDashboard import generate_dashboard
-            generate_dashboard(output_dir="report_testnet")
-            generate_dashboard(output_dir="report_testnet", lang="de")
-            print("[Dashboard] Testnet dashboard updated (EN + DE)")
+            generate_dashboard(trades_since=_DASHBOARD_START, output_dir="report_testnet")
+            generate_dashboard(trades_since=_DASHBOARD_START, output_dir="report_testnet", lang="de")
+            start_str = _DASHBOARD_START.strftime("%Y-%m-%d") if _DASHBOARD_START else "all"
+            print(f"[Dashboard] Testnet dashboard updated (EN + DE) - trades since {start_str}")
         except Exception as e:
             print(f"[Dashboard] Failed to update: {e}")
 
@@ -3893,8 +3901,8 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--dashboard-start",
         type=str,
-        default="2025-12-01",
-        help="Start date for testnet dashboard (YYYY-MM-DD, default: 2025-12-01)",
+        default="2026-01-01",
+        help="Start date for testnet dashboard (YYYY-MM-DD, default: 2026-01-01)",
     )
     return parser.parse_args(argv)
 
@@ -3907,6 +3915,16 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
 
     use_testnet = bool(args.testnet or DEFAULT_USE_TESTNET)
     set_testnet_active(use_testnet)
+
+    # Set dashboard start date for filtering trades
+    try:
+        from datetime import datetime, timezone
+        dashboard_start_dt = datetime.strptime(args.dashboard_start, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        set_dashboard_start(dashboard_start_dt)
+        print(f"[Config] Dashboard shows trades from: {args.dashboard_start}")
+    except Exception as e:
+        print(f"[Warning] Could not parse dashboard_start '{args.dashboard_start}': {e}")
+        set_dashboard_start(None)
 
     # Handle stake sizing: dynamic by default, fixed if --stake provided
     if args.stake is not None:
