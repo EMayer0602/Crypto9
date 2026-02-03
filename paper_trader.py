@@ -4065,45 +4065,34 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
       summary_path = args.summary_json or SIMULATION_SUMMARY_JSON
 
       if not os.path.exists(summary_path):
-          # No file exists - start fresh from 2024-01-01 to 2026-01-01
+          # No file exists - FRESH START from 2024-01-01 to 2026-01-01
           is_fresh_start = True
-          print(f"[Simulation] No {summary_path} found - starting fresh from {HISTORICAL_START.strftime('%Y-%m-%d')} to {HISTORICAL_END.strftime('%Y-%m-%d')}")
+          print(f"[Simulation] No {summary_path} found")
+          print(f"[Simulation] FRESH START: {HISTORICAL_START.strftime('%Y-%m-%d')} to {HISTORICAL_END.strftime('%Y-%m-%d')}")
       else:
           try:
               with open(summary_path, "r", encoding="utf-8") as f:
                   existing_summary = json.load(f)
               existing_trades = existing_summary.get("trades", [])
               if existing_trades:
+                  # Trades exist - APPEND MODE
                   existing_trades_df = pd.DataFrame(existing_trades)
                   last_exit = max(t.get("exit_time", "") for t in existing_trades if t.get("exit_time"))
                   if last_exit:
                       last_end_ts = pd.to_datetime(last_exit)
                       if last_end_ts.tzinfo is None:
                           last_end_ts = last_end_ts.tz_localize(st.BERLIN_TZ)
-                  print(f"[Simulation] Found {len(existing_trades)} existing trades in {summary_path}")
-                  print(f"[Simulation] Will append from: {last_end_ts} to now")
+                  print(f"[Simulation] Found {len(existing_trades)} existing trades")
+                  print(f"[Simulation] APPEND MODE: from {last_end_ts} to now")
               else:
-                  # Fallback: try to load from paper_trading_log.csv
-                  if os.path.exists(TRADE_LOG_FILE):
-                      log_df = _load_trade_log_dataframe(TRADE_LOG_FILE)
-                      if not log_df.empty:
-                          existing_trades_df = log_df
-                          last_exit = log_df["exit_time"].max() if "exit_time" in log_df.columns else None
-                          if last_exit:
-                              last_end_ts = pd.to_datetime(last_exit)
-                              if last_end_ts.tzinfo is None:
-                                  last_end_ts = last_end_ts.tz_localize(st.BERLIN_TZ)
-                          print(f"[Simulation] Loaded {len(log_df)} existing trades from {TRADE_LOG_FILE}")
-                          print(f"[Simulation] Will append from: {last_end_ts} to now")
-                      else:
-                          is_fresh_start = True
-                          print(f"[Simulation] No trades found - starting fresh from {HISTORICAL_START.strftime('%Y-%m-%d')} to {HISTORICAL_END.strftime('%Y-%m-%d')}")
-                  else:
-                      is_fresh_start = True
-                      print(f"[Simulation] No trades found - starting fresh from {HISTORICAL_START.strftime('%Y-%m-%d')} to {HISTORICAL_END.strftime('%Y-%m-%d')}")
+                  # File exists but no trades - FRESH START
+                  is_fresh_start = True
+                  print(f"[Simulation] File exists but no trades")
+                  print(f"[Simulation] FRESH START: {HISTORICAL_START.strftime('%Y-%m-%d')} to {HISTORICAL_END.strftime('%Y-%m-%d')}")
           except Exception as e:
               is_fresh_start = True
-              print(f"[Simulation] Could not load existing trades: {e} - starting fresh from {HISTORICAL_START.strftime('%Y-%m-%d')} to {HISTORICAL_END.strftime('%Y-%m-%d')}")
+              print(f"[Simulation] Error loading: {e}")
+              print(f"[Simulation] FRESH START: {HISTORICAL_START.strftime('%Y-%m-%d')} to {HISTORICAL_END.strftime('%Y-%m-%d')}")
 
       while True:  # Loop for --loop mode
         if args.loop:
