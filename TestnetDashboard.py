@@ -168,9 +168,6 @@ def generate_dashboard(
         print("[Dashboard] No trading summary data available")
         return None
 
-    # Load paper trading state for open positions (from same directory)
-    state = load_paper_trading_state(state_json)
-
     # Get trades from summary (only from trading_summary.json, not simulation files)
     all_trades = summary.get("trades", [])
 
@@ -187,51 +184,37 @@ def generate_dashboard(
                 pass
         closed_trades.append(t)
 
-    # Get open positions from state (more current than summary)
-    state_positions = state.get("positions", [])
+    # Get open positions from summary (use actual data from open_positions_data)
+    summary_positions = summary.get("open_positions_data", [])
 
     # Fetch live prices for open positions
-    if state_positions:
-        symbols = [p.get("symbol", "") for p in state_positions]
+    if summary_positions:
+        symbols = [p.get("symbol", "") for p in summary_positions]
         live_prices = get_all_current_prices(symbols)
         print(f"[Dashboard] Fetched {len(live_prices)} live prices")
     else:
         live_prices = {}
 
-    # === DYNAMIC STAKE CALCULATION ===
+    # === USE ACTUAL VALUES FROM TRADES ===
     # Sort filtered trades chronologically by entry_time
     sorted_trades = sorted(closed_trades, key=lambda t: t.get("entry_time", "") or "")
 
-    # Recalculate stakes and PnL dynamically
-    # First trade: stake = start_capital / max_positions = 16500/10 = 1650
-    # Each trade adds its PnL to capital, next trade uses new capital/10
-    capital = start_capital
-    recalculated_trades = []
+    # Use actual stakes and PnL from trades (as stored in summary)
+    processed_trades = []
     total_realized_pnl = 0
 
     for t in sorted_trades:
         entry_price = float(t.get("entry_price", 0) or 0)
         exit_price = float(t.get("exit_price", 0) or 0)
-        direction = t.get("direction", "long")
 
-        # Dynamic stake based on current capital
-        stake = capital / max_positions
+        # Use actual stake and PnL from trade data
+        stake = float(t.get("stake", 0) or 0)
+        pnl = float(t.get("pnl", 0) or 0)
 
-        # Recalculate PnL based on dynamic stake
-        if entry_price > 0:
-            if direction == "short":
-                pnl = (entry_price - exit_price) / entry_price * stake
-            else:  # long
-                pnl = (exit_price - entry_price) / entry_price * stake
-        else:
-            pnl = 0
-
-        # Update capital for next trade
-        capital += pnl
         total_realized_pnl += pnl
 
-        # Store recalculated values
-        recalculated_trades.append({
+        # Store actual values
+        processed_trades.append({
             **t,
             "stake": stake,
             "pnl": pnl,
@@ -241,10 +224,10 @@ def generate_dashboard(
     # Current capital after all closed trades
     current_capital = start_capital + total_realized_pnl
 
-    # Calculate open positions with live prices and dynamic stake
+    # Use actual open positions from summary with live price updates
     open_positions = []
 
-    for p in state_positions:
+    for p in summary_positions:
         symbol = p.get("symbol", "?")
         entry_price = float(p.get("entry_price", 0) or 0)
         live_price = live_prices.get(symbol, entry_price)
@@ -276,9 +259,9 @@ def generate_dashboard(
         })
 
     # Calculate totals (total_realized_pnl already calculated above)
-    total_closed_trades = len(recalculated_trades)
+    total_closed_trades = len(processed_trades)
     total_unrealized_pnl = sum(p["unrealized_pnl"] for p in open_positions)
-    wins = sum(1 for t in recalculated_trades if float(t.get("pnl", 0) or 0) > 0)
+    wins = sum(1 for t in processed_trades if float(t.get("pnl", 0) or 0) > 0)
     win_rate = wins / total_closed_trades * 100 if total_closed_trades > 0 else 0
     final_capital = current_capital + total_unrealized_pnl
 
@@ -433,9 +416,9 @@ def generate_dashboard(
     <table>
         <tr class="long-header"><th>{L['symbol']}</th><th>{L['entry_time']}</th><th>{L['exit_time']}</th><th>{L['entry_price']}</th><th>{L['exit_price']}</th><th>{L['stake']}</th><th>{L['pnl']}</th><th>{L['pnl_pct']}</th><th>{L['reason']}</th></tr>
 """
-    if recalculated_trades:
+    if processed_trades:
         # Sort by entry_time descending (newest first) for display
-        display_trades = sorted(recalculated_trades, key=lambda t: t.get("entry_time", ""), reverse=True)
+        display_trades = sorted(processed_trades, key=lambda t: t.get("entry_time", ""), reverse=True)
         for t in display_trades[:100]:  # Show max 100 trades
             pnl = float(t.get("pnl", 0) or 0)
             stake = float(t.get("stake", 0) or 0)
