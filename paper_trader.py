@@ -237,13 +237,10 @@ def get_state_file(use_testnet: bool = False, is_simulation: bool = False) -> st
 def get_report_dir(use_testnet: bool = False, is_simulation: bool = False) -> str:
     """Return the appropriate report directory based on mode.
 
-    - Simulation + Testnet: report_simulation_testnet/ (simulation dashboards)
-    - Simulation: report_simulation/ (simulation reports)
-    - Testnet mode: report_testnet/ (for real trading dashboards)
-    - Normal mode: report_html/ (for real trading output)
+    Now simulation uses the SAME directory as live mode so trades accumulate:
+    - Testnet mode (with or without simulation): report_testnet/
+    - Normal mode (with or without simulation): report_html/
     """
-    if is_simulation:
-        return SIMULATION_TESTNET_DIR if use_testnet else SIMULATION_OUTPUT_DIR
     return "report_testnet" if use_testnet else "report_html"
 
 
