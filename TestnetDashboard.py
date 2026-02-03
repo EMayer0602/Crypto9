@@ -495,6 +495,10 @@ def parse_args():
         "--max-positions", type=int, default=10,
         help="Maximum open positions for stake calculation (default: 10)"
     )
+    parser.add_argument(
+        "--output-dir", type=str, default="report_html",
+        help="Output directory for dashboard (default: report_html). Use report_testnet for testnet data."
+    )
     return parser.parse_args()
 
 
@@ -511,20 +515,21 @@ if __name__ == "__main__":
             print(f"[Warning] Invalid date format '{args.start}', showing all trades. Use YYYY-MM-DD.")
 
     print(f"[Config] Start capital: {args.start_capital}, Max positions: {args.max_positions}")
+    print(f"[Config] Output directory: {args.output_dir}")
 
     if args.loop:
         print(f"[Config] Running in loop mode, refreshing every {args.interval} seconds. Press Ctrl+C to stop.")
         try:
             while True:
-                path_en = generate_dashboard(trades_since, args.start_capital, args.max_positions, lang="en")
-                path_de = generate_dashboard(trades_since, args.start_capital, args.max_positions, lang="de")
+                path_en = generate_dashboard(trades_since, args.start_capital, args.max_positions, lang="en", output_dir=args.output_dir)
+                path_de = generate_dashboard(trades_since, args.start_capital, args.max_positions, lang="de", output_dir=args.output_dir)
                 print(f"[{datetime.now().strftime('%H:%M:%S')}] Dashboards updated")
                 time.sleep(args.interval)
         except KeyboardInterrupt:
             print("\nStopped.")
     else:
-        path_en = generate_dashboard(trades_since, args.start_capital, args.max_positions, lang="en")
-        path_de = generate_dashboard(trades_since, args.start_capital, args.max_positions, lang="de")
+        path_en = generate_dashboard(trades_since, args.start_capital, args.max_positions, lang="en", output_dir=args.output_dir)
+        path_de = generate_dashboard(trades_since, args.start_capital, args.max_positions, lang="de", output_dir=args.output_dir)
         if path_en:
             print(f"\nOpen with: start {path_en}")
             print(f"           start {path_de}")
