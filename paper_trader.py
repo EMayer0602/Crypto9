@@ -4057,14 +4057,17 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
     if args.simulate:
       existing_trades_df = None
       last_end_ts = None
+      is_fresh_start = False  # Track if this is a fresh start (no existing trades)
       HISTORICAL_START = pd.Timestamp("2024-01-01", tz=st.BERLIN_TZ)
+      HISTORICAL_END = pd.Timestamp("2026-01-01", tz=st.BERLIN_TZ)  # First run ends here
 
       # Check if existing trades file has data - if yes, append; if no, start fresh from 2024-01-01
       summary_path = args.summary_json or SIMULATION_SUMMARY_JSON
 
       if not os.path.exists(summary_path):
-          # No file exists - start fresh from 2024-01-01
-          print(f"[Simulation] No {summary_path} found - starting fresh from {HISTORICAL_START.strftime('%Y-%m-%d')}")
+          # No file exists - start fresh from 2024-01-01 to 2026-01-01
+          is_fresh_start = True
+          print(f"[Simulation] No {summary_path} found - starting fresh from {HISTORICAL_START.strftime('%Y-%m-%d')} to {HISTORICAL_END.strftime('%Y-%m-%d')}")
       else:
           try:
               with open(summary_path, "r", encoding="utf-8") as f:
@@ -4078,7 +4081,7 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
                       if last_end_ts.tzinfo is None:
                           last_end_ts = last_end_ts.tz_localize(st.BERLIN_TZ)
                   print(f"[Simulation] Found {len(existing_trades)} existing trades in {summary_path}")
-                  print(f"[Simulation] Will append from: {last_end_ts}")
+                  print(f"[Simulation] Will append from: {last_end_ts} to now")
               else:
                   # Fallback: try to load from paper_trading_log.csv
                   if os.path.exists(TRADE_LOG_FILE):
@@ -4091,13 +4094,16 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
                               if last_end_ts.tzinfo is None:
                                   last_end_ts = last_end_ts.tz_localize(st.BERLIN_TZ)
                           print(f"[Simulation] Loaded {len(log_df)} existing trades from {TRADE_LOG_FILE}")
-                          print(f"[Simulation] Will append from: {last_end_ts}")
+                          print(f"[Simulation] Will append from: {last_end_ts} to now")
                       else:
-                          print(f"[Simulation] No trades found - starting fresh from {HISTORICAL_START.strftime('%Y-%m-%d')}")
+                          is_fresh_start = True
+                          print(f"[Simulation] No trades found - starting fresh from {HISTORICAL_START.strftime('%Y-%m-%d')} to {HISTORICAL_END.strftime('%Y-%m-%d')}")
                   else:
-                      print(f"[Simulation] No trades found - starting fresh from {HISTORICAL_START.strftime('%Y-%m-%d')}")
+                      is_fresh_start = True
+                      print(f"[Simulation] No trades found - starting fresh from {HISTORICAL_START.strftime('%Y-%m-%d')} to {HISTORICAL_END.strftime('%Y-%m-%d')}")
           except Exception as e:
-              print(f"[Simulation] Could not load existing trades: {e} - starting fresh from {HISTORICAL_START.strftime('%Y-%m-%d')}")
+              is_fresh_start = True
+              print(f"[Simulation] Could not load existing trades: {e} - starting fresh from {HISTORICAL_START.strftime('%Y-%m-%d')} to {HISTORICAL_END.strftime('%Y-%m-%d')}")
 
       while True:  # Loop for --loop mode
         if args.loop:
@@ -4156,9 +4162,16 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
             except Exception:
                 pass
 
-            # Use cache end or current time as default end
-            default_end = cache_end if cache_end else pd.Timestamp.now(tz=st.BERLIN_TZ)
-            end_ts = resolve_timestamp(args.end, default_end)
+            # Determine end time:
+            # - Fresh start: end at HISTORICAL_END (2026-01-01)
+            # - Append mode: end at now (or cache end)
+            if is_fresh_start:
+                end_ts = HISTORICAL_END if not args.end else resolve_timestamp(args.end, HISTORICAL_END)
+                print(f"[Simulation] Fresh start - will end at: {end_ts.strftime('%Y-%m-%d')}")
+            else:
+                default_end = cache_end if cache_end else pd.Timestamp.now(tz=st.BERLIN_TZ)
+                end_ts = resolve_timestamp(args.end, default_end)
+                print(f"[Simulation] Append mode - will end at: {end_ts.strftime('%Y-%m-%d %H:%M')}")
 
             # Determine start time:
             # - If existing trades: continue from last trade exit (append mode)
