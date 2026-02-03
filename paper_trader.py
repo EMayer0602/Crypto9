@@ -1116,14 +1116,23 @@ def sync_simulation_positions(state: Dict, use_testnet: bool = False) -> int:
     If simulation shows a position that isn't in paper trading state, add it.
     This ensures the monitor catches up with positions from the last backtest.
     Returns the number of positions synced.
+
+    Note: Only syncs from the CURRENT report directory's state, not from root files.
     """
-    sim_file = SIMULATION_OPEN_POSITIONS_JSON
-    if not os.path.exists(sim_file):
+    # Use the mode-specific state file, not the old root file
+    # This prevents cross-contamination between modes
+    sim_state_file = os.path.join(REPORT_DIR, "state.json")
+    if not os.path.exists(sim_state_file):
         return 0
 
+    # Don't sync if we're already using this file as our state
+    if os.path.abspath(sim_state_file) == os.path.abspath(STATE_FILE):
+        return 0  # Same file, nothing to sync
+
     try:
-        with open(sim_file, "r", encoding="utf-8") as fh:
-            sim_positions = json.load(fh)
+        with open(sim_state_file, "r", encoding="utf-8") as fh:
+            sim_state = json.load(fh)
+        sim_positions = sim_state.get("positions", [])
     except Exception as e:
         print(f"[Sync] Could not load simulation positions: {e}")
         return 0
