@@ -4057,10 +4057,15 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
     if args.simulate:
       existing_trades_df = None
       last_end_ts = None
+      HISTORICAL_START = pd.Timestamp("2024-01-01", tz=st.BERLIN_TZ)
 
       # Check if existing trades file has data - if yes, append; if no, start fresh from 2024-01-01
       summary_path = args.summary_json or SIMULATION_SUMMARY_JSON
-      if os.path.exists(summary_path):
+
+      if not os.path.exists(summary_path):
+          # No file exists - start fresh from 2024-01-01
+          print(f"[Simulation] No {summary_path} found - starting fresh from {HISTORICAL_START.strftime('%Y-%m-%d')}")
+      else:
           try:
               with open(summary_path, "r", encoding="utf-8") as f:
                   existing_summary = json.load(f)
@@ -4088,11 +4093,11 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
                           print(f"[Simulation] Loaded {len(log_df)} existing trades from {TRADE_LOG_FILE}")
                           print(f"[Simulation] Will append from: {last_end_ts}")
                       else:
-                          print(f"[Simulation] No trades in JSON or CSV - starting fresh")
+                          print(f"[Simulation] No trades found - starting fresh from {HISTORICAL_START.strftime('%Y-%m-%d')}")
                   else:
-                      print(f"[Simulation] File {summary_path} exists but has no trades - starting fresh")
+                      print(f"[Simulation] No trades found - starting fresh from {HISTORICAL_START.strftime('%Y-%m-%d')}")
           except Exception as e:
-              print(f"[Simulation] Could not load existing trades: {e} - starting fresh")
+              print(f"[Simulation] Could not load existing trades: {e} - starting fresh from {HISTORICAL_START.strftime('%Y-%m-%d')}")
 
       while True:  # Loop for --loop mode
         if args.loop:
@@ -4157,7 +4162,7 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
 
             # Determine start time:
             # - If existing trades: continue from last trade exit (append mode)
-            # - If no existing trades: start from 2024-01-01 (fresh start)
+            # - If no existing trades: start from HISTORICAL_START (2024-01-01)
             if last_end_ts is not None:
                 start_ts = last_end_ts
                 print(f"[Simulation] Appending from last trade: {start_ts.strftime('%Y-%m-%d %H:%M')}")
@@ -4165,8 +4170,8 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
                 start_ts = resolve_timestamp(args.start, None)
                 print(f"[Simulation] Using provided start: {start_ts.strftime('%Y-%m-%d %H:%M')}")
             else:
-                # No existing trades and no --start provided: default to 2024-01-01
-                start_ts = pd.Timestamp("2024-01-01", tz=st.BERLIN_TZ)
+                # No existing trades and no --start provided: default to HISTORICAL_START
+                start_ts = HISTORICAL_START
                 print(f"[Simulation] Fresh start from: {start_ts.strftime('%Y-%m-%d %H:%M')}")
 
             print(f"[Simulation] Period: {start_ts.strftime('%Y-%m-%d %H:%M')} to {end_ts.strftime('%Y-%m-%d %H:%M')}")
