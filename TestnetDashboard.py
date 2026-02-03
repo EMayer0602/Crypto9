@@ -111,17 +111,26 @@ def load_trading_summary(summary_path: Path = None) -> dict:
         return {}
 
 
-def load_paper_trading_state() -> dict:
-    """Load paper trading state from JSON file."""
-    if not PAPER_TRADING_STATE.exists():
-        print(f"[Warning] {PAPER_TRADING_STATE} not found")
+def load_paper_trading_state(state_path: Path = None) -> dict:
+    """Load paper trading state from JSON file.
+
+    Args:
+        state_path: Path to state file. If None, uses default PAPER_TRADING_STATE.
+    """
+    if state_path is None:
+        state_path = PAPER_TRADING_STATE
+    else:
+        state_path = Path(state_path)
+
+    if not state_path.exists():
+        print(f"[Warning] {state_path} not found")
         return {}
 
     try:
-        with open(PAPER_TRADING_STATE, "r", encoding="utf-8") as f:
+        with open(state_path, "r", encoding="utf-8") as f:
             return json.load(f)
     except Exception as e:
-        print(f"[Error] Failed to load {PAPER_TRADING_STATE}: {e}")
+        print(f"[Error] Failed to load {state_path}: {e}")
         return {}
 
 
@@ -147,8 +156,9 @@ def generate_dashboard(
     else:
         output_dir = Path(output_dir)
 
-    # Input summary JSON is in the same directory as output
+    # Input files are in the same directory as output
     trading_summary_json = output_dir / "trading_summary.json"
+    state_json = output_dir / "state.json"
 
     print(f"[Dashboard] Loading data (lang={lang}, dir={output_dir})...")
 
@@ -158,8 +168,8 @@ def generate_dashboard(
         print("[Dashboard] No trading summary data available")
         return None
 
-    # Load paper trading state for open positions
-    state = load_paper_trading_state()
+    # Load paper trading state for open positions (from same directory)
+    state = load_paper_trading_state(state_json)
 
     # Get trades from summary
     all_trades = summary.get("trades", [])

@@ -205,7 +205,7 @@ def correct_historical_trades_pnl(json_path: str = None) -> int:
 
 
 CONFIG_FILE = "paper_trading_config.csv"
-STATE_FILE = "paper_trading_state.json"
+STATE_FILE = "paper_trading_state.json"  # Default, will be overridden by get_state_file()
 TRADE_LOG_FILE = "paper_trading_log.csv"
 SIMULATION_LOG_FILE = "paper_trading_simulation_log.csv"
 SIMULATION_LOG_JSON = "paper_trading_simulation_log.json"
@@ -219,6 +219,19 @@ SIMULATION_SUMMARY_JSON = os.path.join("report_html", "trading_summary.json")
 # Separate output directories for --simulate mode (to not overwrite real trading data)
 SIMULATION_OUTPUT_DIR = "report_simulation"
 SIMULATION_TESTNET_DIR = "report_simulation_testnet"
+
+
+def get_state_file(use_testnet: bool = False, is_simulation: bool = False) -> str:
+    """Return the appropriate state file path based on mode.
+
+    Each mode has its own state file to prevent data mixing:
+    - Normal: report_html/state.json
+    - Testnet: report_testnet/state.json
+    - Simulation: report_simulation/state.json
+    - Simulation + Testnet: report_simulation_testnet/state.json
+    """
+    report_dir = get_report_dir(use_testnet, is_simulation)
+    return os.path.join(report_dir, "state.json")
 
 
 def get_report_dir(use_testnet: bool = False, is_simulation: bool = False) -> str:
@@ -3936,11 +3949,16 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
 
     # Update output paths based on testnet mode and simulation mode
     # Simulation mode uses separate directories to not overwrite real trading data
-    global SIMULATION_SUMMARY_HTML, SIMULATION_SUMMARY_JSON, REPORT_DIR
+    global SIMULATION_SUMMARY_HTML, SIMULATION_SUMMARY_JSON, REPORT_DIR, STATE_FILE
     is_simulation = bool(args.simulate)
     REPORT_DIR = get_report_dir(use_testnet, is_simulation)
+    STATE_FILE = get_state_file(use_testnet, is_simulation)
     SIMULATION_SUMMARY_HTML = os.path.join(REPORT_DIR, "trading_summary.html")
     SIMULATION_SUMMARY_JSON = os.path.join(REPORT_DIR, "trading_summary.json")
+    print(f"[Config] State file: {STATE_FILE}")
+
+    # Create report directory and state file parent
+    os.makedirs(REPORT_DIR, exist_ok=True)
 
     # Create simulation directories if needed
     if is_simulation:
