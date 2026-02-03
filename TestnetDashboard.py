@@ -268,8 +268,10 @@ def generate_dashboard(
         entry_price = float(p.get("entry_price", 0) or 0)
         live_price = live_prices.get(symbol, entry_price)
 
-        # Use dynamic stake based on current capital
-        stake = current_capital / max_positions
+        # Use original stake from position data (was calculated at entry time)
+        stake = float(p.get("stake", 0) or 0)
+        if stake <= 0:
+            stake = current_capital / max_positions  # fallback if not stored
         if entry_price > 0:
             amount = stake / entry_price
             current_value = amount * live_price
