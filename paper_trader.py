@@ -4075,7 +4075,22 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
                   print(f"[Simulation] Found {len(existing_trades)} existing trades in {summary_path}")
                   print(f"[Simulation] Will append from: {last_end_ts}")
               else:
-                  print(f"[Simulation] File {summary_path} exists but has no trades - starting fresh")
+                  # Fallback: try to load from paper_trading_log.csv
+                  if os.path.exists(TRADE_LOG_FILE):
+                      log_df = _load_trade_log_dataframe(TRADE_LOG_FILE)
+                      if not log_df.empty:
+                          existing_trades_df = log_df
+                          last_exit = log_df["exit_time"].max() if "exit_time" in log_df.columns else None
+                          if last_exit:
+                              last_end_ts = pd.to_datetime(last_exit)
+                              if last_end_ts.tzinfo is None:
+                                  last_end_ts = last_end_ts.tz_localize(st.BERLIN_TZ)
+                          print(f"[Simulation] Loaded {len(log_df)} existing trades from {TRADE_LOG_FILE}")
+                          print(f"[Simulation] Will append from: {last_end_ts}")
+                      else:
+                          print(f"[Simulation] No trades in JSON or CSV - starting fresh")
+                  else:
+                      print(f"[Simulation] File {summary_path} exists but has no trades - starting fresh")
           except Exception as e:
               print(f"[Simulation] Could not load existing trades: {e} - starting fresh")
 
