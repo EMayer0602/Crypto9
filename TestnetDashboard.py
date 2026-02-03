@@ -174,6 +174,25 @@ def generate_dashboard(
     # Get trades from summary
     all_trades = summary.get("trades", [])
 
+    # Also load trades from crypto9_testnet_closed_trades.json if it exists
+    testnet_trades_file = Path("crypto9_testnet_closed_trades.json")
+    if testnet_trades_file.exists():
+        try:
+            with open(testnet_trades_file, "r", encoding="utf-8") as f:
+                testnet_trades = json.load(f)
+            if testnet_trades:
+                print(f"[Dashboard] Loaded {len(testnet_trades)} trades from {testnet_trades_file}")
+                # Merge testnet trades, avoiding duplicates by (symbol, entry_time)
+                existing_keys = {(t.get("symbol", ""), t.get("entry_time", "")) for t in all_trades}
+                for tt in testnet_trades:
+                    key = (tt.get("symbol", ""), tt.get("entry_time", ""))
+                    if key not in existing_keys:
+                        all_trades.append(tt)
+                        existing_keys.add(key)
+                print(f"[Dashboard] Total trades after merge: {len(all_trades)}")
+        except Exception as e:
+            print(f"[Dashboard] Failed to load testnet trades: {e}")
+
     # Filter trades by date if specified
     closed_trades = []
     for t in all_trades:
