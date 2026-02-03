@@ -195,25 +195,39 @@ def generate_dashboard(
     else:
         live_prices = {}
 
-    # === USE ACTUAL VALUES FROM TRADES ===
+    # === RECALCULATE AS IF STARTING WITH INITIAL CAPITAL ===
     # Sort filtered trades chronologically by entry_time
     sorted_trades = sorted(closed_trades, key=lambda t: t.get("entry_time", "") or "")
 
-    # Use actual stakes and PnL from trades (as stored in summary)
+    # Recalculate stakes and PnL starting from initial capital
+    # Keep actual dates and prices, but recalculate stake = capital / max_positions
+    capital = start_capital
     processed_trades = []
     total_realized_pnl = 0
 
     for t in sorted_trades:
+        # Keep actual dates and prices
         entry_price = float(t.get("entry_price", 0) or 0)
         exit_price = float(t.get("exit_price", 0) or 0)
+        direction = t.get("direction", "long").lower()
 
-        # Use actual stake and PnL from trade data
-        stake = float(t.get("stake", 0) or 0)
-        pnl = float(t.get("pnl", 0) or 0)
+        # Recalculate stake based on current capital
+        stake = capital / max_positions
 
+        # Recalculate PnL based on recalculated stake and actual prices
+        if entry_price > 0:
+            if direction == "short":
+                pnl = (entry_price - exit_price) / entry_price * stake
+            else:  # long
+                pnl = (exit_price - entry_price) / entry_price * stake
+        else:
+            pnl = 0
+
+        # Update capital for next trade
+        capital += pnl
         total_realized_pnl += pnl
 
-        # Store actual values
+        # Store with recalculated values but original dates/prices
         processed_trades.append({
             **t,
             "stake": stake,
@@ -224,7 +238,7 @@ def generate_dashboard(
     # Current capital after all closed trades
     current_capital = start_capital + total_realized_pnl
 
-    # Use actual open positions from summary with live price updates
+    # Recalculate open positions with current capital
     open_positions = []
 
     for p in summary_positions:
@@ -232,10 +246,8 @@ def generate_dashboard(
         entry_price = float(p.get("entry_price", 0) or 0)
         live_price = live_prices.get(symbol, entry_price)
 
-        # Use original stake from position data (was calculated at entry time)
-        stake = float(p.get("stake", 0) or 0)
-        if stake <= 0:
-            stake = current_capital / max_positions  # fallback if not stored
+        # Recalculate stake based on current capital (after closed trades)
+        stake = current_capital / max_positions
         if entry_price > 0:
             amount = stake / entry_price
             current_value = amount * live_price
