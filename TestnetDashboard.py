@@ -188,9 +188,14 @@ def generate_dashboard(
     else:
         live_prices = {}
 
+    # Calculate realized PnL first (needed for current capital)
+    total_realized_pnl = sum(float(t.get("pnl", 0) or 0) for t in closed_trades)
+
+    # Current capital = Start + Realized PnL (NOT from state file!)
+    current_capital = start_capital + total_realized_pnl
+
     # Calculate open positions with live prices and dynamic stake
     open_positions = []
-    current_capital = state.get("total_capital", start_capital)
 
     for p in state_positions:
         symbol = p.get("symbol", "?")
@@ -221,9 +226,8 @@ def generate_dashboard(
             "unrealized_pct": unrealized_pct,
         })
 
-    # Calculate totals
+    # Calculate totals (total_realized_pnl already calculated above)
     total_closed_trades = len(closed_trades)
-    total_realized_pnl = sum(float(t.get("pnl", 0) or 0) for t in closed_trades)
     total_unrealized_pnl = sum(p["unrealized_pnl"] for p in open_positions)
     wins = sum(1 for t in closed_trades if float(t.get("pnl", 0) or 0) > 0)
     win_rate = wins / total_closed_trades * 100 if total_closed_trades > 0 else 0
