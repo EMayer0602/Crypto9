@@ -226,6 +226,71 @@ python paper_trader.py --use-futures-signals
 
 ---
 
+## Parameter Combinations and Priorities
+
+### Mode Priority (paper_trader.py)
+
+When multiple mode flags are set, they follow this priority:
+
+| Priority | Flag | Behavior |
+|----------|------|----------|
+| 1 | `--force-entry` | Force single entry, then exit |
+| 2 | `--monitor` | Continuous monitoring loop |
+| 3 | `--simulate` | Historical simulation |
+| 4 | (none) | Single tick (one-time check) |
+
+**Important:** `--simulate` overrides `--monitor`! For continuous simulation use `--loop`:
+```bash
+# WRONG: --monitor is ignored
+python paper_trader.py --simulate --testnet --monitor
+
+# CORRECT: Use --loop for continuous simulation
+python paper_trader.py --simulate --testnet --loop
+```
+
+### --monitor vs --signal-interval
+
+| Parameter | Purpose |
+|-----------|---------|
+| `--monitor` | **Mode**: Enables continuous operation |
+| `--signal-interval` | **Timing**: Minutes between signal checks (default: 15) |
+
+```bash
+# Monitor mode checking every 10 minutes
+python paper_trader.py --monitor --signal-interval 10
+```
+
+### Dashboard: --loop vs --interval
+
+| Parameter | Purpose |
+|-----------|---------|
+| `--loop` | **Mode**: Run dashboard continuously |
+| `--interval` | **Timing**: Seconds between refreshes (default: 60) |
+
+| Combination | Behavior |
+|-------------|----------|
+| Neither | Single dashboard generation |
+| `--loop` only | Continuous, refresh every 60 sec |
+| `--interval 30` only | Single run (interval ignored) |
+| `--loop --interval 30` | Continuous, refresh every 30 sec |
+
+```bash
+# Dashboard updating every 30 seconds
+python TestnetDashboard.py --loop --interval 30 --start 2026-01-01
+```
+
+### Dashboard Start Date
+
+| Command | Trades shown from |
+|---------|-------------------|
+| `python TestnetDashboard.py` | 2025-12-01 (default) |
+| `python TestnetDashboard.py --start 2026-01-15` | 2026-01-15 |
+| `python paper_trader.py --testnet --dashboard-start 2026-01-01` | 2026-01-01 |
+
+**Note:** When filtering by date, all displayed values (stakes, PnL) are recalculated dynamically starting from 16,500 initial capital.
+
+---
+
 ## Output Directory Structure
 
 Different modes write to separate directories to prevent data conflicts:
