@@ -1,15 +1,13 @@
 #!/usr/bin/env python3
-"""Generate HTML dashboard from report_html/trading_summary.json.
+"""Generate HTML dashboard from simulation trades.
 
-Reads from report_html/trading_summary.json:
-- trades (closed trades array)
-- open_positions_data (open positions array)
-
-Stakes are recalculated with compound growth from 16500 initial capital.
-Generates dashboard.html and dashboard_de.html in report_testnet/.
+This dashboard reads from the simulation's JSON output files to show
+the exact same trades as trading_summary.html, just in dashboard format.
+Stakes are recalculated with compound growth from initial capital.
 """
 
 import json
+import os
 from datetime import datetime
 from pathlib import Path
 
@@ -18,17 +16,28 @@ from pathlib import Path
 START_CAPITAL = 16500.0
 MAX_POSITIONS = 10
 
-# Fixed directories - no parameters
-SOURCE_DIR = Path("report_html")
-OUTPUT_DIR = Path("report_testnet")
-TRADING_SUMMARY_JSON = "trading_summary.json"
+# Default paths - same as paper_trader.py
+REPORT_DIR = Path("report_testnet")
+CLOSED_TRADES_JSON = "paper_trading_simulation_log.json"
+OPEN_POSITIONS_JSON = "paper_trading_actual_trades.json"
+SUMMARY_JSON = "trading_summary.json"
+
+# For testnet, files are in report_testnet/
+TESTNET_CLOSED_TRADES_JSON = REPORT_DIR / "paper_trading_simulation_log.json"
+TESTNET_OPEN_POSITIONS_JSON = REPORT_DIR / "paper_trading_actual_trades.json"
+TESTNET_SUMMARY_JSON = REPORT_DIR / "trading_summary.json"
 
 
 def load_json(path: Path) -> list | dict:
     """Load JSON file, return empty list/dict if not found."""
     if not path.exists():
-        print(f"Warning: {path} not found")
-        return []
+        # Try without report_testnet prefix
+        alt_path = Path(path.name)
+        if alt_path.exists():
+            path = alt_path
+        else:
+            print(f"Warning: {path} not found")
+            return []
     try:
         with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
@@ -37,63 +46,40 @@ def load_json(path: Path) -> list | dict:
         return []
 
 
-def fmt_num(value: float, lang: str = "en") -> str:
-    """Format number according to language."""
-    if lang == "de":
-        if abs(value) >= 1000:
-            return f"{value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-        return f"{value:.2f}".replace(".", ",")
-    return f"{value:,.2f}"
+def fmt_de(value: float) -> str:
+    """Format number in German style."""
+    if abs(value) >= 1000:
+        return f"{value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    return f"{value:.2f}".replace(".", ",")
 
 
-def generate_dashboard(source_dir: Path, output_dir: Path, lang: str = "en", start_date: datetime = None):
-    """Generate HTML dashboard from trading_summary.json.
+def generate_dashboard(use_testnet: bool = True):
+    """Generate HTML dashboard from simulation JSON files."""
+    print("Loading simulation data...")
 
-    Args:
-        source_dir: Directory containing trading_summary.json (report_html/)
-        output_dir: Directory for dashboard output (report_testnet/)
-        lang: Language for labels ("en" or "de")
-        start_date: Only include trades from this date onwards
-    """
-    summary_path = source_dir / TRADING_SUMMARY_JSON
-    summary = load_json(summary_path)
-
-    # Extract trades and open positions from trading_summary.json
-    if isinstance(summary, dict):
-        closed_trades = summary.get("trades", [])
-        open_positions = summary.get("open_positions_data", [])
+    # Determine paths based on testnet mode
+    if use_testnet:
+        closed_path = TESTNET_CLOSED_TRADES_JSON
+        open_path = TESTNET_OPEN_POSITIONS_JSON
+        summary_path = TESTNET_SUMMARY_JSON
+        output_dir = REPORT_DIR
     else:
-        closed_trades = []
-        open_positions = []
+        closed_path = Path(CLOSED_TRADES_JSON)
+        open_path = Path(OPEN_POSITIONS_JSON)
+        summary_path = Path(SUMMARY_JSON)
+        output_dir = Path("report_html")
+
+    # Load data
+    closed_trades = load_json(closed_path)
+    open_positions = load_json(open_path)
+    summary = load_json(summary_path)
 
     if not isinstance(closed_trades, list):
         closed_trades = []
     if not isinstance(open_positions, list):
         open_positions = []
-
-    # Filter by start_date if provided
-    if start_date:
-        filtered_trades = []
-        for t in closed_trades:
-            et = t.get("entry_time") or t.get("Zeit") or ""
-            try:
-                entry_dt = datetime.fromisoformat(et.replace("Z", "+00:00"))
-                if entry_dt.replace(tzinfo=None) >= start_date:
-                    filtered_trades.append(t)
-            except:
-                pass
-        closed_trades = filtered_trades
-
-        filtered_open = []
-        for p in open_positions:
-            et = p.get("entry_time", "")
-            try:
-                entry_dt = datetime.fromisoformat(et.replace("Z", "+00:00"))
-                if entry_dt.replace(tzinfo=None) >= start_date:
-                    filtered_open.append(p)
-            except:
-                pass
-        open_positions = filtered_open
+    if not isinstance(summary, dict):
+        summary = {}
 
     print(f"Loaded {len(closed_trades)} closed trades, {len(open_positions)} open positions")
 
@@ -188,42 +174,12 @@ def generate_dashboard(source_dir: Path, output_dir: Path, lang: str = "en", sta
     # Use recalculated data for display
     open_positions = recalculated_open
 
-    # Language labels
-    L = {
-        "en": {
-            "title": "Trading Dashboard",
-            "source": f"Simulation trades, recalculated with {fmt_num(START_CAPITAL, 'en')} initial capital",
-            "start_capital": "Start Capital", "final_capital": "Final Capital",
-            "closed_trades": "Closed Trades", "realized_pnl": "Realized PnL",
-            "long_trades": "Long Trades", "short_trades": "Short Trades",
-            "open_positions": "Open Positions", "open_equity": "Open Equity",
-            "symbol": "Symbol", "direction": "Direction", "indicator": "Indicator",
-            "entry_time": "Entry Time", "exit_time": "Exit Time",
-            "entry_price": "Entry Price", "last_price": "Last Price",
-            "stake": "Stake", "bars": "Bars", "pnl": "PnL", "status": "Status", "reason": "Reason",
-        },
-        "de": {
-            "title": "Trading Dashboard",
-            "source": f"Simulation Trades, neu berechnet mit {fmt_num(START_CAPITAL, 'de')} Startkapital",
-            "start_capital": "Startkapital", "final_capital": "Endkapital",
-            "closed_trades": "Geschlossene Trades", "realized_pnl": "Realisierter PnL",
-            "long_trades": "Long Trades", "short_trades": "Short Trades",
-            "open_positions": "Offene Positionen", "open_equity": "Offenes Equity",
-            "symbol": "Symbol", "direction": "Richtung", "indicator": "Indikator",
-            "entry_time": "Einstieg", "exit_time": "Ausstieg",
-            "entry_price": "Einstiegspreis", "last_price": "Aktueller Preis",
-            "stake": "Einsatz", "bars": "Bars", "pnl": "PnL", "status": "Status", "reason": "Grund",
-        },
-    }[lang]
-
-    def fmt(v): return fmt_num(v, lang)
-
     # Generate HTML
     html = f"""<!DOCTYPE html>
 <html>
 <head>
     <meta charset="utf-8">
-    <title>{L['title']}</title>
+    <title>Trading Dashboard (from Simulation)</title>
     <style>
         body {{ font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }}
         .container {{ max-width: 1600px; margin: 0 auto; }}
@@ -248,41 +204,41 @@ def generate_dashboard(source_dir: Path, output_dir: Path, lang: str = "en", sta
 </head>
 <body>
 <div class="container">
-    <h1>{L['title']}</h1>
-    <p class="source-note">{L['source']}</p>
+    <h1>Trading Dashboard</h1>
+    <p class="source-note">Data source: Simulation trades, recalculated with {fmt_de(START_CAPITAL)} initial capital</p>
 
     <div class="summary-boxes">
         <div class="summary-box">
-            <h3>{L['start_capital']}</h3>
-            <div class="value">{fmt(START_CAPITAL)}</div>
+            <h3>Start Capital</h3>
+            <div class="value">{fmt_de(START_CAPITAL)}</div>
         </div>
         <div class="summary-box">
-            <h3>{L['final_capital']}</h3>
-            <div class="value {'positive' if final_capital >= START_CAPITAL else 'negative'}">{fmt(final_capital)}</div>
+            <h3>Final Capital</h3>
+            <div class="value {'positive' if final_capital >= START_CAPITAL else 'negative'}">{fmt_de(final_capital)}</div>
         </div>
         <div class="summary-box">
-            <h3>{L['closed_trades']}</h3>
+            <h3>Closed Trades</h3>
             <div class="value">{len(recalculated_trades)}</div>
         </div>
         <div class="summary-box">
-            <h3>{L['realized_pnl']}</h3>
-            <div class="value {'positive' if total_pnl >= 0 else 'negative'}">{fmt(total_pnl)}</div>
+            <h3>Realized PnL</h3>
+            <div class="value {'positive' if total_pnl >= 0 else 'negative'}">{fmt_de(total_pnl)}</div>
         </div>
         <div class="summary-box">
-            <h3>{L['long_trades']}</h3>
+            <h3>Long Trades</h3>
             <div class="value">{len(long_trades)} ({long_wins}W)</div>
         </div>
         <div class="summary-box">
-            <h3>{L['short_trades']}</h3>
+            <h3>Short Trades</h3>
             <div class="value">{len(short_trades)} ({short_wins}W)</div>
         </div>
         <div class="summary-box">
-            <h3>{L['open_positions']}</h3>
+            <h3>Open Positions</h3>
             <div class="value">{len(open_positions)}</div>
         </div>
         <div class="summary-box">
-            <h3>{L['open_equity']}</h3>
-            <div class="value {'positive' if open_equity >= 0 else 'negative'}">{fmt(open_equity)}</div>
+            <h3>Open Equity</h3>
+            <div class="value {'positive' if open_equity >= 0 else 'negative'}">{fmt_de(open_equity)}</div>
         </div>
     </div>
 """
@@ -290,9 +246,9 @@ def generate_dashboard(source_dir: Path, output_dir: Path, lang: str = "en", sta
     # Open Positions section
     html += f"""
     <div class="section">
-    <h2>{L['open_positions']} ({len(open_positions)}, Equity: <span class="{'positive' if open_equity >= 0 else 'negative'}">{fmt(open_equity)}</span>)</h2>
+    <h2>Open Positions ({len(open_positions)}, Equity: <span class="{'positive' if open_equity >= 0 else 'negative'}">{fmt_de(open_equity)}</span>)</h2>
     <table>
-        <tr class="open-header"><th>{L['symbol']}</th><th>{L['direction']}</th><th>{L['indicator']}</th><th>HTF</th><th>{L['entry_time']}</th><th>{L['entry_price']}</th><th>{L['last_price']}</th><th>{L['stake']}</th><th>{L['bars']}</th><th>{L['pnl']}</th><th>{L['status']}</th></tr>
+        <tr class="open-header"><th>Symbol</th><th>Direction</th><th>Indicator</th><th>HTF</th><th>Entry Time</th><th>Entry Price</th><th>Last Price</th><th>Stake</th><th>Bars</th><th>Unrealized PnL</th><th>Status</th></tr>
 """
     if open_positions:
         for p in open_positions:
@@ -315,20 +271,20 @@ def generate_dashboard(source_dir: Path, output_dir: Path, lang: str = "en", sta
             <td>{entry_str}</td>
             <td>{p.get('entry_price', 0):.6g}</td>
             <td>{p.get('last_price', 0):.6g}</td>
-            <td>{fmt(p.get('stake', 0))}</td>
+            <td>{fmt_de(p.get('stake', 0))}</td>
             <td>{p.get('bars_held', 0)}</td>
-            <td class="{pnl_class}">{fmt(pnl)}</td>
+            <td class="{pnl_class}">{fmt_de(pnl)}</td>
             <td>{p.get('status', 'N/A')}</td>
         </tr>\n"""
     else:
-        html += "        <tr><td colspan='11'>-</td></tr>\n"
+        html += "        <tr><td colspan='11'>No open positions</td></tr>\n"
 
     html += "    </table>\n    </div>\n"
 
     # Helper function to generate closed trade table rows
     def trade_rows(trades):
         if not trades:
-            return "        <tr><td colspan='9'>-</td></tr>\n"
+            return "        <tr><td colspan='10'>No trades</td></tr>\n"
         rows = ""
         for t in trades:
             entry_time = t.get("entry_time") or t.get("Zeit") or ""
@@ -346,7 +302,7 @@ def generate_dashboard(source_dir: Path, output_dir: Path, lang: str = "en", sta
 
             pnl = t.get("pnl", 0)
             stake = t.get("stake", 0)
-            pnl_pct = t.get("pnl_pct", 0)
+            pnl_pct = t.get("pnl_pct", 0)  # Already calculated as percentage
             pnl_class = "positive" if pnl >= 0 else "negative"
 
             rows += f"""        <tr>
@@ -355,8 +311,8 @@ def generate_dashboard(source_dir: Path, output_dir: Path, lang: str = "en", sta
             <td>{t.get('htf', 'N/A')}</td>
             <td>{entry_str}</td>
             <td>{exit_str}</td>
-            <td>{fmt(stake)}</td>
-            <td class="{pnl_class}">{fmt(pnl)}</td>
+            <td>{fmt_de(stake)}</td>
+            <td class="{pnl_class}">{fmt_de(pnl)}</td>
             <td class="{pnl_class}">{pnl_pct:+.2f}%</td>
             <td>{t.get('reason', 'N/A')}</td>
         </tr>\n"""
@@ -365,9 +321,9 @@ def generate_dashboard(source_dir: Path, output_dir: Path, lang: str = "en", sta
     # Long Trades section
     html += f"""
     <div class="section">
-    <h2>{L['long_trades']} ({len(long_trades)}, PnL: <span class="{'positive' if long_pnl >= 0 else 'negative'}">{fmt(long_pnl)}</span>)</h2>
+    <h2>Long Trades ({len(long_trades)} closed, PnL: <span class="{'positive' if long_pnl >= 0 else 'negative'}">{fmt_de(long_pnl)}</span>)</h2>
     <table>
-        <tr class="long-header"><th>{L['symbol']}</th><th>{L['indicator']}</th><th>HTF</th><th>{L['entry_time']}</th><th>{L['exit_time']}</th><th>{L['stake']}</th><th>{L['pnl']}</th><th>%</th><th>{L['reason']}</th></tr>
+        <tr class="long-header"><th>Symbol</th><th>Indicator</th><th>HTF</th><th>Entry</th><th>Exit</th><th>Stake</th><th>PnL</th><th>PnL %</th><th>Reason</th></tr>
 """
     html += trade_rows(long_trades)
 
@@ -376,9 +332,9 @@ def generate_dashboard(source_dir: Path, output_dir: Path, lang: str = "en", sta
     </div>
 
     <div class="section">
-    <h2>{L['short_trades']} ({len(short_trades)}, PnL: <span class="{'positive' if short_pnl >= 0 else 'negative'}">{fmt(short_pnl)}</span>)</h2>
+    <h2>Short Trades ({len(short_trades)} closed, PnL: <span class="{'positive' if short_pnl >= 0 else 'negative'}">{fmt_de(short_pnl)}</span>)</h2>
     <table>
-        <tr class="short-header"><th>{L['symbol']}</th><th>{L['indicator']}</th><th>HTF</th><th>{L['entry_time']}</th><th>{L['exit_time']}</th><th>{L['stake']}</th><th>{L['pnl']}</th><th>%</th><th>{L['reason']}</th></tr>
+        <tr class="short-header"><th>Symbol</th><th>Indicator</th><th>HTF</th><th>Entry</th><th>Exit</th><th>Stake</th><th>PnL</th><th>PnL %</th><th>Reason</th></tr>
 """
     html += trade_rows(short_trades)
 
@@ -393,8 +349,7 @@ def generate_dashboard(source_dir: Path, output_dir: Path, lang: str = "en", sta
 
     # Write to file
     output_dir.mkdir(exist_ok=True)
-    suffix = "_de" if lang == "de" else ""
-    output_path = output_dir / f"dashboard{suffix}.html"
+    output_path = output_dir / "dashboard.html"
     output_path.write_text(html, encoding="utf-8")
     print(f"Dashboard saved to: {output_path}")
     return output_path
@@ -402,37 +357,11 @@ def generate_dashboard(source_dir: Path, output_dir: Path, lang: str = "en", sta
 
 if __name__ == "__main__":
     import argparse
-    import time
-
     parser = argparse.ArgumentParser(description="Generate trading dashboard from simulation data")
-    parser.add_argument("--start", type=str, help="Only show trades from this date (YYYY-MM-DD)")
-    parser.add_argument("--loop", action="store_true", help="Run continuously, refresh every 60 seconds")
-    parser.add_argument("--interval", type=int, default=60, help="Refresh interval in seconds (default: 60)")
+    parser.add_argument("--testnet", action="store_true", default=True, help="Use testnet report directory")
+    parser.add_argument("--live", action="store_true", help="Use live report directory")
     args = parser.parse_args()
 
-    # Parse start date
-    start_date = None
-    if args.start:
-        try:
-            start_date = datetime.strptime(args.start, "%Y-%m-%d")
-            print(f"Filtering trades from: {args.start}")
-        except ValueError:
-            print(f"Invalid date format: {args.start} (use YYYY-MM-DD)")
-
-    print(f"Reading from: {SOURCE_DIR}")
-    print(f"Writing to: {OUTPUT_DIR}")
-
-    if args.loop:
-        print(f"Loop mode: refreshing every {args.interval} seconds. Press Ctrl+C to stop.")
-        try:
-            while True:
-                path_en = generate_dashboard(SOURCE_DIR, OUTPUT_DIR, lang="en", start_date=start_date)
-                path_de = generate_dashboard(SOURCE_DIR, OUTPUT_DIR, lang="de", start_date=start_date)
-                print(f"[{datetime.now().strftime('%H:%M:%S')}] Updated")
-                time.sleep(args.interval)
-        except KeyboardInterrupt:
-            print("\nStopped.")
-    else:
-        path_en = generate_dashboard(SOURCE_DIR, OUTPUT_DIR, lang="en", start_date=start_date)
-        path_de = generate_dashboard(SOURCE_DIR, OUTPUT_DIR, lang="de", start_date=start_date)
-        print(f"\nOpen:\n  {path_en}\n  {path_de}")
+    use_testnet = not args.live
+    path = generate_dashboard(use_testnet=use_testnet)
+    print(f"\nOpen with: xdg-open {path}")
