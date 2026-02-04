@@ -45,12 +45,13 @@ def fmt_num(value: float, lang: str = "en") -> str:
     return f"{value:,.2f}"
 
 
-def generate_dashboard(output_dir: Path, lang: str = "en"):
+def generate_dashboard(output_dir: Path, lang: str = "en", start_date: datetime = None):
     """Generate HTML dashboard from simulation JSON files.
 
     Args:
         output_dir: Directory containing JSON files and for output
         lang: Language for labels ("en" or "de")
+        start_date: Only include trades from this date onwards
     """
     closed_path = output_dir / CLOSED_TRADES_JSON
     open_path = output_dir / OPEN_POSITIONS_JSON
@@ -63,6 +64,30 @@ def generate_dashboard(output_dir: Path, lang: str = "en"):
         closed_trades = []
     if not isinstance(open_positions, list):
         open_positions = []
+
+    # Filter by start_date if provided
+    if start_date:
+        filtered_trades = []
+        for t in closed_trades:
+            et = t.get("entry_time") or t.get("Zeit") or ""
+            try:
+                entry_dt = datetime.fromisoformat(et.replace("Z", "+00:00"))
+                if entry_dt.replace(tzinfo=None) >= start_date:
+                    filtered_trades.append(t)
+            except:
+                pass
+        closed_trades = filtered_trades
+
+        filtered_open = []
+        for p in open_positions:
+            et = p.get("entry_time", "")
+            try:
+                entry_dt = datetime.fromisoformat(et.replace("Z", "+00:00"))
+                if entry_dt.replace(tzinfo=None) >= start_date:
+                    filtered_open.append(p)
+            except:
+                pass
+        open_positions = filtered_open
 
     print(f"Loaded {len(closed_trades)} closed trades, {len(open_positions)} open positions")
 
@@ -371,15 +396,39 @@ def generate_dashboard(output_dir: Path, lang: str = "en"):
 
 if __name__ == "__main__":
     import argparse
+    import time
+
     parser = argparse.ArgumentParser(description="Generate trading dashboard from simulation data")
-    parser.add_argument("--dir", type=str, default="report_testnet", help="Directory with JSON files")
+    parser.add_argument("--dir", "--output-dir", type=str, default="report_testnet", help="Directory with JSON files")
+    parser.add_argument("--start", type=str, help="Only show trades from this date (YYYY-MM-DD)")
+    parser.add_argument("--loop", action="store_true", help="Run continuously, refresh every 60 seconds")
+    parser.add_argument("--interval", type=int, default=60, help="Refresh interval in seconds (default: 60)")
     args = parser.parse_args()
 
     output_dir = Path(args.dir)
+
+    # Parse start date
+    start_date = None
+    if args.start:
+        try:
+            start_date = datetime.strptime(args.start, "%Y-%m-%d")
+            print(f"Filtering trades from: {args.start}")
+        except ValueError:
+            print(f"Invalid date format: {args.start} (use YYYY-MM-DD)")
+
     print(f"Reading from: {output_dir}")
 
-    # Generate both English and German dashboards
-    path_en = generate_dashboard(output_dir, lang="en")
-    path_de = generate_dashboard(output_dir, lang="de")
-
-    print(f"\nOpen:\n  {path_en}\n  {path_de}")
+    if args.loop:
+        print(f"Loop mode: refreshing every {args.interval} seconds. Press Ctrl+C to stop.")
+        try:
+            while True:
+                path_en = generate_dashboard(output_dir, lang="en", start_date=start_date)
+                path_de = generate_dashboard(output_dir, lang="de", start_date=start_date)
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] Updated")
+                time.sleep(args.interval)
+        except KeyboardInterrupt:
+            print("\nStopped.")
+    else:
+        path_en = generate_dashboard(output_dir, lang="en", start_date=start_date)
+        path_de = generate_dashboard(output_dir, lang="de", start_date=start_date)
+        print(f"\nOpen:\n  {path_en}\n  {path_de}")
