@@ -1,40 +1,255 @@
 #!/usr/bin/env python3
 """Generate HTML dashboard from simulation trades.
 
-This dashboard reads from the simulation's JSON output files to show
-the exact same trades as trading_summary.html, just in dashboard format.
-Stakes are recalculated with compound growth from initial capital.
+This dashboard reads from report_html/trading_summary.html to show
+all trades with recalculated stakes from initial capital.
 """
 
 import json
-import os
+import re
 from datetime import datetime
 from pathlib import Path
+from html.parser import HTMLParser
 
 
 # Capital settings - same as paper_trader.py
 START_CAPITAL = 16500.0
 MAX_POSITIONS = 10
 
-# Default paths - actual file locations
-REPORT_DIR = Path("report_testnet")
-
-# Closed trades and open positions are in root directory
-CLOSED_TRADES_JSON = Path("crypto9_testnet_closed_trades.json")
+# Fixed paths
+SOURCE_HTML = Path("report_html/trading_summary.html")
 OPEN_POSITIONS_JSON = Path("paper_trading_open_positions.json")
-SUMMARY_JSON = REPORT_DIR / "trading_summary.json"
+OUTPUT_DIR = Path("report_testnet")
+
+
+class PandasTableParser(HTMLParser):
+    """Parse pandas-generated HTML tables from trading_summary.html."""
+
+    def __init__(self):
+        super().__init__()
+        self.in_table = False
+        self.in_thead = False
+        self.in_tbody = False
+        self.in_row = False
+        self.in_cell = False
+        self.is_header_cell = False
+        self.current_row = []
+        self.headers = []
+        self.rows = []
+        self.tables = []
+        self.current_table_name = ""
+        self.in_h2 = False
+        self.h2_text = ""
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "table":
+            self.in_table = True
+            self.rows = []
+            self.headers = []
+        elif tag == "thead":
+            self.in_thead = True
+        elif tag == "tbody":
+            self.in_tbody = True
+        elif tag == "tr" and self.in_table:
+            self.in_row = True
+            self.current_row = []
+        elif tag == "th" and self.in_row:
+            self.in_cell = True
+            self.is_header_cell = True
+        elif tag == "td" and self.in_row:
+            self.in_cell = True
+            self.is_header_cell = False
+        elif tag == "h2":
+            self.in_h2 = True
+            self.h2_text = ""
+
+    def handle_endtag(self, tag):
+        if tag == "table":
+            self.in_table = False
+            if self.headers or self.rows:
+                self.tables.append({
+                    "name": self.current_table_name,
+                    "headers": self.headers,
+                    "rows": self.rows
+                })
+            self.rows = []
+            self.headers = []
+        elif tag == "thead":
+            self.in_thead = False
+        elif tag == "tbody":
+            self.in_tbody = False
+        elif tag == "tr":
+            self.in_row = False
+            if self.current_row:
+                if self.in_thead:
+                    self.headers = self.current_row
+                else:
+                    self.rows.append(self.current_row)
+            self.current_row = []
+        elif tag in ("th", "td"):
+            self.in_cell = False
+            self.is_header_cell = False
+        elif tag == "h2":
+            self.in_h2 = False
+            self.current_table_name = self.h2_text.strip()
+
+    def handle_data(self, data):
+        if self.in_cell:
+            self.current_row.append(data.strip())
+        elif self.in_h2:
+            self.h2_text += data
+
+
+def parse_trades_from_html(html_path: Path) -> tuple[list, list]:
+    """Parse closed trades and open positions from trading_summary.html."""
+    if not html_path.exists():
+        print(f"Warning: {html_path} not found")
+        return [], []
+
+    html_content = html_path.read_text(encoding="utf-8")
+
+    parser = PandasTableParser()
+    parser.feed(html_content)
+
+    long_trades = []
+    short_trades = []
+    open_positions = []
+
+    for table in parser.tables:
+        name = table["name"].lower()
+        headers = [h.lower() for h in table.get("headers", [])]
+        rows = table["rows"]
+
+        if "long trades" in name and "open" not in name:
+            # Parse Long Trades table (pandas format)
+            for row in rows:
+                trade = parse_pandas_trade_row(headers, row, "long")
+                if trade:
+                    long_trades.append(trade)
+
+        elif "short trades" in name and "open" not in name:
+            # Parse Short Trades table (pandas format)
+            for row in rows:
+                trade = parse_pandas_trade_row(headers, row, "short")
+                if trade:
+                    short_trades.append(trade)
+
+        elif "open" in name.lower():
+            # Parse Open Positions table
+            for row in rows:
+                pos = parse_pandas_open_position_row(headers, row)
+                if pos:
+                    open_positions.append(pos)
+
+    # Only Long trades - we don't trade Short
+    closed_trades = long_trades
+    return closed_trades, open_positions
+
+
+def parse_pandas_trade_row(headers: list, row: list, default_direction: str) -> dict | None:
+    """Parse a single trade row from pandas-generated HTML table."""
+    if not row or len(row) < 5:
+        return None
+
+    # Create a dict from headers and row values
+    data = {}
+    for i, h in enumerate(headers):
+        if i < len(row):
+            data[h] = row[i]
+
+    symbol = data.get("symbol", "")
+    if not symbol or "symbol" in symbol.lower():
+        return None
+
+    # Get entry and exit prices
+    entry_price = parse_number(data.get("entry_price", "0"))
+    exit_price = parse_number(data.get("exit_price", "0"))
+
+    # Calculate PnL percentage from prices
+    direction = data.get("direction", default_direction).lower()
+    if entry_price > 0:
+        if direction == "long":
+            pnl_pct = (exit_price - entry_price) / entry_price * 100
+        else:
+            pnl_pct = (entry_price - exit_price) / entry_price * 100
+    else:
+        pnl_pct = 0
+
+    return {
+        "symbol": symbol,
+        "indicator": data.get("indicator", ""),
+        "htf": data.get("htf", ""),
+        "entry_time": data.get("entry_time", ""),
+        "exit_time": data.get("exit_time", ""),
+        "entry_price": entry_price,
+        "exit_price": exit_price,
+        "original_stake": parse_number(data.get("stake", "0")),
+        "original_pnl": parse_number(data.get("pnl", "0")),
+        "original_pnl_pct": pnl_pct,
+        "reason": data.get("reason", ""),
+        "direction": direction,
+    }
+
+
+def parse_pandas_open_position_row(headers: list, row: list) -> dict | None:
+    """Parse a single open position row from pandas-generated HTML table."""
+    if not row or len(row) < 5:
+        return None
+
+    # Create a dict from headers and row values
+    data = {}
+    for i, h in enumerate(headers):
+        if i < len(row):
+            data[h] = row[i]
+
+    symbol = data.get("symbol", "")
+    if not symbol or "symbol" in symbol.lower():
+        return None
+
+    return {
+        "symbol": symbol,
+        "direction": data.get("direction", "long").lower(),
+        "indicator": data.get("indicator", ""),
+        "htf": data.get("htf", ""),
+        "entry_time": data.get("entry_time", ""),
+        "entry_price": parse_number(data.get("entry_price", "0")),
+        "last_price": parse_number(data.get("last_price", data.get("exit_price", "0"))),
+        "bars_held": int(parse_number(data.get("bars_held", data.get("bars", "0")))),
+    }
+
+
+def parse_number(s: str) -> float:
+    """Parse number from string, handling various formats."""
+    if not s or s == "-":
+        return 0.0
+    # Remove any HTML tags
+    s = re.sub(r"<[^>]+>", "", s)
+    # Remove currency symbols and whitespace
+    s = s.replace("USDT", "").replace("$", "").strip()
+    # Handle German format: 1.234,56 -> 1234.56
+    if "," in s and "." in s:
+        # Determine which is decimal separator
+        last_comma = s.rfind(",")
+        last_dot = s.rfind(".")
+        if last_comma > last_dot:
+            # German format: 1.234,56
+            s = s.replace(".", "").replace(",", ".")
+        else:
+            # US format: 1,234.56
+            s = s.replace(",", "")
+    elif "," in s:
+        s = s.replace(",", ".")
+    try:
+        return float(s)
+    except:
+        return 0.0
 
 
 def load_json(path: Path) -> list | dict:
     """Load JSON file, return empty list/dict if not found."""
     if not path.exists():
-        # Try without report_testnet prefix
-        alt_path = Path(path.name)
-        if alt_path.exists():
-            path = alt_path
-        else:
-            print(f"Warning: {path} not found")
-            return []
+        print(f"Warning: {path} not found")
+        return []
     try:
         with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
@@ -51,36 +266,36 @@ def fmt_de(value: float) -> str:
 
 
 def generate_dashboard():
-    """Generate HTML dashboard from simulation JSON files."""
-    print("Loading simulation data...")
+    """Generate HTML dashboard from simulation HTML file."""
+    print("Loading simulation data from HTML...")
 
-    # Fixed paths - no testnet parameter needed
-    closed_path = CLOSED_TRADES_JSON
-    open_path = OPEN_POSITIONS_JSON
-    summary_path = SUMMARY_JSON
-    output_dir = REPORT_DIR
+    # Parse trades from HTML
+    closed_trades, html_open_positions = parse_trades_from_html(SOURCE_HTML)
 
-    # Load data
-    closed_trades = load_json(closed_path)
-    open_positions = load_json(open_path)
-    summary = load_json(summary_path)
+    # Also load open positions from JSON (more up-to-date)
+    json_open_positions = load_json(OPEN_POSITIONS_JSON)
+    if not isinstance(json_open_positions, list):
+        json_open_positions = []
 
-    if not isinstance(closed_trades, list):
-        closed_trades = []
-    if not isinstance(open_positions, list):
-        open_positions = []
-    if not isinstance(summary, dict):
-        summary = {}
+    # Prefer JSON open positions if available, otherwise use HTML
+    open_positions = json_open_positions if json_open_positions else html_open_positions
 
     print(f"Loaded {len(closed_trades)} closed trades, {len(open_positions)} open positions")
 
+    if not closed_trades:
+        print("Warning: No trades found in HTML. Check if the file format is correct.")
+
     # Sort helper
     def get_entry_time(t):
-        et = t.get("entry_time") or t.get("Zeit") or ""
+        et = t.get("entry_time", "")
         try:
+            # Handle ISO format with timezone
             return datetime.fromisoformat(et.replace("Z", "+00:00"))
         except:
-            return datetime.min
+            try:
+                return datetime.strptime(et[:19], "%Y-%m-%d %H:%M:%S")
+            except:
+                return datetime.min
 
     # === RECALCULATE CLOSED TRADES WITH COMPOUND GROWTH ===
     # Sort chronologically (oldest first) for compound calculation
@@ -91,28 +306,17 @@ def generate_dashboard():
 
     for t in trades_chrono:
         stake = capital / MAX_POSITIONS
-        entry_price = t.get("entry_price") or t.get("Entry") or 0
-        exit_price = t.get("exit_price") or t.get("ExitPreis") or 0
-        direction = t.get("direction", "").lower()
+        original_pnl_pct = t.get("original_pnl_pct", 0) / 100  # Convert from percentage
 
-        # Calculate PnL based on direction
-        if entry_price > 0:
-            if direction == "long":
-                pnl_pct = (exit_price - entry_price) / entry_price
-            else:  # short
-                pnl_pct = (entry_price - exit_price) / entry_price
-            pnl = pnl_pct * stake
-        else:
-            pnl = 0
-            pnl_pct = 0
-
+        # Recalculate PnL with new stake
+        pnl = original_pnl_pct * stake
         capital += pnl
 
         # Create recalculated trade entry
         recalc_trade = dict(t)
         recalc_trade["stake"] = stake
         recalc_trade["pnl"] = pnl
-        recalc_trade["pnl_pct"] = pnl_pct * 100
+        recalc_trade["pnl_pct"] = original_pnl_pct * 100
         recalc_trade["equity_after"] = capital
         recalculated_trades.append(recalc_trade)
 
@@ -170,7 +374,7 @@ def generate_dashboard():
 <html>
 <head>
     <meta charset="utf-8">
-    <title>Trading Dashboard (from Simulation)</title>
+    <title>Trading Dashboard</title>
     <style>
         body {{ font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }}
         .container {{ max-width: 1600px; margin: 0 auto; }}
@@ -196,7 +400,7 @@ def generate_dashboard():
 <body>
 <div class="container">
     <h1>Trading Dashboard</h1>
-    <p class="source-note">Data source: Simulation trades, recalculated with {fmt_de(START_CAPITAL)} initial capital</p>
+    <p class="source-note">Simulation trades, recalculated with {fmt_de(START_CAPITAL)} initial capital</p>
 
     <div class="summary-boxes">
         <div class="summary-box">
@@ -216,14 +420,6 @@ def generate_dashboard():
             <div class="value {'positive' if total_pnl >= 0 else 'negative'}">{fmt_de(total_pnl)}</div>
         </div>
         <div class="summary-box">
-            <h3>Long Trades</h3>
-            <div class="value">{len(long_trades)} ({long_wins}W)</div>
-        </div>
-        <div class="summary-box">
-            <h3>Short Trades</h3>
-            <div class="value">{len(short_trades)} ({short_wins}W)</div>
-        </div>
-        <div class="summary-box">
             <h3>Open Positions</h3>
             <div class="value">{len(open_positions)}</div>
         </div>
@@ -234,12 +430,12 @@ def generate_dashboard():
     </div>
 """
 
-    # Open Positions section
+    # Open Positions section (FIRST - before closed trades)
     html += f"""
     <div class="section">
     <h2>Open Positions ({len(open_positions)}, Equity: <span class="{'positive' if open_equity >= 0 else 'negative'}">{fmt_de(open_equity)}</span>)</h2>
     <table>
-        <tr class="open-header"><th>Symbol</th><th>Direction</th><th>Indicator</th><th>HTF</th><th>Entry Time</th><th>Entry Price</th><th>Last Price</th><th>Stake</th><th>Bars</th><th>Unrealized PnL</th><th>Status</th></tr>
+        <tr class="open-header"><th>Symbol</th><th>Direction</th><th>Indicator</th><th>HTF</th><th>Entry Time</th><th>Entry Price</th><th>Last Price</th><th>Stake</th><th>Bars</th><th>PnL</th><th>Status</th></tr>
 """
     if open_positions:
         for p in open_positions:
@@ -275,11 +471,11 @@ def generate_dashboard():
     # Helper function to generate closed trade table rows
     def trade_rows(trades):
         if not trades:
-            return "        <tr><td colspan='10'>No trades</td></tr>\n"
+            return "        <tr><td colspan='9'>-</td></tr>\n"
         rows = ""
         for t in trades:
-            entry_time = t.get("entry_time") or t.get("Zeit") or ""
-            exit_time = t.get("exit_time") or t.get("ExitZeit") or ""
+            entry_time = t.get("entry_time", "")
+            exit_time = t.get("exit_time", "")
             try:
                 entry_dt = datetime.fromisoformat(entry_time.replace("Z", "+00:00"))
                 entry_str = entry_dt.strftime("%Y-%m-%d %H:%M")
@@ -293,7 +489,7 @@ def generate_dashboard():
 
             pnl = t.get("pnl", 0)
             stake = t.get("stake", 0)
-            pnl_pct = t.get("pnl_pct", 0)  # Already calculated as percentage
+            pnl_pct = t.get("pnl_pct", 0)
             pnl_class = "positive" if pnl >= 0 else "negative"
 
             rows += f"""        <tr>
@@ -312,22 +508,11 @@ def generate_dashboard():
     # Long Trades section
     html += f"""
     <div class="section">
-    <h2>Long Trades ({len(long_trades)} closed, PnL: <span class="{'positive' if long_pnl >= 0 else 'negative'}">{fmt_de(long_pnl)}</span>)</h2>
+    <h2>Closed Trades ({len(long_trades)}, PnL: <span class="{'positive' if long_pnl >= 0 else 'negative'}">{fmt_de(long_pnl)}</span>)</h2>
     <table>
-        <tr class="long-header"><th>Symbol</th><th>Indicator</th><th>HTF</th><th>Entry</th><th>Exit</th><th>Stake</th><th>PnL</th><th>PnL %</th><th>Reason</th></tr>
+        <tr class="long-header"><th>Symbol</th><th>Indicator</th><th>HTF</th><th>Entry Time</th><th>Exit Time</th><th>Stake</th><th>PnL</th><th>%</th><th>Reason</th></tr>
 """
     html += trade_rows(long_trades)
-
-    # Short Trades section
-    html += f"""    </table>
-    </div>
-
-    <div class="section">
-    <h2>Short Trades ({len(short_trades)} closed, PnL: <span class="{'positive' if short_pnl >= 0 else 'negative'}">{fmt_de(short_pnl)}</span>)</h2>
-    <table>
-        <tr class="short-header"><th>Symbol</th><th>Indicator</th><th>HTF</th><th>Entry</th><th>Exit</th><th>Stake</th><th>PnL</th><th>PnL %</th><th>Reason</th></tr>
-"""
-    html += trade_rows(short_trades)
 
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     html += f"""    </table>
@@ -339,8 +524,8 @@ def generate_dashboard():
 </html>"""
 
     # Write to file
-    output_dir.mkdir(exist_ok=True)
-    output_path = output_dir / "dashboard.html"
+    OUTPUT_DIR.mkdir(exist_ok=True)
+    output_path = OUTPUT_DIR / "dashboard.html"
     output_path.write_text(html, encoding="utf-8")
     print(f"Dashboard saved to: {output_path}")
     return output_path
