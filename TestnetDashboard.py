@@ -45,16 +45,17 @@ def fmt_num(value: float, lang: str = "en") -> str:
     return f"{value:,.2f}"
 
 
-def generate_dashboard(output_dir: Path, lang: str = "en", start_date: datetime = None):
+def generate_dashboard(source_dir: Path, output_dir: Path, lang: str = "en", start_date: datetime = None):
     """Generate HTML dashboard from simulation JSON files.
 
     Args:
-        output_dir: Directory containing JSON files and for output
+        source_dir: Directory containing simulation JSON files (report_html/)
+        output_dir: Directory for dashboard output (report_testnet/)
         lang: Language for labels ("en" or "de")
         start_date: Only include trades from this date onwards
     """
-    closed_path = output_dir / CLOSED_TRADES_JSON
-    open_path = output_dir / OPEN_POSITIONS_JSON
+    closed_path = source_dir / CLOSED_TRADES_JSON
+    open_path = source_dir / OPEN_POSITIONS_JSON
 
     # Load data from simulation JSON files
     closed_trades = load_json(closed_path)
@@ -399,13 +400,15 @@ if __name__ == "__main__":
     import time
 
     parser = argparse.ArgumentParser(description="Generate trading dashboard from simulation data")
-    parser.add_argument("--dir", "--output-dir", type=str, default="report_testnet", help="Directory with JSON files")
+    parser.add_argument("--source-dir", type=str, default="report_html", help="Source directory with simulation JSON files")
+    parser.add_argument("--output-dir", type=str, default="report_testnet", help="Output directory for dashboard HTML")
     parser.add_argument("--start", type=str, help="Only show trades from this date (YYYY-MM-DD)")
     parser.add_argument("--loop", action="store_true", help="Run continuously, refresh every 60 seconds")
     parser.add_argument("--interval", type=int, default=60, help="Refresh interval in seconds (default: 60)")
     args = parser.parse_args()
 
-    output_dir = Path(args.dir)
+    source_dir = Path(args.source_dir)
+    output_dir = Path(args.output_dir)
 
     # Parse start date
     start_date = None
@@ -416,19 +419,20 @@ if __name__ == "__main__":
         except ValueError:
             print(f"Invalid date format: {args.start} (use YYYY-MM-DD)")
 
-    print(f"Reading from: {output_dir}")
+    print(f"Reading from: {source_dir}")
+    print(f"Writing to: {output_dir}")
 
     if args.loop:
         print(f"Loop mode: refreshing every {args.interval} seconds. Press Ctrl+C to stop.")
         try:
             while True:
-                path_en = generate_dashboard(output_dir, lang="en", start_date=start_date)
-                path_de = generate_dashboard(output_dir, lang="de", start_date=start_date)
+                path_en = generate_dashboard(source_dir, output_dir, lang="en", start_date=start_date)
+                path_de = generate_dashboard(source_dir, output_dir, lang="de", start_date=start_date)
                 print(f"[{datetime.now().strftime('%H:%M:%S')}] Updated")
                 time.sleep(args.interval)
         except KeyboardInterrupt:
             print("\nStopped.")
     else:
-        path_en = generate_dashboard(output_dir, lang="en", start_date=start_date)
-        path_de = generate_dashboard(output_dir, lang="de", start_date=start_date)
+        path_en = generate_dashboard(source_dir, output_dir, lang="en", start_date=start_date)
+        path_de = generate_dashboard(source_dir, output_dir, lang="de", start_date=start_date)
         print(f"\nOpen:\n  {path_en}\n  {path_de}")
