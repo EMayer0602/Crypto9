@@ -4334,6 +4334,7 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
             # Update for next iteration
             last_end_ts = end_ts
             existing_trades_df = trades_df.copy() if not trades_df.empty else None
+            is_fresh_start = False  # After first run, always use append mode (ends at NOW)
             print(f"\n[Loop] Next refresh in {args.signal_interval:.0f} minutes. Press Ctrl+C to stop.")
             try:
                 time.sleep(args.signal_interval * 60)
