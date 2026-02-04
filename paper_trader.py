@@ -4187,6 +4187,20 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
                 print(f"[Simulation] Fresh start from: {start_ts.strftime('%Y-%m-%d %H:%M')}")
 
             print(f"[Simulation] Period: {start_ts.strftime('%Y-%m-%d %H:%M')} to {end_ts.strftime('%Y-%m-%d %H:%M')}")
+
+            # Skip if no new data to process
+            if start_ts >= end_ts:
+                print(f"[Simulation] No new data available (start >= end). Waiting for new data...")
+                if args.loop:
+                    print(f"\n[Loop] Next refresh in {args.signal_interval:.0f} minutes. Press Ctrl+C to stop.")
+                    try:
+                        time.sleep(args.signal_interval * 60)
+                        st.clear_data_cache()
+                        continue
+                    except KeyboardInterrupt:
+                        print("\n[Loop] Stopped by user.")
+                break
+
             trades, final_state = run_simulation(
                 start_ts,
                 end_ts,
