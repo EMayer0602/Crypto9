@@ -2377,58 +2377,6 @@ def generate_summary_html(
         formatted = formatted.replace(",", "X").replace(".", ",").replace("X", ".")
         return formatted
 
-    html_parts = [
-        "<html><head><meta charset='utf-8'>",
-        "<title>Paper Trading Simulation Summary</title>",
-        "<style>body{font-family:Arial,sans-serif;margin:20px;}table{border-collapse:collapse;margin-top:12px;width:auto;}th,td{border:1px solid #ccc;padding:6px 10px;text-align:right;}th{text-align:center;background:#f0f0f0;font-weight:bold;}td:first-child{text-align:left;}h1{margin-bottom:10px;}h2{margin-top:30px;margin-bottom:10px;}.stats-container{display:flex;gap:20px;flex-wrap:wrap;}</style>",
-        "</head><body>",
-        f"<h1>Simulation Summary {summary['start']} → {summary['end']}</h1>",
-
-        # Combined Statistics Table (Overall + Long + Short)
-        "<h2>Statistics</h2>",
-        "<table>",
-        "<tr><th>Metric</th><th>Overall</th><th>Long</th><th>Short</th></tr>",
-        f"<tr><td>Closed trades</td><td>{summary['closed_trades']}</td><td>{summary.get('long_trades', 0)}</td><td>{summary.get('short_trades', 0)}</td></tr>",
-        f"<tr><td>Open positions</td><td>{summary['open_positions']}</td><td>{summary.get('long_open', 0)}</td><td>{summary.get('short_open', 0)}</td></tr>",
-        f"<tr><td>PnL (USDT)</td><td>{fmt_de(summary['closed_pnl'])}</td><td>{fmt_de(summary.get('long_pnl', 0))}</td><td>{fmt_de(summary.get('short_pnl', 0))}</td></tr>",
-        f"<tr><td>Avg PnL (USDT)</td><td>{fmt_de(summary['avg_trade_pnl'])}</td><td>{fmt_de(summary.get('long_avg_pnl', 0))}</td><td>{fmt_de(summary.get('short_avg_pnl', 0))}</td></tr>",
-        f"<tr><td>Win rate (%)</td><td>{fmt_de(summary['win_rate_pct'])}</td><td>{fmt_de(summary.get('long_win_rate', 0))}</td><td>{fmt_de(summary.get('short_win_rate', 0))}</td></tr>",
-        f"<tr><td>Winners</td><td>{summary['winners']}</td><td>{summary.get('long_winners', 0)}</td><td>{summary.get('short_winners', 0)}</td></tr>",
-        f"<tr><td>Losers</td><td>{summary['losers']}</td><td>{summary.get('long_losers', 0)}</td><td>{summary.get('short_losers', 0)}</td></tr>",
-        f"<tr><td>Open equity (USDT)</td><td>{fmt_de(summary['open_equity'])}</td><td>{fmt_de(summary.get('long_open_equity', 0))}</td><td>{fmt_de(summary.get('short_open_equity', 0))}</td></tr>",
-        f"<tr style='font-weight:bold;'><td>Final capital (USDT)</td><td>{fmt_de(summary['final_capital'])}</td><td>-</td><td>-</td></tr>",
-        "</table>",
-    ]
-
-    # Per-Symbol Statistics Table
-    symbol_stats = summary.get("symbol_stats", [])
-    if symbol_stats:
-        html_parts.append("<h2>Statistics by Symbol</h2>")
-        html_parts.append("<table>")
-        html_parts.append("<tr><th>Symbol</th><th>Trades</th><th>Win</th><th>Loss</th><th>Win%</th><th>Total PnL</th><th>Avg PnL</th><th>Best</th><th>Worst</th><th>Max DD</th><th>PF</th><th>Long</th><th>Short</th><th>Long PnL</th><th>Short PnL</th></tr>")
-        for ss in symbol_stats:
-            pnl_color = "green" if ss["total_pnl"] >= 0 else "red"
-            html_parts.append(
-                f"<tr>"
-                f"<td>{ss['symbol']}</td>"
-                f"<td>{ss['trades']}</td>"
-                f"<td>{ss['winners']}</td>"
-                f"<td>{ss['losers']}</td>"
-                f"<td>{fmt_de(ss['win_rate'], 1)}%</td>"
-                f"<td style='color:{pnl_color}'>{fmt_de(ss['total_pnl'])}</td>"
-                f"<td>{fmt_de(ss['avg_pnl'])}</td>"
-                f"<td style='color:green'>{fmt_de(ss['best_trade'])}</td>"
-                f"<td style='color:red'>{fmt_de(ss['worst_trade'])}</td>"
-                f"<td style='color:orange'>{fmt_de(ss['max_drawdown'])}</td>"
-                f"<td>{ss['profit_factor']}</td>"
-                f"<td>{ss['long_trades']}</td>"
-                f"<td>{ss['short_trades']}</td>"
-                f"<td>{fmt_de(ss['long_pnl'])}</td>"
-                f"<td>{fmt_de(ss['short_pnl'])}</td>"
-                f"</tr>"
-            )
-        html_parts.append("</table>")
-
     # === FIRST: RECALCULATE CLOSED TRADES TO GET FINAL CAPITAL ===
     START_CAPITAL = 16500.0
     MAX_POSITIONS = 10
@@ -2488,29 +2436,20 @@ def generate_summary_html(
         if "stake" in trades_display.columns and "entry_price" in trades_display.columns:
             trades_display["amount"] = trades_display["stake"] / trades_display["entry_price"].replace(0, pd.NA)
 
-    # === NOW: OPEN POSITIONS WITH FINAL CAPITAL ===
+    # === RECALCULATE OPEN POSITIONS WITH FINAL CAPITAL ===
+    recalc_open_equity = 0
+    open_display = None
+
     if not open_positions_df.empty:
-        # Prepare display DataFrame - ensure numeric columns are actually numeric
         open_display = open_positions_df.copy()
 
-        # Remove rows where essential columns are NaN (filter out empty rows)
         if "symbol" in open_display.columns:
             open_display = open_display[open_display["symbol"].notna()]
 
-        # Convert all numeric columns to proper types
         for col in ["entry_price", "stake", "last_price", "unrealized_pnl", "unrealized_pct"]:
             if col in open_display.columns:
                 open_display[col] = pd.to_numeric(open_display[col], errors="coerce")
 
-        for col in ["param_a", "param_b", "atr_mult"]:
-            if col in open_display.columns:
-                open_display[col] = pd.to_numeric(open_display[col], errors="coerce")
-
-        for col in ["min_hold_bars", "bars_held"]:
-            if col in open_display.columns:
-                open_display[col] = pd.to_numeric(open_display[col], errors="coerce")
-
-        # Recalculate open positions with final capital
         open_stake = final_capital / MAX_POSITIONS
         recalc_open_stakes = []
         recalc_open_pnls = []
@@ -2539,11 +2478,79 @@ def generate_summary_html(
         open_display["stake"] = recalc_open_stakes
         open_display["unrealized_pnl"] = recalc_open_pnls
         open_display["unrealized_pct"] = recalc_open_pcts
+        recalc_open_equity = sum(recalc_open_pnls)
 
-        # Calculate Amount = Stake / Entry Price
         if "stake" in open_display.columns and "entry_price" in open_display.columns:
             open_display["amount"] = open_display["stake"] / open_display["entry_price"].replace(0, pd.NA)
 
+        for col in ["param_a", "param_b", "atr_mult"]:
+            if col in open_display.columns:
+                open_display[col] = pd.to_numeric(open_display[col], errors="coerce")
+
+        for col in ["min_hold_bars", "bars_held"]:
+            if col in open_display.columns:
+                open_display[col] = pd.to_numeric(open_display[col], errors="coerce")
+
+    # === NOW BUILD HTML WITH RECALCULATED VALUES ===
+    recalc_final_capital = START_CAPITAL + recalc_total_pnl + recalc_open_equity
+    num_closed = len(trades_display) if trades_display is not None else 0
+    num_open = len(open_display) if open_display is not None else 0
+    avg_pnl = recalc_total_pnl / num_closed if num_closed > 0 else 0
+
+    html_parts = [
+        "<html><head><meta charset='utf-8'>",
+        "<title>Paper Trading Simulation Summary</title>",
+        "<style>body{font-family:Arial,sans-serif;margin:20px;}table{border-collapse:collapse;margin-top:12px;width:auto;}th,td{border:1px solid #ccc;padding:6px 10px;text-align:right;}th{text-align:center;background:#f0f0f0;font-weight:bold;}td:first-child{text-align:left;}h1{margin-bottom:10px;}h2{margin-top:30px;margin-bottom:10px;}.stats-container{display:flex;gap:20px;flex-wrap:wrap;}</style>",
+        "</head><body>",
+        f"<h1>Simulation Summary {summary['start']} → {summary['end']}</h1>",
+
+        # Combined Statistics Table - USE RECALCULATED VALUES
+        "<h2>Statistics (recalculated from initial capital 16.500)</h2>",
+        "<table>",
+        "<tr><th>Metric</th><th>Overall</th><th>Long</th><th>Short</th></tr>",
+        f"<tr><td>Closed trades</td><td>{num_closed}</td><td>{summary.get('long_trades', num_closed)}</td><td>{summary.get('short_trades', 0)}</td></tr>",
+        f"<tr><td>Open positions</td><td>{num_open}</td><td>{summary.get('long_open', num_open)}</td><td>{summary.get('short_open', 0)}</td></tr>",
+        f"<tr><td>PnL (USDT)</td><td>{fmt_de(recalc_total_pnl)}</td><td>{fmt_de(recalc_total_pnl)}</td><td>{fmt_de(0)}</td></tr>",
+        f"<tr><td>Avg PnL (USDT)</td><td>{fmt_de(avg_pnl)}</td><td>{fmt_de(avg_pnl)}</td><td>{fmt_de(0)}</td></tr>",
+        f"<tr><td>Win rate (%)</td><td>{fmt_de(summary['win_rate_pct'])}</td><td>{fmt_de(summary.get('long_win_rate', 0))}</td><td>{fmt_de(summary.get('short_win_rate', 0))}</td></tr>",
+        f"<tr><td>Winners</td><td>{summary['winners']}</td><td>{summary.get('long_winners', 0)}</td><td>{summary.get('short_winners', 0)}</td></tr>",
+        f"<tr><td>Losers</td><td>{summary['losers']}</td><td>{summary.get('long_losers', 0)}</td><td>{summary.get('short_losers', 0)}</td></tr>",
+        f"<tr><td>Open equity (USDT)</td><td>{fmt_de(recalc_open_equity)}</td><td>{fmt_de(recalc_open_equity)}</td><td>{fmt_de(0)}</td></tr>",
+        f"<tr style='font-weight:bold;'><td>Final capital (USDT)</td><td>{fmt_de(recalc_final_capital)}</td><td>-</td><td>-</td></tr>",
+        "</table>",
+    ]
+
+    # Per-Symbol Statistics Table
+    symbol_stats = summary.get("symbol_stats", [])
+    if symbol_stats:
+        html_parts.append("<h2>Statistics by Symbol</h2>")
+        html_parts.append("<table>")
+        html_parts.append("<tr><th>Symbol</th><th>Trades</th><th>Win</th><th>Loss</th><th>Win%</th><th>Total PnL</th><th>Avg PnL</th><th>Best</th><th>Worst</th><th>Max DD</th><th>PF</th><th>Long</th><th>Short</th><th>Long PnL</th><th>Short PnL</th></tr>")
+        for ss in symbol_stats:
+            pnl_color = "green" if ss["total_pnl"] >= 0 else "red"
+            html_parts.append(
+                f"<tr>"
+                f"<td>{ss['symbol']}</td>"
+                f"<td>{ss['trades']}</td>"
+                f"<td>{ss['winners']}</td>"
+                f"<td>{ss['losers']}</td>"
+                f"<td>{fmt_de(ss['win_rate'], 1)}%</td>"
+                f"<td style='color:{pnl_color}'>{fmt_de(ss['total_pnl'])}</td>"
+                f"<td>{fmt_de(ss['avg_pnl'])}</td>"
+                f"<td style='color:green'>{fmt_de(ss['best_trade'])}</td>"
+                f"<td style='color:red'>{fmt_de(ss['worst_trade'])}</td>"
+                f"<td style='color:orange'>{fmt_de(ss['max_drawdown'])}</td>"
+                f"<td>{ss['profit_factor']}</td>"
+                f"<td>{ss['long_trades']}</td>"
+                f"<td>{ss['short_trades']}</td>"
+                f"<td>{fmt_de(ss['long_pnl'])}</td>"
+                f"<td>{fmt_de(ss['short_pnl'])}</td>"
+                f"</tr>"
+            )
+        html_parts.append("</table>")
+
+    # === DISPLAY OPEN POSITIONS (already calculated above) ===
+    if open_display is not None and not open_display.empty:
         # Use formatters parameter to format specific columns during HTML generation
         # German number format
         def make_float_formatter_de(precision):
