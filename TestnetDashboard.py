@@ -265,9 +265,12 @@ def fmt_de(value: float) -> str:
     return f"{value:.2f}".replace(".", ",")
 
 
-def generate_dashboard():
+def generate_dashboard(start_date: str = None, output_dir: Path = None):
     """Generate HTML dashboard from simulation HTML file."""
     print("Loading simulation data from HTML...")
+
+    if output_dir is None:
+        output_dir = OUTPUT_DIR
 
     # Parse trades from HTML
     closed_trades, html_open_positions = parse_trades_from_html(SOURCE_HTML)
@@ -296,6 +299,13 @@ def generate_dashboard():
                 return datetime.strptime(et[:19], "%Y-%m-%d %H:%M:%S")
             except:
                 return datetime.min
+
+    # Filter by start date if provided
+    if start_date:
+        start_dt = datetime.fromisoformat(start_date + "T00:00:00+01:00")
+        closed_trades = [t for t in closed_trades if get_entry_time(t) >= start_dt]
+        open_positions = [p for p in open_positions if get_entry_time(p) >= start_dt]
+        print(f"After filtering from {start_date}: {len(closed_trades)} trades, {len(open_positions)} open positions")
 
     # === RECALCULATE CLOSED TRADES WITH COMPOUND GROWTH ===
     # Sort chronologically (oldest first) for compound calculation
@@ -524,13 +534,32 @@ def generate_dashboard():
 </html>"""
 
     # Write to file
-    OUTPUT_DIR.mkdir(exist_ok=True)
-    output_path = OUTPUT_DIR / "dashboard.html"
+    output_dir.mkdir(exist_ok=True)
+    output_path = output_dir / "dashboard.html"
     output_path.write_text(html, encoding="utf-8")
     print(f"Dashboard saved to: {output_path}")
     return output_path
 
 
 if __name__ == "__main__":
-    path = generate_dashboard()
-    print(f"\nOpen with: xdg-open {path}")
+    import argparse
+    import time
+
+    parser = argparse.ArgumentParser(description="Generate trading dashboard")
+    parser.add_argument("--start", type=str, help="Start date YYYY-MM-DD (trades before this are ignored)")
+    parser.add_argument("--output-dir", type=str, default="report_testnet", help="Output directory")
+    parser.add_argument("--loop", action="store_true", help="Run continuously")
+    parser.add_argument("--interval", type=int, default=300, help="Loop interval in seconds (default: 300)")
+    args = parser.parse_args()
+
+    output_dir = Path(args.output_dir)
+
+    while True:
+        path = generate_dashboard(start_date=args.start, output_dir=output_dir)
+        print(f"\nOpen with: xdg-open {path}")
+
+        if not args.loop:
+            break
+
+        print(f"\nWaiting {args.interval} seconds...")
+        time.sleep(args.interval)
