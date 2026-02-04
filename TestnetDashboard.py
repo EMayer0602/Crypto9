@@ -429,8 +429,8 @@ def generate_dashboard(
         <tr class="long-header"><th>{L['symbol']}</th><th>{L['entry_time']}</th><th>{L['exit_time']}</th><th>{L['entry_price']}</th><th>{L['exit_price']}</th><th>{L['stake']}</th><th>{L['pnl']}</th><th>{L['pnl_pct']}</th><th>{L['reason']}</th></tr>
 """
     if processed_trades:
-        # Sort by entry_time descending (newest first) for display
-        display_trades = sorted(processed_trades, key=lambda t: t.get("entry_time", ""), reverse=True)
+        # Sort by exit_time descending (newest first) for display
+        display_trades = sorted(processed_trades, key=lambda t: t.get("exit_time", "") or "", reverse=True)
         for t in display_trades[:100]:  # Show max 100 trades
             pnl = float(t.get("pnl", 0) or 0)
             stake = float(t.get("stake", 0) or 0)
