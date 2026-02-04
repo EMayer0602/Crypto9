@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Generate HTML dashboard from trading_summary.json.
+"""Generate HTML dashboard from simulation JSON files.
 
 Reads from:
-- trading_summary.json -> trades (closed) + open_positions_data (open)
+- paper_trading_simulation_log.json (closed trades)
+- paper_trading_actual_trades.json (open positions)
 
 Stakes are recalculated with compound growth from 16500 initial capital.
 Generates both English and German dashboards.
@@ -17,8 +18,9 @@ from pathlib import Path
 START_CAPITAL = 16500.0
 MAX_POSITIONS = 10
 
-# Default paths
-TRADING_SUMMARY_JSON = "trading_summary.json"
+# Default paths - simulation JSON files
+CLOSED_TRADES_JSON = "paper_trading_simulation_log.json"
+OPEN_POSITIONS_JSON = "paper_trading_actual_trades.json"
 
 
 def load_json(path: Path) -> list | dict:
@@ -44,23 +46,19 @@ def fmt_num(value: float, lang: str = "en") -> str:
 
 
 def generate_dashboard(output_dir: Path, lang: str = "en", start_date: datetime = None):
-    """Generate HTML dashboard from trading_summary.json.
+    """Generate HTML dashboard from simulation JSON files.
 
     Args:
         output_dir: Directory containing JSON files and for output
         lang: Language for labels ("en" or "de")
         start_date: Only include trades from this date onwards
     """
-    summary_path = output_dir / TRADING_SUMMARY_JSON
-    summary = load_json(summary_path)
+    closed_path = output_dir / CLOSED_TRADES_JSON
+    open_path = output_dir / OPEN_POSITIONS_JSON
 
-    # Extract trades and open positions from trading_summary.json
-    if isinstance(summary, dict):
-        closed_trades = summary.get("trades", [])
-        open_positions = summary.get("open_positions_data", [])
-    else:
-        closed_trades = []
-        open_positions = []
+    # Load data from simulation JSON files
+    closed_trades = load_json(closed_path)
+    open_positions = load_json(open_path)
 
     if not isinstance(closed_trades, list):
         closed_trades = []
