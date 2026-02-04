@@ -4022,7 +4022,13 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
         if not success:
             print("[Force] Manuelle Order konnte nicht erstellt werden.")
         return
-    if args.monitor:
+
+    # If --simulate and --monitor are both set, treat as --simulate --loop
+    if args.simulate and args.monitor:
+        args.loop = True
+        print("[Config] --simulate --monitor detected: running as --simulate --loop")
+
+    if args.monitor and not args.simulate:
         if args.refresh_params:
             st.run_overall_best_params()
         if args.clear_outputs:
