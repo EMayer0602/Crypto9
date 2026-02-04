@@ -2429,7 +2429,66 @@ def generate_summary_html(
             )
         html_parts.append("</table>")
 
-    # === OPEN POSITIONS FIRST ===
+    # === FIRST: RECALCULATE CLOSED TRADES TO GET FINAL CAPITAL ===
+    START_CAPITAL = 16500.0
+    MAX_POSITIONS = 10
+    final_capital = START_CAPITAL
+    trades_display = None
+    recalc_total_pnl = 0
+
+    if not trades_df.empty:
+        trades_display = trades_df.copy()
+
+        # Remove rows where essential columns are NaN
+        if "symbol" in trades_display.columns:
+            trades_display = trades_display[trades_display["symbol"].notna()]
+
+        for col in ["entry_price", "exit_price", "stake", "pnl"]:
+            if col in trades_display.columns:
+                trades_display[col] = pd.to_numeric(trades_display[col], errors="coerce")
+
+        # Sort chronologically for proper compound calculation
+        if "entry_time" in trades_display.columns:
+            trades_display = trades_display.sort_values("entry_time", ascending=True)
+
+        # Recalculate stakes with compound growth
+        capital = START_CAPITAL
+        recalc_stakes = []
+        recalc_pnls = []
+
+        for idx, row in trades_display.iterrows():
+            entry_price = float(row.get("entry_price", 0) or 0)
+            exit_price = float(row.get("exit_price", 0) or 0)
+            direction = str(row.get("direction", "long")).lower()
+
+            stake = capital / MAX_POSITIONS
+
+            if entry_price > 0:
+                if direction == "short":
+                    pnl = (entry_price - exit_price) / entry_price * stake
+                else:
+                    pnl = (exit_price - entry_price) / entry_price * stake
+            else:
+                pnl = 0
+
+            recalc_stakes.append(stake)
+            recalc_pnls.append(pnl)
+            capital += pnl
+
+        trades_display["stake"] = recalc_stakes
+        trades_display["pnl"] = recalc_pnls
+        final_capital = capital
+        recalc_total_pnl = sum(recalc_pnls)
+
+        # Sort descending for display
+        if "entry_time" in trades_display.columns:
+            trades_display = trades_display.sort_values("entry_time", ascending=False)
+
+        # Calculate Amount
+        if "stake" in trades_display.columns and "entry_price" in trades_display.columns:
+            trades_display["amount"] = trades_display["stake"] / trades_display["entry_price"].replace(0, pd.NA)
+
+    # === NOW: OPEN POSITIONS WITH FINAL CAPITAL ===
     if not open_positions_df.empty:
         # Prepare display DataFrame - ensure numeric columns are actually numeric
         open_display = open_positions_df.copy()
@@ -2450,6 +2509,36 @@ def generate_summary_html(
         for col in ["min_hold_bars", "bars_held"]:
             if col in open_display.columns:
                 open_display[col] = pd.to_numeric(open_display[col], errors="coerce")
+
+        # Recalculate open positions with final capital
+        open_stake = final_capital / MAX_POSITIONS
+        recalc_open_stakes = []
+        recalc_open_pnls = []
+        recalc_open_pcts = []
+
+        for idx, row in open_display.iterrows():
+            entry_price = float(row.get("entry_price", 0) or 0)
+            last_price = float(row.get("last_price", 0) or entry_price)
+            direction = str(row.get("direction", "long")).lower()
+
+            if entry_price > 0:
+                if direction == "short":
+                    pnl = (entry_price - last_price) / entry_price * open_stake
+                    pct = (entry_price - last_price) / entry_price * 100
+                else:
+                    pnl = (last_price - entry_price) / entry_price * open_stake
+                    pct = (last_price - entry_price) / entry_price * 100
+            else:
+                pnl = 0
+                pct = 0
+
+            recalc_open_stakes.append(open_stake)
+            recalc_open_pnls.append(pnl)
+            recalc_open_pcts.append(pct)
+
+        open_display["stake"] = recalc_open_stakes
+        open_display["unrealized_pnl"] = recalc_open_pnls
+        open_display["unrealized_pct"] = recalc_open_pcts
 
         # Calculate Amount = Stake / Entry Price
         if "stake" in open_display.columns and "entry_price" in open_display.columns:
@@ -2509,65 +2598,8 @@ def generate_summary_html(
             html_parts.append("<h2>Open positions</h2>")
             html_parts.append(open_display.to_html(index=False, escape=False, formatters=open_formatters))
 
-    # === CLOSED TRADES ===
-    if not trades_df.empty:
-        # Prepare display DataFrame - ensure numeric columns are actually numeric
-        trades_display = trades_df.copy()
-
-        # Remove rows where essential columns are NaN (filter out empty rows)
-        if "symbol" in trades_display.columns:
-            trades_display = trades_display[trades_display["symbol"].notna()]
-
-        for col in ["entry_price", "exit_price", "stake", "pnl"]:
-            if col in trades_display.columns:
-                trades_display[col] = pd.to_numeric(trades_display[col], errors="coerce")
-
-        # === RECALCULATE STAKES WITH COMPOUND GROWTH ===
-        # Sort chronologically first for proper compound calculation
-        if "entry_time" in trades_display.columns:
-            trades_display = trades_display.sort_values("entry_time", ascending=True)
-
-        # Recalculate stakes starting from initial capital
-        START_CAPITAL = 16500.0
-        MAX_POSITIONS = 10
-        capital = START_CAPITAL
-        recalc_stakes = []
-        recalc_pnls = []
-
-        for idx, row in trades_display.iterrows():
-            entry_price = float(row.get("entry_price", 0) or 0)
-            exit_price = float(row.get("exit_price", 0) or 0)
-            direction = str(row.get("direction", "long")).lower()
-
-            # Calculate stake based on current capital
-            stake = capital / MAX_POSITIONS
-
-            # Calculate PnL based on recalculated stake
-            if entry_price > 0:
-                if direction == "short":
-                    pnl = (entry_price - exit_price) / entry_price * stake
-                else:  # long
-                    pnl = (exit_price - entry_price) / entry_price * stake
-            else:
-                pnl = 0
-
-            recalc_stakes.append(stake)
-            recalc_pnls.append(pnl)
-
-            # Update capital for next trade (compound growth)
-            capital += pnl
-
-        trades_display["stake"] = recalc_stakes
-        trades_display["pnl"] = recalc_pnls
-
-        # Now sort by entry_time descending (newest first) for display
-        if "entry_time" in trades_display.columns:
-            trades_display = trades_display.sort_values("entry_time", ascending=False)
-
-        # Calculate Amount = Stake / Entry Price
-        if "stake" in trades_display.columns and "entry_price" in trades_display.columns:
-            trades_display["amount"] = trades_display["stake"] / trades_display["entry_price"].replace(0, pd.NA)
-
+    # === DISPLAY CLOSED TRADES (already calculated above) ===
+    if trades_display is not None and not trades_display.empty:
         full_cols = [c for c in [
             "symbol","direction","indicator","htf","entry_time","entry_price","exit_time","exit_price","amount","stake","pnl","reason"
         ] if c in trades_display.columns]
