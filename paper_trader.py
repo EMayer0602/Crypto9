@@ -2377,126 +2377,6 @@ def generate_summary_html(
         formatted = formatted.replace(",", "X").replace(".", ",").replace("X", ".")
         return formatted
 
-    # === FIRST: RECALCULATE CLOSED TRADES TO GET FINAL CAPITAL ===
-    START_CAPITAL = 16500.0
-    MAX_POSITIONS = 10
-    final_capital = START_CAPITAL
-    trades_display = None
-    recalc_total_pnl = 0
-
-    if not trades_df.empty:
-        trades_display = trades_df.copy()
-
-        # Remove rows where essential columns are NaN
-        if "symbol" in trades_display.columns:
-            trades_display = trades_display[trades_display["symbol"].notna()]
-
-        for col in ["entry_price", "exit_price", "stake", "pnl"]:
-            if col in trades_display.columns:
-                trades_display[col] = pd.to_numeric(trades_display[col], errors="coerce")
-
-        # Sort chronologically for proper compound calculation
-        if "entry_time" in trades_display.columns:
-            trades_display = trades_display.sort_values("entry_time", ascending=True)
-
-        # Recalculate stakes with compound growth
-        capital = START_CAPITAL
-        recalc_stakes = []
-        recalc_pnls = []
-
-        for idx, row in trades_display.iterrows():
-            entry_price = float(row.get("entry_price", 0) or 0)
-            exit_price = float(row.get("exit_price", 0) or 0)
-            direction = str(row.get("direction", "long")).lower()
-
-            stake = capital / MAX_POSITIONS
-
-            if entry_price > 0:
-                if direction == "short":
-                    pnl = (entry_price - exit_price) / entry_price * stake
-                else:
-                    pnl = (exit_price - entry_price) / entry_price * stake
-            else:
-                pnl = 0
-
-            recalc_stakes.append(stake)
-            recalc_pnls.append(pnl)
-            capital += pnl
-
-        trades_display["stake"] = recalc_stakes
-        trades_display["pnl"] = recalc_pnls
-        final_capital = capital
-        recalc_total_pnl = sum(recalc_pnls)
-
-        # Sort descending for display
-        if "entry_time" in trades_display.columns:
-            trades_display = trades_display.sort_values("entry_time", ascending=False)
-
-        # Calculate Amount
-        if "stake" in trades_display.columns and "entry_price" in trades_display.columns:
-            trades_display["amount"] = trades_display["stake"] / trades_display["entry_price"].replace(0, pd.NA)
-
-    # === RECALCULATE OPEN POSITIONS WITH FINAL CAPITAL ===
-    recalc_open_equity = 0
-    open_display = None
-
-    if not open_positions_df.empty:
-        open_display = open_positions_df.copy()
-
-        if "symbol" in open_display.columns:
-            open_display = open_display[open_display["symbol"].notna()]
-
-        for col in ["entry_price", "stake", "last_price", "unrealized_pnl", "unrealized_pct"]:
-            if col in open_display.columns:
-                open_display[col] = pd.to_numeric(open_display[col], errors="coerce")
-
-        open_stake = final_capital / MAX_POSITIONS
-        recalc_open_stakes = []
-        recalc_open_pnls = []
-        recalc_open_pcts = []
-
-        for idx, row in open_display.iterrows():
-            entry_price = float(row.get("entry_price", 0) or 0)
-            last_price = float(row.get("last_price", 0) or entry_price)
-            direction = str(row.get("direction", "long")).lower()
-
-            if entry_price > 0:
-                if direction == "short":
-                    pnl = (entry_price - last_price) / entry_price * open_stake
-                    pct = (entry_price - last_price) / entry_price * 100
-                else:
-                    pnl = (last_price - entry_price) / entry_price * open_stake
-                    pct = (last_price - entry_price) / entry_price * 100
-            else:
-                pnl = 0
-                pct = 0
-
-            recalc_open_stakes.append(open_stake)
-            recalc_open_pnls.append(pnl)
-            recalc_open_pcts.append(pct)
-
-        open_display["stake"] = recalc_open_stakes
-        open_display["unrealized_pnl"] = recalc_open_pnls
-        open_display["unrealized_pct"] = recalc_open_pcts
-        recalc_open_equity = sum(recalc_open_pnls)
-
-        if "stake" in open_display.columns and "entry_price" in open_display.columns:
-            open_display["amount"] = open_display["stake"] / open_display["entry_price"].replace(0, pd.NA)
-
-        for col in ["param_a", "param_b", "atr_mult"]:
-            if col in open_display.columns:
-                open_display[col] = pd.to_numeric(open_display[col], errors="coerce")
-
-        for col in ["min_hold_bars", "bars_held"]:
-            if col in open_display.columns:
-                open_display[col] = pd.to_numeric(open_display[col], errors="coerce")
-
-    # === NOW BUILD HTML WITH RECALCULATED VALUES ===
-    recalc_final_capital = START_CAPITAL + recalc_total_pnl + recalc_open_equity
-    num_closed = len(trades_display) if trades_display is not None else 0
-    num_open = len(open_display) if open_display is not None else 0
-    avg_pnl = recalc_total_pnl / num_closed if num_closed > 0 else 0
-
     html_parts = [
         "<html><head><meta charset='utf-8'>",
         "<title>Paper Trading Simulation Summary</title>",
@@ -2504,19 +2384,19 @@ def generate_summary_html(
         "</head><body>",
         f"<h1>Simulation Summary {summary['start']} → {summary['end']}</h1>",
 
-        # Combined Statistics Table - USE RECALCULATED VALUES
-        "<h2>Statistics (recalculated from initial capital 16.500)</h2>",
+        # Combined Statistics Table (Overall + Long + Short)
+        "<h2>Statistics</h2>",
         "<table>",
         "<tr><th>Metric</th><th>Overall</th><th>Long</th><th>Short</th></tr>",
-        f"<tr><td>Closed trades</td><td>{num_closed}</td><td>{summary.get('long_trades', num_closed)}</td><td>{summary.get('short_trades', 0)}</td></tr>",
-        f"<tr><td>Open positions</td><td>{num_open}</td><td>{summary.get('long_open', num_open)}</td><td>{summary.get('short_open', 0)}</td></tr>",
-        f"<tr><td>PnL (USDT)</td><td>{fmt_de(recalc_total_pnl)}</td><td>{fmt_de(recalc_total_pnl)}</td><td>{fmt_de(0)}</td></tr>",
-        f"<tr><td>Avg PnL (USDT)</td><td>{fmt_de(avg_pnl)}</td><td>{fmt_de(avg_pnl)}</td><td>{fmt_de(0)}</td></tr>",
+        f"<tr><td>Closed trades</td><td>{summary['closed_trades']}</td><td>{summary.get('long_trades', 0)}</td><td>{summary.get('short_trades', 0)}</td></tr>",
+        f"<tr><td>Open positions</td><td>{summary['open_positions']}</td><td>{summary.get('long_open', 0)}</td><td>{summary.get('short_open', 0)}</td></tr>",
+        f"<tr><td>PnL (USDT)</td><td>{fmt_de(summary['closed_pnl'])}</td><td>{fmt_de(summary.get('long_pnl', 0))}</td><td>{fmt_de(summary.get('short_pnl', 0))}</td></tr>",
+        f"<tr><td>Avg PnL (USDT)</td><td>{fmt_de(summary['avg_trade_pnl'])}</td><td>{fmt_de(summary.get('long_avg_pnl', 0))}</td><td>{fmt_de(summary.get('short_avg_pnl', 0))}</td></tr>",
         f"<tr><td>Win rate (%)</td><td>{fmt_de(summary['win_rate_pct'])}</td><td>{fmt_de(summary.get('long_win_rate', 0))}</td><td>{fmt_de(summary.get('short_win_rate', 0))}</td></tr>",
         f"<tr><td>Winners</td><td>{summary['winners']}</td><td>{summary.get('long_winners', 0)}</td><td>{summary.get('short_winners', 0)}</td></tr>",
         f"<tr><td>Losers</td><td>{summary['losers']}</td><td>{summary.get('long_losers', 0)}</td><td>{summary.get('short_losers', 0)}</td></tr>",
-        f"<tr><td>Open equity (USDT)</td><td>{fmt_de(recalc_open_equity)}</td><td>{fmt_de(recalc_open_equity)}</td><td>{fmt_de(0)}</td></tr>",
-        f"<tr style='font-weight:bold;'><td>Final capital (USDT)</td><td>{fmt_de(recalc_final_capital)}</td><td>-</td><td>-</td></tr>",
+        f"<tr><td>Open equity (USDT)</td><td>{fmt_de(summary['open_equity'])}</td><td>{fmt_de(summary.get('long_open_equity', 0))}</td><td>{fmt_de(summary.get('short_open_equity', 0))}</td></tr>",
+        f"<tr style='font-weight:bold;'><td>Final capital (USDT)</td><td>{fmt_de(summary['final_capital'])}</td><td>-</td><td>-</td></tr>",
         "</table>",
     ]
 
@@ -2549,64 +2429,22 @@ def generate_summary_html(
             )
         html_parts.append("</table>")
 
-    # === DISPLAY OPEN POSITIONS (already calculated above) ===
-    if open_display is not None and not open_display.empty:
-        # Use formatters parameter to format specific columns during HTML generation
-        # German number format
-        def make_float_formatter_de(precision):
-            def formatter(x):
-                if pd.isna(x):
-                    return ""
-                formatted = f"{x:,.{precision}f}"
-                return formatted.replace(",", "X").replace(".", ",").replace("X", ".")
-            return formatter
+    if not trades_df.empty:
+        # Prepare display DataFrame - ensure numeric columns are actually numeric
+        trades_display = trades_df.copy()
 
-        def make_int_formatter():
-            return lambda x: f"{int(x)}" if pd.notna(x) else "0"
+        # Remove rows where essential columns are NaN (filter out empty rows)
+        if "symbol" in trades_display.columns:
+            trades_display = trades_display[trades_display["symbol"].notna()]
 
-        open_formatters = {}
+        for col in ["entry_price", "exit_price", "stake", "pnl"]:
+            if col in trades_display.columns:
+                trades_display[col] = pd.to_numeric(trades_display[col], errors="coerce")
 
-        # 8 decimal places for prices and stake
-        for col in ["entry_price", "stake", "last_price", "unrealized_pnl", "unrealized_pct"]:
-            if col in open_display.columns:
-                open_formatters[col] = make_float_formatter_de(8)
-        # 4 decimal places for amount
-        if "amount" in open_display.columns:
-            open_formatters["amount"] = make_float_formatter_de(4)
+        # Calculate Amount = Stake / Entry Price
+        if "stake" in trades_display.columns and "entry_price" in trades_display.columns:
+            trades_display["amount"] = trades_display["stake"] / trades_display["entry_price"].replace(0, pd.NA)
 
-        # 2 decimal places for float params
-        for col in ["param_a", "param_b", "atr_mult"]:
-            if col in open_display.columns:
-                open_formatters[col] = make_float_formatter_de(2)
-
-        # Integers for counts
-        for col in ["min_hold_bars", "bars_held"]:
-            if col in open_display.columns:
-                open_formatters[col] = make_int_formatter()
-
-        # Separate Long and Short open positions
-        if "direction" in open_display.columns:
-            long_open = open_display[open_display["direction"].str.lower() == "long"].copy()
-            short_open = open_display[open_display["direction"].str.lower() == "short"].copy()
-
-            # Display Long Open Positions
-            if not long_open.empty:
-                long_equity = compute_net_open_equity(long_open)
-                html_parts.append(f"<h2>Long Open Positions ({len(long_open)} positions, Equity: {fmt_de(long_equity)} USDT)</h2>")
-                html_parts.append(long_open.to_html(index=False, escape=False, formatters=open_formatters))
-
-            # Display Short Open Positions
-            if not short_open.empty:
-                short_equity = compute_net_open_equity(short_open)
-                html_parts.append(f"<h2>Short Open Positions ({len(short_open)} positions, Equity: {fmt_de(short_equity)} USDT)</h2>")
-                html_parts.append(short_open.to_html(index=False, escape=False, formatters=open_formatters))
-        else:
-            # Fallback if no direction column
-            html_parts.append("<h2>Open positions</h2>")
-            html_parts.append(open_display.to_html(index=False, escape=False, formatters=open_formatters))
-
-    # === DISPLAY CLOSED TRADES (already calculated above) ===
-    if trades_display is not None and not trades_display.empty:
         full_cols = [c for c in [
             "symbol","direction","indicator","htf","entry_time","entry_price","exit_time","exit_price","amount","stake","pnl","reason"
         ] if c in trades_display.columns]
@@ -2649,6 +2487,85 @@ def generate_summary_html(
             # Fallback if no direction column
             html_parts.append("<h2>Complete Closed Trades (with Entry and Exit)</h2>")
             html_parts.append(trades_display.to_html(index=False, escape=False, formatters=formatters))
+
+    if not open_positions_df.empty:
+        # Prepare display DataFrame - ensure numeric columns are actually numeric
+        open_display = open_positions_df.copy()
+
+        # Remove rows where essential columns are NaN (filter out empty rows)
+        if "symbol" in open_display.columns:
+            open_display = open_display[open_display["symbol"].notna()]
+
+        # Convert all numeric columns to proper types
+        for col in ["entry_price", "stake", "last_price", "unrealized_pnl", "unrealized_pct"]:
+            if col in open_display.columns:
+                open_display[col] = pd.to_numeric(open_display[col], errors="coerce")
+
+        for col in ["param_a", "param_b", "atr_mult"]:
+            if col in open_display.columns:
+                open_display[col] = pd.to_numeric(open_display[col], errors="coerce")
+
+        for col in ["min_hold_bars", "bars_held"]:
+            if col in open_display.columns:
+                open_display[col] = pd.to_numeric(open_display[col], errors="coerce")
+
+        # Calculate Amount = Stake / Entry Price
+        if "stake" in open_display.columns and "entry_price" in open_display.columns:
+            open_display["amount"] = open_display["stake"] / open_display["entry_price"].replace(0, pd.NA)
+
+        # Use formatters parameter to format specific columns during HTML generation
+        # German number format
+        def make_float_formatter_de(precision):
+            def formatter(x):
+                if pd.isna(x):
+                    return ""
+                formatted = f"{x:,.{precision}f}"
+                return formatted.replace(",", "X").replace(".", ",").replace("X", ".")
+            return formatter
+
+        def make_int_formatter():
+            return lambda x: f"{int(x)}" if pd.notna(x) else "0"
+
+        formatters = {}
+
+        # 8 decimal places for prices and stake
+        for col in ["entry_price", "stake", "last_price", "unrealized_pnl", "unrealized_pct"]:
+            if col in open_display.columns:
+                formatters[col] = make_float_formatter_de(8)
+        # 4 decimal places for amount
+        if "amount" in open_display.columns:
+            formatters["amount"] = make_float_formatter_de(4)
+
+        # 2 decimal places for float params
+        for col in ["param_a", "param_b", "atr_mult"]:
+            if col in open_display.columns:
+                formatters[col] = make_float_formatter_de(2)
+
+        # Integers for counts
+        for col in ["min_hold_bars", "bars_held"]:
+            if col in open_display.columns:
+                formatters[col] = make_int_formatter()
+
+        # Separate Long and Short open positions
+        if "direction" in open_display.columns:
+            long_open = open_display[open_display["direction"].str.lower() == "long"].copy()
+            short_open = open_display[open_display["direction"].str.lower() == "short"].copy()
+
+            # Display Long Open Positions
+            if not long_open.empty:
+                long_equity = compute_net_open_equity(long_open)
+                html_parts.append(f"<h2>Long Open Positions ({len(long_open)} positions, Equity: {fmt_de(long_equity)} USDT)</h2>")
+                html_parts.append(long_open.to_html(index=False, escape=False, formatters=formatters))
+
+            # Display Short Open Positions
+            if not short_open.empty:
+                short_equity = compute_net_open_equity(short_open)
+                html_parts.append(f"<h2>Short Open Positions ({len(short_open)} positions, Equity: {fmt_de(short_equity)} USDT)</h2>")
+                html_parts.append(short_open.to_html(index=False, escape=False, formatters=formatters))
+        else:
+            # Fallback if no direction column
+            html_parts.append("<h2>Open positions</h2>")
+            html_parts.append(open_display.to_html(index=False, escape=False, formatters=formatters))
 
     html_parts.append("</body></html>")
 
