@@ -2,31 +2,33 @@
 <html>
 <head>
     <meta charset="utf-8">
-    <title>Paper Trading Dashboard</title>
-    <meta http-equiv="refresh" content="60">
+    <title>Trading Dashboard</title>
     <style>
         body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
         .container { max-width: 1600px; margin: 0 auto; }
         h1 { color: #333; border-bottom: 2px solid #007bff; padding-bottom: 10px; }
-        .subtitle { color: #666; font-size: 14px; margin-top: -10px; }
         h2 { color: #555; margin-top: 30px; }
         table { border-collapse: collapse; width: 100%; margin-top: 10px; background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-        th, td { border: 1px solid #ddd; padding: 6px; text-align: right; font-size: 13px; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: right; }
         th { background: #007bff; color: white; text-align: center; }
         td:first-child { text-align: left; }
         .positive { color: green; font-weight: bold; }
         .negative { color: red; font-weight: bold; }
-        .summary-box { display: inline-block; background: white; padding: 15px; margin: 8px; border-radius: 5px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); min-width: 130px; text-align: center; }
-        .summary-box h3 { margin: 0 0 8px 0; color: #666; font-size: 12px; }
-        .summary-box .value { font-size: 20px; font-weight: bold; }
+        .summary-box { display: inline-block; background: white; padding: 20px; margin: 10px; border-radius: 5px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); min-width: 150px; text-align: center; }
+        .summary-box h3 { margin: 0 0 10px 0; color: #666; font-size: 14px; }
+        .summary-box .value { font-size: 24px; font-weight: bold; }
         .long-header { background: #28a745 !important; }
+        .short-header { background: #dc3545 !important; }
+        .open-header { background: #17a2b8 !important; }
         .timestamp { color: #666; font-size: 12px; margin-top: 20px; }
+        .section { margin-bottom: 30px; }
+        .source-note { color: #666; font-style: italic; margin-bottom: 20px; }
     </style>
 </head>
 <body>
 <div class="container">
-    <h1>Paper Trading Dashboard</h1>
-    <p class="subtitle">SPOT Only - Long-only Mode | Start: $16,500.00 | Max Positions: 10</p>
+    <h1>Trading Dashboard</h1>
+    <p class="source-note">Simulation trades, recalculated with 16,500.00 initial capital</p>
 
     <div class="summary-boxes">
         <div class="summary-box">
@@ -34,8 +36,8 @@
             <div class="value">16,500.00</div>
         </div>
         <div class="summary-box">
-            <h3>Current Capital</h3>
-            <div class="value negative">16,302.35</div>
+            <h3>Final Capital</h3>
+            <div class="value positive">16,504.41</div>
         </div>
         <div class="summary-box">
             <h3>Closed Trades</h3>
@@ -46,91 +48,122 @@
             <div class="value positive">4.41</div>
         </div>
         <div class="summary-box">
-            <h3>Win Rate</h3>
-            <div class="value">100.0%</div>
+            <h3>Long Trades</h3>
+            <div class="value">1 (1W)</div>
+        </div>
+        <div class="summary-box">
+            <h3>Short Trades</h3>
+            <div class="value">0 (0W)</div>
         </div>
         <div class="summary-box">
             <h3>Open Positions</h3>
             <div class="value">5</div>
         </div>
         <div class="summary-box">
-            <h3>Unrealized PnL</h3>
-            <div class="value negative">-202.06</div>
+            <h3>Open Equity</h3>
+            <div class="value negative">-122.52</div>
         </div>
     </div>
 
-    <h2>Open Positions (5)</h2>
+    <div class="section">
+    <h2>Open Positions (5, Equity: <span class="negative">-122.52</span>)</h2>
     <table>
-        <tr><th>Symbol</th><th>Entry Time</th><th>Entry Price</th><th>Last Price</th><th>Stake</th><th>Amount</th><th>Unrealized PnL</th><th>PnL %</th></tr>
-        <tr>
-            <td>SUI/USDC</td>
-            <td>2026-02-02T19:00:00+01:00</td>
-            <td>1.14820000</td>
-            <td>1.12370000</td>
-            <td>1,650.44</td>
-            <td>1,437.416109</td>
-            <td class="negative">-35.22</td>
-            <td class="negative">-2.13%</td>
-        </tr>
+        <tr class="open-header"><th>Symbol</th><th>Direction</th><th>Indicator</th><th>HTF</th><th>Entry Time</th><th>Entry Price</th><th>Last Price</th><th>Stake</th><th>Bars</th><th>PnL</th><th>Status</th></tr>
         <tr>
             <td>ICP/USDT</td>
-            <td>2026-02-03T13:00:00+01:00</td>
-            <td>2.69400000</td>
-            <td>2.64200000</td>
+            <td>LONG</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-02-03 13:00</td>
+            <td>2.694</td>
+            <td>2.662</td>
             <td>1,650.44</td>
-            <td>612.635923</td>
-            <td class="negative">-31.86</td>
-            <td class="negative">-1.93%</td>
-        </tr>
-        <tr>
-            <td>LUNC/USDT</td>
-            <td>2026-02-01T23:00:00+01:00</td>
-            <td>0.00003749</td>
-            <td>0.00003667</td>
-            <td>1,650.44</td>
-            <td>44,023,504.307031</td>
-            <td class="negative">-36.10</td>
-            <td class="negative">-2.19%</td>
+            <td>4</td>
+            <td class="negative">-19.60</td>
+            <td>Verlust</td>
         </tr>
         <tr>
             <td>LINK/USDT</td>
-            <td>2026-02-02T22:00:00+01:00</td>
-            <td>9.81000000</td>
-            <td>9.46000000</td>
+            <td>LONG</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-02-02 22:00</td>
+            <td>9.81</td>
+            <td>9.52</td>
             <td>1,650.44</td>
-            <td>168.240691</td>
-            <td class="negative">-58.88</td>
-            <td class="negative">-3.57%</td>
+            <td>19</td>
+            <td class="negative">-48.79</td>
+            <td>Verlust</td>
         </tr>
         <tr>
             <td>ADA/USDT</td>
-            <td>2026-02-02T22:00:00+01:00</td>
-            <td>0.30120000</td>
-            <td>0.29390000</td>
+            <td>LONG</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-02-02 22:00</td>
+            <td>0.3012</td>
+            <td>0.2955</td>
             <td>1,650.44</td>
-            <td>5,479.552379</td>
-            <td class="negative">-40.00</td>
-            <td class="negative">-2.42%</td>
+            <td>19</td>
+            <td class="negative">-31.23</td>
+            <td>Verlust</td>
+        </tr>
+        <tr>
+            <td>SUI/USDC</td>
+            <td>LONG</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-02-02 19:00</td>
+            <td>1.1482</td>
+            <td>1.1433</td>
+            <td>1,650.44</td>
+            <td>22</td>
+            <td class="negative">-7.04</td>
+            <td>Verlust</td>
+        </tr>
+        <tr>
+            <td>LUNC/USDT</td>
+            <td>LONG</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-02-01 23:00</td>
+            <td>3.749e-05</td>
+            <td>3.713e-05</td>
+            <td>1,650.44</td>
+            <td>42</td>
+            <td class="negative">-15.85</td>
+            <td>Verlust</td>
         </tr>
     </table>
+    </div>
 
-    <h2>Closed Trades (1, PnL: <span class="positive">4.41</span>)</h2>
+    <div class="section">
+    <h2>Long Trades (1, PnL: <span class="positive">4.41</span>)</h2>
     <table>
-        <tr class="long-header"><th>Symbol</th><th>Entry Time</th><th>Exit Time</th><th>Entry Price</th><th>Exit Price</th><th>Stake</th><th>PnL</th><th>PnL %</th><th>Reason</th></tr>
+        <tr class="long-header"><th>Symbol</th><th>Indicator</th><th>HTF</th><th>Entry Time</th><th>Exit Time</th><th>Stake</th><th>PnL</th><th>%</th><th>Reason</th></tr>
         <tr>
             <td>LINK/EUR</td>
-            <td>2026-01-03T15:00:00+01:00</td>
-            <td>2026-01-03T18:00:00+01:00</td>
-            <td>11.22000000</td>
-            <td>11.25000000</td>
+            <td>jma</td>
+            <td>1h</td>
+            <td>2026-01-03 15:00</td>
+            <td>2026-01-03 18:00</td>
             <td>1,650.00</td>
             <td class="positive">4.41</td>
             <td class="positive">+0.27%</td>
             <td>Time-based exit (3 bars, optimal=3)</td>
         </tr>
     </table>
+    </div>
 
-    <p class="timestamp">Generated: 2026-02-03 18:07:57 | Data from trading_summary.json + paper_trading_state.json</p>
+    <div class="section">
+    <h2>Short Trades (0, PnL: <span class="positive">0.00</span>)</h2>
+    <table>
+        <tr class="short-header"><th>Symbol</th><th>Indicator</th><th>HTF</th><th>Entry Time</th><th>Exit Time</th><th>Stake</th><th>PnL</th><th>%</th><th>Reason</th></tr>
+        <tr><td colspan='9'>-</td></tr>
+    </table>
+    </div>
+
+    <p class="timestamp">Generated: 2026-02-04 19:55:50</p>
 </div>
 </body>
 </html>
