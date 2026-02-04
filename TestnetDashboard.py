@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Generate HTML dashboard from simulation JSON files.
+"""Generate HTML dashboard from report_html/trading_summary.json.
 
-Reads from:
-- paper_trading_simulation_log.json (closed trades)
-- paper_trading_actual_trades.json (open positions)
+Reads from report_html/trading_summary.json:
+- trades (closed trades array)
+- open_positions_data (open positions array)
 
 Stakes are recalculated with compound growth from 16500 initial capital.
-Generates both English and German dashboards.
+Generates dashboard.html and dashboard_de.html in report_testnet/.
 """
 
 import json
@@ -18,9 +18,10 @@ from pathlib import Path
 START_CAPITAL = 16500.0
 MAX_POSITIONS = 10
 
-# Default paths - simulation JSON files
-CLOSED_TRADES_JSON = "paper_trading_simulation_log.json"
-OPEN_POSITIONS_JSON = "paper_trading_actual_trades.json"
+# Fixed directories - no parameters
+SOURCE_DIR = Path("report_html")
+OUTPUT_DIR = Path("report_testnet")
+TRADING_SUMMARY_JSON = "trading_summary.json"
 
 
 def load_json(path: Path) -> list | dict:
@@ -46,20 +47,24 @@ def fmt_num(value: float, lang: str = "en") -> str:
 
 
 def generate_dashboard(source_dir: Path, output_dir: Path, lang: str = "en", start_date: datetime = None):
-    """Generate HTML dashboard from simulation JSON files.
+    """Generate HTML dashboard from trading_summary.json.
 
     Args:
-        source_dir: Directory containing simulation JSON files (report_html/)
+        source_dir: Directory containing trading_summary.json (report_html/)
         output_dir: Directory for dashboard output (report_testnet/)
         lang: Language for labels ("en" or "de")
         start_date: Only include trades from this date onwards
     """
-    closed_path = source_dir / CLOSED_TRADES_JSON
-    open_path = source_dir / OPEN_POSITIONS_JSON
+    summary_path = source_dir / TRADING_SUMMARY_JSON
+    summary = load_json(summary_path)
 
-    # Load data from simulation JSON files
-    closed_trades = load_json(closed_path)
-    open_positions = load_json(open_path)
+    # Extract trades and open positions from trading_summary.json
+    if isinstance(summary, dict):
+        closed_trades = summary.get("trades", [])
+        open_positions = summary.get("open_positions_data", [])
+    else:
+        closed_trades = []
+        open_positions = []
 
     if not isinstance(closed_trades, list):
         closed_trades = []
@@ -400,15 +405,10 @@ if __name__ == "__main__":
     import time
 
     parser = argparse.ArgumentParser(description="Generate trading dashboard from simulation data")
-    parser.add_argument("--source-dir", type=str, default="report_html", help="Source directory with simulation JSON files")
-    parser.add_argument("--output-dir", type=str, default="report_testnet", help="Output directory for dashboard HTML")
     parser.add_argument("--start", type=str, help="Only show trades from this date (YYYY-MM-DD)")
     parser.add_argument("--loop", action="store_true", help="Run continuously, refresh every 60 seconds")
     parser.add_argument("--interval", type=int, default=60, help="Refresh interval in seconds (default: 60)")
     args = parser.parse_args()
-
-    source_dir = Path(args.source_dir)
-    output_dir = Path(args.output_dir)
 
     # Parse start date
     start_date = None
@@ -419,20 +419,20 @@ if __name__ == "__main__":
         except ValueError:
             print(f"Invalid date format: {args.start} (use YYYY-MM-DD)")
 
-    print(f"Reading from: {source_dir}")
-    print(f"Writing to: {output_dir}")
+    print(f"Reading from: {SOURCE_DIR}")
+    print(f"Writing to: {OUTPUT_DIR}")
 
     if args.loop:
         print(f"Loop mode: refreshing every {args.interval} seconds. Press Ctrl+C to stop.")
         try:
             while True:
-                path_en = generate_dashboard(source_dir, output_dir, lang="en", start_date=start_date)
-                path_de = generate_dashboard(source_dir, output_dir, lang="de", start_date=start_date)
+                path_en = generate_dashboard(SOURCE_DIR, OUTPUT_DIR, lang="en", start_date=start_date)
+                path_de = generate_dashboard(SOURCE_DIR, OUTPUT_DIR, lang="de", start_date=start_date)
                 print(f"[{datetime.now().strftime('%H:%M:%S')}] Updated")
                 time.sleep(args.interval)
         except KeyboardInterrupt:
             print("\nStopped.")
     else:
-        path_en = generate_dashboard(source_dir, output_dir, lang="en", start_date=start_date)
-        path_de = generate_dashboard(source_dir, output_dir, lang="de", start_date=start_date)
+        path_en = generate_dashboard(SOURCE_DIR, OUTPUT_DIR, lang="en", start_date=start_date)
+        path_de = generate_dashboard(SOURCE_DIR, OUTPUT_DIR, lang="de", start_date=start_date)
         print(f"\nOpen:\n  {path_en}\n  {path_de}")
