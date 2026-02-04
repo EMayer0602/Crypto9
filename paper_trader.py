@@ -4156,11 +4156,18 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
             except Exception:
                 pass
 
-            # Determine end time - both fresh start and append mode end at NOW (or cache end)
+            # Determine end time:
+            # - Fresh start: end at HISTORICAL_END (2026-01-01) to allow testing merge
+            # - Append mode: end at now (or cache end) to fill the gap
+            HISTORICAL_END = pd.Timestamp("2026-01-01", tz=st.BERLIN_TZ)
             default_end = cache_end if cache_end else pd.Timestamp.now(tz=st.BERLIN_TZ)
-            end_ts = resolve_timestamp(args.end, default_end)
-            mode_str = "Fresh start" if is_fresh_start else "Append mode"
-            print(f"[Simulation] {mode_str} - will end at: {end_ts.strftime('%Y-%m-%d %H:%M')}")
+
+            if is_fresh_start:
+                end_ts = HISTORICAL_END if not args.end else resolve_timestamp(args.end, HISTORICAL_END)
+                print(f"[Simulation] Fresh start - will end at: {end_ts.strftime('%Y-%m-%d')}")
+            else:
+                end_ts = resolve_timestamp(args.end, default_end)
+                print(f"[Simulation] Append mode - will end at: {end_ts.strftime('%Y-%m-%d %H:%M')}")
 
             # Determine start time:
             # - If existing trades: continue from last trade exit (append mode)
