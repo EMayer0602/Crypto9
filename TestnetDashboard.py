@@ -16,16 +16,13 @@ from pathlib import Path
 START_CAPITAL = 16500.0
 MAX_POSITIONS = 10
 
-# Default paths - same as paper_trader.py
+# Default paths - actual file locations
 REPORT_DIR = Path("report_testnet")
-CLOSED_TRADES_JSON = "paper_trading_simulation_log.json"
-OPEN_POSITIONS_JSON = "paper_trading_actual_trades.json"
-SUMMARY_JSON = "trading_summary.json"
 
-# For testnet, files are in report_testnet/
-TESTNET_CLOSED_TRADES_JSON = REPORT_DIR / "paper_trading_simulation_log.json"
-TESTNET_OPEN_POSITIONS_JSON = REPORT_DIR / "paper_trading_actual_trades.json"
-TESTNET_SUMMARY_JSON = REPORT_DIR / "trading_summary.json"
+# Closed trades and open positions are in root directory
+CLOSED_TRADES_JSON = Path("crypto9_testnet_closed_trades.json")
+OPEN_POSITIONS_JSON = Path("paper_trading_open_positions.json")
+SUMMARY_JSON = REPORT_DIR / "trading_summary.json"
 
 
 def load_json(path: Path) -> list | dict:
@@ -53,21 +50,15 @@ def fmt_de(value: float) -> str:
     return f"{value:.2f}".replace(".", ",")
 
 
-def generate_dashboard(use_testnet: bool = True):
+def generate_dashboard():
     """Generate HTML dashboard from simulation JSON files."""
     print("Loading simulation data...")
 
-    # Determine paths based on testnet mode
-    if use_testnet:
-        closed_path = TESTNET_CLOSED_TRADES_JSON
-        open_path = TESTNET_OPEN_POSITIONS_JSON
-        summary_path = TESTNET_SUMMARY_JSON
-        output_dir = REPORT_DIR
-    else:
-        closed_path = Path(CLOSED_TRADES_JSON)
-        open_path = Path(OPEN_POSITIONS_JSON)
-        summary_path = Path(SUMMARY_JSON)
-        output_dir = Path("report_html")
+    # Fixed paths - no testnet parameter needed
+    closed_path = CLOSED_TRADES_JSON
+    open_path = OPEN_POSITIONS_JSON
+    summary_path = SUMMARY_JSON
+    output_dir = REPORT_DIR
 
     # Load data
     closed_trades = load_json(closed_path)
@@ -356,12 +347,5 @@ def generate_dashboard(use_testnet: bool = True):
 
 
 if __name__ == "__main__":
-    import argparse
-    parser = argparse.ArgumentParser(description="Generate trading dashboard from simulation data")
-    parser.add_argument("--testnet", action="store_true", default=True, help="Use testnet report directory")
-    parser.add_argument("--live", action="store_true", help="Use live report directory")
-    args = parser.parse_args()
-
-    use_testnet = not args.live
-    path = generate_dashboard(use_testnet=use_testnet)
+    path = generate_dashboard()
     print(f"\nOpen with: xdg-open {path}")
