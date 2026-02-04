@@ -2315,10 +2315,10 @@ def build_summary_payload(
     # Convert trades DataFrame to list of dicts for JSON export
     trades_list = []
     if not trades_df.empty:
-        # Sort by exit_time descending (newest first)
+        # Sort by entry_time descending (newest first) - matches Dashboard compound growth display
         trades_export = trades_df.copy()
-        if "exit_time" in trades_export.columns:
-            trades_export = trades_export.sort_values("exit_time", ascending=False)
+        if "entry_time" in trades_export.columns:
+            trades_export = trades_export.sort_values("entry_time", ascending=False)
         # Convert timestamps to ISO strings for JSON serialization
         for col in trades_export.columns:
             if pd.api.types.is_datetime64_any_dtype(trades_export[col]):
@@ -2356,8 +2356,8 @@ def build_summary_payload(
         **long_open_stats,
         **short_open_stats,
         "symbol_stats": symbol_stats,
-        "trades": trades_list,
         "open_positions_data": open_positions_list,
+        "trades": trades_list,
     }
 
 
