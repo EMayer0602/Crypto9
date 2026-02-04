@@ -2385,7 +2385,7 @@ def generate_summary_html(
         f"<h1>Simulation Summary {summary['start']} → {summary['end']}</h1>",
 
         # Combined Statistics Table (Overall + Long + Short)
-        "<h2>Statistics</h2>",
+        f"<h2>Statistics (recalculated from initial capital {fmt_de(16500, 0)})</h2>",
         "<table>",
         "<tr><th>Metric</th><th>Overall</th><th>Long</th><th>Short</th></tr>",
         f"<tr><td>Closed trades</td><td>{summary['closed_trades']}</td><td>{summary.get('long_trades', 0)}</td><td>{summary.get('short_trades', 0)}</td></tr>",
@@ -2429,65 +2429,7 @@ def generate_summary_html(
             )
         html_parts.append("</table>")
 
-    if not trades_df.empty:
-        # Prepare display DataFrame - ensure numeric columns are actually numeric
-        trades_display = trades_df.copy()
-
-        # Remove rows where essential columns are NaN (filter out empty rows)
-        if "symbol" in trades_display.columns:
-            trades_display = trades_display[trades_display["symbol"].notna()]
-
-        for col in ["entry_price", "exit_price", "stake", "pnl"]:
-            if col in trades_display.columns:
-                trades_display[col] = pd.to_numeric(trades_display[col], errors="coerce")
-
-        # Calculate Amount = Stake / Entry Price
-        if "stake" in trades_display.columns and "entry_price" in trades_display.columns:
-            trades_display["amount"] = trades_display["stake"] / trades_display["entry_price"].replace(0, pd.NA)
-
-        full_cols = [c for c in [
-            "symbol","direction","indicator","htf","entry_time","entry_price","exit_time","exit_price","amount","stake","pnl","reason"
-        ] if c in trades_display.columns]
-        trades_display = trades_display[full_cols]
-
-        # Use formatters parameter to format specific columns during HTML generation
-        # German number format for trade table columns
-        def make_formatter_de(precision):
-            def formatter(x):
-                if pd.isna(x):
-                    return ""
-                formatted = f"{x:,.{precision}f}"
-                return formatted.replace(",", "X").replace(".", ",").replace("X", ".")
-            return formatter
-
-        formatters = {}
-        for col in ["entry_price", "exit_price", "stake", "pnl"]:
-            if col in trades_display.columns:
-                formatters[col] = make_formatter_de(8)
-        if "amount" in trades_display.columns:
-            formatters["amount"] = make_formatter_de(4)
-
-        # Separate Long and Short trades
-        if "direction" in trades_display.columns:
-            long_trades = trades_display[trades_display["direction"].str.lower() == "long"].copy()
-            short_trades = trades_display[trades_display["direction"].str.lower() == "short"].copy()
-
-            # Display Long Trades
-            if not long_trades.empty:
-                long_pnl = long_trades["pnl"].sum() if "pnl" in long_trades.columns else 0
-                html_parts.append(f"<h2>Long Trades ({len(long_trades)} trades, PnL: {fmt_de(long_pnl)} USDT)</h2>")
-                html_parts.append(long_trades.to_html(index=False, escape=False, formatters=formatters))
-
-            # Display Short Trades
-            if not short_trades.empty:
-                short_pnl = short_trades["pnl"].sum() if "pnl" in short_trades.columns else 0
-                html_parts.append(f"<h2>Short Trades ({len(short_trades)} trades, PnL: {fmt_de(short_pnl)} USDT)</h2>")
-                html_parts.append(short_trades.to_html(index=False, escape=False, formatters=formatters))
-        else:
-            # Fallback if no direction column
-            html_parts.append("<h2>Complete Closed Trades (with Entry and Exit)</h2>")
-            html_parts.append(trades_display.to_html(index=False, escape=False, formatters=formatters))
-
+    # ===== OPEN POSITIONS FIRST =====
     if not open_positions_df.empty:
         # Prepare display DataFrame - ensure numeric columns are actually numeric
         open_display = open_positions_df.copy()
@@ -2513,6 +2455,10 @@ def generate_summary_html(
         if "stake" in open_display.columns and "entry_price" in open_display.columns:
             open_display["amount"] = open_display["stake"] / open_display["entry_price"].replace(0, pd.NA)
 
+        # Sort by entry_time descending (newest first)
+        if "entry_time" in open_display.columns:
+            open_display = open_display.sort_values("entry_time", ascending=False)
+
         # Use formatters parameter to format specific columns during HTML generation
         # German number format
         def make_float_formatter_de(precision):
@@ -2526,25 +2472,25 @@ def generate_summary_html(
         def make_int_formatter():
             return lambda x: f"{int(x)}" if pd.notna(x) else "0"
 
-        formatters = {}
+        open_formatters = {}
 
         # 8 decimal places for prices and stake
         for col in ["entry_price", "stake", "last_price", "unrealized_pnl", "unrealized_pct"]:
             if col in open_display.columns:
-                formatters[col] = make_float_formatter_de(8)
+                open_formatters[col] = make_float_formatter_de(8)
         # 4 decimal places for amount
         if "amount" in open_display.columns:
-            formatters["amount"] = make_float_formatter_de(4)
+            open_formatters["amount"] = make_float_formatter_de(4)
 
         # 2 decimal places for float params
         for col in ["param_a", "param_b", "atr_mult"]:
             if col in open_display.columns:
-                formatters[col] = make_float_formatter_de(2)
+                open_formatters[col] = make_float_formatter_de(2)
 
         # Integers for counts
         for col in ["min_hold_bars", "bars_held"]:
             if col in open_display.columns:
-                formatters[col] = make_int_formatter()
+                open_formatters[col] = make_int_formatter()
 
         # Separate Long and Short open positions
         if "direction" in open_display.columns:
@@ -2555,17 +2501,81 @@ def generate_summary_html(
             if not long_open.empty:
                 long_equity = compute_net_open_equity(long_open)
                 html_parts.append(f"<h2>Long Open Positions ({len(long_open)} positions, Equity: {fmt_de(long_equity)} USDT)</h2>")
-                html_parts.append(long_open.to_html(index=False, escape=False, formatters=formatters))
+                html_parts.append(long_open.to_html(index=False, escape=False, formatters=open_formatters))
 
             # Display Short Open Positions
             if not short_open.empty:
                 short_equity = compute_net_open_equity(short_open)
                 html_parts.append(f"<h2>Short Open Positions ({len(short_open)} positions, Equity: {fmt_de(short_equity)} USDT)</h2>")
-                html_parts.append(short_open.to_html(index=False, escape=False, formatters=formatters))
+                html_parts.append(short_open.to_html(index=False, escape=False, formatters=open_formatters))
         else:
             # Fallback if no direction column
             html_parts.append("<h2>Open positions</h2>")
-            html_parts.append(open_display.to_html(index=False, escape=False, formatters=formatters))
+            html_parts.append(open_display.to_html(index=False, escape=False, formatters=open_formatters))
+
+    # ===== CLOSED TRADES (after open positions) =====
+    if not trades_df.empty:
+        # Prepare display DataFrame - ensure numeric columns are actually numeric
+        trades_display = trades_df.copy()
+
+        # Remove rows where essential columns are NaN (filter out empty rows)
+        if "symbol" in trades_display.columns:
+            trades_display = trades_display[trades_display["symbol"].notna()]
+
+        for col in ["entry_price", "exit_price", "stake", "pnl"]:
+            if col in trades_display.columns:
+                trades_display[col] = pd.to_numeric(trades_display[col], errors="coerce")
+
+        # Sort by entry_time descending (newest first)
+        if "entry_time" in trades_display.columns:
+            trades_display = trades_display.sort_values("entry_time", ascending=False)
+
+        # Calculate Amount = Stake / Entry Price
+        if "stake" in trades_display.columns and "entry_price" in trades_display.columns:
+            trades_display["amount"] = trades_display["stake"] / trades_display["entry_price"].replace(0, pd.NA)
+
+        full_cols = [c for c in [
+            "symbol","direction","indicator","htf","entry_time","entry_price","exit_time","exit_price","amount","stake","pnl","reason"
+        ] if c in trades_display.columns]
+        trades_display = trades_display[full_cols]
+
+        # Use formatters parameter to format specific columns during HTML generation
+        # German number format for trade table columns
+        def make_formatter_de(precision):
+            def formatter(x):
+                if pd.isna(x):
+                    return ""
+                formatted = f"{x:,.{precision}f}"
+                return formatted.replace(",", "X").replace(".", ",").replace("X", ".")
+            return formatter
+
+        trade_formatters = {}
+        for col in ["entry_price", "exit_price", "stake", "pnl"]:
+            if col in trades_display.columns:
+                trade_formatters[col] = make_formatter_de(8)
+        if "amount" in trades_display.columns:
+            trade_formatters["amount"] = make_formatter_de(4)
+
+        # Separate Long and Short trades
+        if "direction" in trades_display.columns:
+            long_trades = trades_display[trades_display["direction"].str.lower() == "long"].copy()
+            short_trades = trades_display[trades_display["direction"].str.lower() == "short"].copy()
+
+            # Display Long Trades
+            if not long_trades.empty:
+                long_pnl = long_trades["pnl"].sum() if "pnl" in long_trades.columns else 0
+                html_parts.append(f"<h2>Long Trades ({len(long_trades)} trades, PnL: {fmt_de(long_pnl)} USDT)</h2>")
+                html_parts.append(long_trades.to_html(index=False, escape=False, formatters=trade_formatters))
+
+            # Display Short Trades
+            if not short_trades.empty:
+                short_pnl = short_trades["pnl"].sum() if "pnl" in short_trades.columns else 0
+                html_parts.append(f"<h2>Short Trades ({len(short_trades)} trades, PnL: {fmt_de(short_pnl)} USDT)</h2>")
+                html_parts.append(short_trades.to_html(index=False, escape=False, formatters=trade_formatters))
+        else:
+            # Fallback if no direction column
+            html_parts.append("<h2>Complete Closed Trades (with Entry and Exit)</h2>")
+            html_parts.append(trades_display.to_html(index=False, escape=False, formatters=trade_formatters))
 
     html_parts.append("</body></html>")
 
