@@ -2514,10 +2514,6 @@ def generate_summary_html(
         # Prepare display DataFrame - ensure numeric columns are actually numeric
         trades_display = trades_df.copy()
 
-        # Sort by entry_time descending (newest first)
-        if "entry_time" in trades_display.columns:
-            trades_display = trades_display.sort_values("entry_time", ascending=False)
-
         # Remove rows where essential columns are NaN (filter out empty rows)
         if "symbol" in trades_display.columns:
             trades_display = trades_display[trades_display["symbol"].notna()]
@@ -2525,6 +2521,48 @@ def generate_summary_html(
         for col in ["entry_price", "exit_price", "stake", "pnl"]:
             if col in trades_display.columns:
                 trades_display[col] = pd.to_numeric(trades_display[col], errors="coerce")
+
+        # === RECALCULATE STAKES WITH COMPOUND GROWTH ===
+        # Sort chronologically first for proper compound calculation
+        if "entry_time" in trades_display.columns:
+            trades_display = trades_display.sort_values("entry_time", ascending=True)
+
+        # Recalculate stakes starting from initial capital
+        START_CAPITAL = 16500.0
+        MAX_POSITIONS = 10
+        capital = START_CAPITAL
+        recalc_stakes = []
+        recalc_pnls = []
+
+        for idx, row in trades_display.iterrows():
+            entry_price = float(row.get("entry_price", 0) or 0)
+            exit_price = float(row.get("exit_price", 0) or 0)
+            direction = str(row.get("direction", "long")).lower()
+
+            # Calculate stake based on current capital
+            stake = capital / MAX_POSITIONS
+
+            # Calculate PnL based on recalculated stake
+            if entry_price > 0:
+                if direction == "short":
+                    pnl = (entry_price - exit_price) / entry_price * stake
+                else:  # long
+                    pnl = (exit_price - entry_price) / entry_price * stake
+            else:
+                pnl = 0
+
+            recalc_stakes.append(stake)
+            recalc_pnls.append(pnl)
+
+            # Update capital for next trade (compound growth)
+            capital += pnl
+
+        trades_display["stake"] = recalc_stakes
+        trades_display["pnl"] = recalc_pnls
+
+        # Now sort by entry_time descending (newest first) for display
+        if "entry_time" in trades_display.columns:
+            trades_display = trades_display.sort_values("entry_time", ascending=False)
 
         # Calculate Amount = Stake / Entry Price
         if "stake" in trades_display.columns and "entry_price" in trades_display.columns:
