@@ -503,7 +503,7 @@ def generate_dashboard(start_date: str = None, output_dir: Path = None, german: 
 <body>
 <div class="container">
     <h1>Trading Dashboard</h1>
-    <p class="source-note">Simulation trades, recalculated with {fmt_de(START_CAPITAL)} initial capital</p>
+    <p class="source-note">Simulation trades, recalculated with {fmt_de(START_CAPITAL)} initial capital | Updated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}</p>
 
     <div class="summary-boxes">
         <div class="summary-box">
