@@ -20,7 +20,7 @@ START_DATE = "2025-12-01"  # Trades before this date are ignored
 # Fixed paths
 SOURCE_JSON = Path("report_html/trading_summary.json")
 SOURCE_HTML = Path("report_html/trading_summary.html")  # Fallback only
-OPEN_POSITIONS_JSON = Path("paper_trading_open_positions.json")
+# Removed: OPEN_POSITIONS_JSON - now using trading_summary.json only
 OUTPUT_DIR = Path("report_testnet")
 
 
@@ -388,22 +388,8 @@ def generate_dashboard(start_date: str = None, output_dir: Path = None, german: 
             closed_trades = [t for t in closed_trades if parse_entry_time(t.get("entry_time", "")) >= start_dt]
             json_open_positions = [p for p in json_open_positions if parse_entry_time(p.get("entry_time", "")) >= start_dt]
 
-    # Load open positions from separate JSON file (paper_trading_open_positions.json)
-    open_positions_file = load_json(OPEN_POSITIONS_JSON)
-    if isinstance(open_positions_file, list) and open_positions_file:
-        # Filter to Long only + start_date
-        open_positions = []
-        start_dt = datetime.fromisoformat(start_date + "T00:00:00+01:00") if start_date else None
-        for p in open_positions_file:
-            if str(p.get("direction", "long")).lower() != "long":
-                continue
-            if start_dt:
-                entry_dt = parse_entry_time(p.get("entry_time", ""))
-                if entry_dt < start_dt:
-                    continue
-            open_positions.append(p)
-    else:
-        open_positions = json_open_positions
+    # Use open positions from trading_summary.json (single source of truth)
+    open_positions = [p for p in json_open_positions if str(p.get("direction", "long")).lower() == "long"]
 
     print(f"Loaded {len(closed_trades)} closed trades, {len(open_positions)} open positions")
 
@@ -684,91 +670,9 @@ def get_last_trade_date() -> str | None:
     return None
 
 
-def ensure_state_file() -> bool:
-    """Ensure report_html/state.json exists with open positions.
-
-    This is required for --use-saved-state to preserve open positions.
-    Creates state.json from paper_trading_open_positions.json if it doesn't exist.
-    """
-    state_file = Path("report_html/state.json")
-    open_positions_file = Path("paper_trading_open_positions.json")
-
-    # Check if we need to create/update state.json
-    if state_file.exists():
-        try:
-            with open(state_file, "r", encoding="utf-8") as f:
-                state = json.load(f)
-                if state.get("positions"):
-                    return True  # Already has positions
-        except:
-            pass
-
-    # Load open positions
-    if not open_positions_file.exists():
-        return False
-
-    try:
-        with open(open_positions_file, "r", encoding="utf-8") as f:
-            open_pos = json.load(f)
-
-        if not open_pos:
-            return False
-
-        # Create state from open positions
-        state = {
-            "total_capital": START_CAPITAL,
-            "positions": [],
-            "last_processed_bar": {},
-            "symbol_trade_counts": {}
-        }
-
-        for pos in open_pos:
-            # Create position key: SYMBOL|INDICATOR|HTF|DIRECTION
-            key = f"{pos['symbol']}|{pos['indicator']}|{pos['htf']}|{pos['direction']}"
-
-            # Calculate size_units
-            entry_price = pos.get("entry_price", 0)
-            stake = pos.get("stake", 0)
-            size_units = stake / entry_price if entry_price > 0 else 0
-
-            position_record = {
-                "key": key,
-                "symbol": pos.get("symbol"),
-                "direction": pos.get("direction"),
-                "indicator": pos.get("indicator"),
-                "htf": pos.get("htf"),
-                "param_a": pos.get("param_a", 0),
-                "param_b": pos.get("param_b", 0),
-                "atr_mult": pos.get("atr_mult"),
-                "min_hold_bars": pos.get("min_hold_bars", 0),
-                "entry_price": entry_price,
-                "entry_time": pos.get("entry_time"),
-                "entry_atr": 0.0,  # Not available in open_positions
-                "stake": stake,
-                "size_units": size_units
-            }
-            state["positions"].append(position_record)
-            state["symbol_trade_counts"][pos["symbol"]] = 1
-            state["last_processed_bar"][key] = pos["entry_time"]
-
-        # Save state.json
-        state_file.parent.mkdir(parents=True, exist_ok=True)
-        with open(state_file, "w", encoding="utf-8") as f:
-            json.dump(state, f, indent=2)
-
-        print(f"[State] Created state.json with {len(state['positions'])} open positions")
-        return True
-    except Exception as e:
-        print(f"[State] Error creating state.json: {e}")
-        return False
-
-
 def refresh_simulation_data() -> bool:
     """Run paper_trader.py --simulate to fill gap from last trade to now."""
     import subprocess
-
-    # Ensure state.json exists before using --use-saved-state
-    ensure_state_file()
 
     last_date = get_last_trade_date()
     if not last_date:
@@ -776,7 +680,8 @@ def refresh_simulation_data() -> bool:
         cmd = ["python3", "paper_trader.py", "--simulate", "--start", "2024-01-31"]
     else:
         print(f"Last trade date: {last_date}, simulating gap to now...")
-        cmd = ["python3", "paper_trader.py", "--simulate", "--start", last_date, "--use-saved-state"]
+        # Append mode - simulation reads existing trades from trading_summary.json
+        cmd = ["python3", "paper_trader.py", "--simulate", "--start", last_date]
 
     print(f"Running: {' '.join(cmd)}")
     try:
