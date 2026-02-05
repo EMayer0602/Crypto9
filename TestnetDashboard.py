@@ -260,8 +260,24 @@ def load_json(path: Path) -> list | dict:
         return []
 
 
-def parse_trades_from_json(json_path: Path) -> tuple[list, list]:
-    """Parse closed trades and open positions from trading_summary.json."""
+def parse_entry_time(entry_time: str) -> datetime:
+    """Parse entry_time string to datetime."""
+    try:
+        return datetime.fromisoformat(entry_time.replace("Z", "+00:00"))
+    except:
+        try:
+            return datetime.strptime(entry_time[:19], "%Y-%m-%d %H:%M:%S")
+        except:
+            return datetime.min
+
+
+def parse_trades_from_json(json_path: Path, start_date: str = None) -> tuple[list, list]:
+    """Parse closed trades and open positions from trading_summary.json.
+
+    Args:
+        json_path: Path to trading_summary.json
+        start_date: Optional start date filter (YYYY-MM-DD). Trades before this are skipped.
+    """
     if not json_path.exists():
         print(f"Warning: {json_path} not found, falling back to HTML")
         return [], []
@@ -271,16 +287,29 @@ def parse_trades_from_json(json_path: Path) -> tuple[list, list]:
         print(f"Warning: Invalid JSON format in {json_path}")
         return [], []
 
+    # Parse start_date filter
+    start_dt = None
+    if start_date:
+        start_dt = datetime.fromisoformat(start_date + "T00:00:00+01:00")
+
     # Get trades from JSON
     trades = data.get("trades", [])
     open_positions = data.get("open_positions_data", [])
 
-    # Filter to Long only
+    # Filter to Long only + start_date filter
     long_trades = []
     for t in trades:
         direction = str(t.get("direction", "long")).lower()
         if direction != "long":
             continue
+
+        entry_time = t.get("entry_time", "")
+
+        # Apply start_date filter early
+        if start_dt:
+            entry_dt = parse_entry_time(entry_time)
+            if entry_dt < start_dt:
+                continue
 
         # Calculate PnL percentage from prices
         entry_price = float(t.get("entry_price", 0) or 0)
@@ -294,7 +323,7 @@ def parse_trades_from_json(json_path: Path) -> tuple[list, list]:
             "symbol": t.get("symbol", ""),
             "indicator": t.get("indicator", ""),
             "htf": t.get("htf", ""),
-            "entry_time": t.get("entry_time", ""),
+            "entry_time": entry_time,
             "exit_time": t.get("exit_time", ""),
             "entry_price": entry_price,
             "exit_price": exit_price,
@@ -305,19 +334,27 @@ def parse_trades_from_json(json_path: Path) -> tuple[list, list]:
             "direction": "long",
         })
 
-    # Parse open positions
+    # Parse open positions with start_date filter
     parsed_open = []
     for p in open_positions:
         direction = str(p.get("direction", "long")).lower()
         if direction != "long":
             continue
 
+        entry_time = p.get("entry_time", "")
+
+        # Apply start_date filter early
+        if start_dt:
+            entry_dt = parse_entry_time(entry_time)
+            if entry_dt < start_dt:
+                continue
+
         parsed_open.append({
             "symbol": p.get("symbol", ""),
             "direction": direction,
             "indicator": p.get("indicator", ""),
             "htf": p.get("htf", ""),
-            "entry_time": p.get("entry_time", ""),
+            "entry_time": entry_time,
             "entry_price": float(p.get("entry_price", 0) or 0),
             "last_price": float(p.get("last_price", 0) or 0),
             "bars_held": int(float(p.get("bars_held", 0) or 0)),
@@ -335,48 +372,47 @@ def fmt_de(value: float) -> str:
 
 def generate_dashboard(start_date: str = None, output_dir: Path = None, german: bool = False):
     """Generate HTML dashboard from simulation JSON file."""
-    print("Loading simulation data from JSON...")
+    print(f"Loading simulation data from JSON (start_date={start_date})...")
 
     if output_dir is None:
         output_dir = OUTPUT_DIR
 
-    # Try JSON first (primary source), fall back to HTML
-    closed_trades, json_open_positions = parse_trades_from_json(SOURCE_JSON)
+    # Try JSON first (primary source) - filter is applied during parsing
+    closed_trades, json_open_positions = parse_trades_from_json(SOURCE_JSON, start_date=start_date)
     if not closed_trades:
         print("Falling back to HTML parsing...")
         closed_trades, json_open_positions = parse_trades_from_html(SOURCE_HTML)
+        # Apply filter for HTML fallback
+        if start_date:
+            start_dt = datetime.fromisoformat(start_date + "T00:00:00+01:00")
+            closed_trades = [t for t in closed_trades if parse_entry_time(t.get("entry_time", "")) >= start_dt]
+            json_open_positions = [p for p in json_open_positions if parse_entry_time(p.get("entry_time", "")) >= start_dt]
 
     # Load open positions from separate JSON file (paper_trading_open_positions.json)
     open_positions_file = load_json(OPEN_POSITIONS_JSON)
     if isinstance(open_positions_file, list) and open_positions_file:
-        # Filter to Long only
-        open_positions = [p for p in open_positions_file if str(p.get("direction", "long")).lower() == "long"]
+        # Filter to Long only + start_date
+        open_positions = []
+        start_dt = datetime.fromisoformat(start_date + "T00:00:00+01:00") if start_date else None
+        for p in open_positions_file:
+            if str(p.get("direction", "long")).lower() != "long":
+                continue
+            if start_dt:
+                entry_dt = parse_entry_time(p.get("entry_time", ""))
+                if entry_dt < start_dt:
+                    continue
+            open_positions.append(p)
     else:
         open_positions = json_open_positions
 
     print(f"Loaded {len(closed_trades)} closed trades, {len(open_positions)} open positions")
 
     if not closed_trades:
-        print("Warning: No trades found in HTML. Check if the file format is correct.")
+        print("Warning: No trades found. Check if the file format is correct.")
 
-    # Sort helper
+    # Sort helper (reuse parse_entry_time)
     def get_entry_time(t):
-        et = t.get("entry_time", "")
-        try:
-            # Handle ISO format with timezone
-            return datetime.fromisoformat(et.replace("Z", "+00:00"))
-        except:
-            try:
-                return datetime.strptime(et[:19], "%Y-%m-%d %H:%M:%S")
-            except:
-                return datetime.min
-
-    # Filter by start date if provided
-    if start_date:
-        start_dt = datetime.fromisoformat(start_date + "T00:00:00+01:00")
-        closed_trades = [t for t in closed_trades if get_entry_time(t) >= start_dt]
-        open_positions = [p for p in open_positions if get_entry_time(p) >= start_dt]
-        print(f"After filtering from {start_date}: {len(closed_trades)} trades, {len(open_positions)} open positions")
+        return parse_entry_time(t.get("entry_time", ""))
 
     # === RECALCULATE CLOSED TRADES WITH COMPOUND GROWTH ===
     # Sort chronologically (oldest first) for compound calculation
