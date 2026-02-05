@@ -15,6 +15,7 @@ from html.parser import HTMLParser
 # Capital settings - same as paper_trader.py
 START_CAPITAL = 16500.0
 MAX_POSITIONS = 10
+START_DATE = "2025-12-01"  # Trades before this date are ignored
 
 # Fixed paths
 SOURCE_HTML = Path("report_html/trading_summary.html")
@@ -546,7 +547,7 @@ if __name__ == "__main__":
     import time
 
     parser = argparse.ArgumentParser(description="Generate trading dashboard")
-    parser.add_argument("--start", type=str, help="Start date YYYY-MM-DD (trades before this are ignored)")
+    parser.add_argument("--start", type=str, default=START_DATE, help="Start date YYYY-MM-DD (default: 2025-12-01)")
     parser.add_argument("--output-dir", type=str, default="report_testnet", help="Output directory")
     parser.add_argument("--loop", action="store_true", help="Run continuously")
     parser.add_argument("--interval", type=int, default=300, help="Loop interval in seconds (default: 300)")
