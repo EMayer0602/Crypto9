@@ -273,8 +273,16 @@ def generate_dashboard(start_date: str = None, output_dir: Path = None):
     if output_dir is None:
         output_dir = OUTPUT_DIR
 
-    # Parse trades and open positions from HTML only
-    closed_trades, open_positions = parse_trades_from_html(SOURCE_HTML)
+    # Parse trades from HTML
+    closed_trades, html_open_positions = parse_trades_from_html(SOURCE_HTML)
+
+    # Load open positions from JSON
+    json_open_positions = load_json(OPEN_POSITIONS_JSON)
+    if not isinstance(json_open_positions, list):
+        json_open_positions = []
+
+    # Use JSON open positions if available, otherwise HTML
+    open_positions = json_open_positions if json_open_positions else html_open_positions
 
     print(f"Loaded {len(closed_trades)} closed trades, {len(open_positions)} open positions")
 
