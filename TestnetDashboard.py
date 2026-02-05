@@ -12,6 +12,40 @@ from pathlib import Path
 from html.parser import HTMLParser
 
 
+def fetch_live_price(symbol: str) -> float | None:
+    """Fetch current price from Binance for a symbol."""
+    try:
+        import ccxt
+        exchange = ccxt.binance()
+        ticker = exchange.fetch_ticker(symbol)
+        return ticker.get('last', None)
+    except Exception as e:
+        print(f"Could not fetch live price for {symbol}: {e}")
+        return None
+
+
+def update_open_positions_with_live_prices(open_positions: list) -> list:
+    """Update open positions with live prices from Binance."""
+    updated = []
+    for pos in open_positions:
+        symbol = pos.get('symbol', '')
+        live_price = fetch_live_price(symbol)
+        if live_price:
+            pos = dict(pos)  # Copy to avoid modifying original
+            pos['last_price'] = live_price
+            # Recalculate unrealized PnL
+            entry_price = pos.get('entry_price', 0)
+            stake = pos.get('stake', 0)
+            if entry_price > 0:
+                pnl_pct = (live_price - entry_price) / entry_price
+                pos['unrealized_pct'] = pnl_pct * 100
+                pos['unrealized_pnl'] = pnl_pct * stake
+                pos['status'] = 'Gewinn' if pnl_pct >= 0 else 'Verlust'
+            print(f"  {symbol}: {entry_price:.8f} -> {live_price:.8f} ({pos['unrealized_pct']:+.2f}%)")
+        updated.append(pos)
+    return updated
+
+
 # Capital settings - same as paper_trader.py
 START_CAPITAL = 16500.0
 MAX_POSITIONS = 10
@@ -390,6 +424,11 @@ def generate_dashboard(start_date: str = None, output_dir: Path = None, german: 
 
     # Use open positions from trading_summary.json (single source of truth)
     open_positions = [p for p in json_open_positions if str(p.get("direction", "long")).lower() == "long"]
+
+    # Fetch live prices for open positions
+    if open_positions:
+        print("Fetching live prices from Binance...")
+        open_positions = update_open_positions_with_live_prices(open_positions)
 
     print(f"Loaded {len(closed_trades)} closed trades, {len(open_positions)} open positions")
 
