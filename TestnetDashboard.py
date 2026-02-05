@@ -32,6 +32,7 @@ def update_open_positions_with_live_prices(open_positions: list) -> list:
         live_price = fetch_live_price(symbol)
         if live_price:
             pos = dict(pos)  # Copy to avoid modifying original
+            old_price = pos.get('last_price', 0)
             pos['last_price'] = live_price
             # Recalculate unrealized PnL
             entry_price = pos.get('entry_price', 0)
@@ -41,7 +42,9 @@ def update_open_positions_with_live_prices(open_positions: list) -> list:
                 pos['unrealized_pct'] = pnl_pct * 100
                 pos['unrealized_pnl'] = pnl_pct * stake
                 pos['status'] = 'Gewinn' if pnl_pct >= 0 else 'Verlust'
-            print(f"  {symbol}: {entry_price:.8f} -> {live_price:.8f} ({pos['unrealized_pct']:+.2f}%)")
+            print(f"  {symbol}: Entry {entry_price:.8f} | Old {old_price:.8f} -> Live {live_price:.8f} ({pos['unrealized_pct']:+.2f}%)")
+        else:
+            print(f"  {symbol}: FAILED to fetch live price, using cached: {pos.get('last_price', 0):.8f}")
         updated.append(pos)
     return updated
 
