@@ -651,6 +651,7 @@ def generate_dashboard(start_date: str = None, output_dir: Path = None, german: 
 
 if __name__ == "__main__":
     import argparse
+    import subprocess
     import time
 
     parser = argparse.ArgumentParser(description="Generate trading dashboard")
@@ -658,16 +659,41 @@ if __name__ == "__main__":
     parser.add_argument("--output-dir", type=str, default="report_testnet", help="Output directory")
     parser.add_argument("--loop", action="store_true", help="Run continuously")
     parser.add_argument("--interval", type=int, default=300, help="Loop interval in seconds (default: 300)")
+    parser.add_argument("--no-refresh", action="store_true", help="Skip paper_trader.py refresh (use existing data)")
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)
+    first_run = True
 
     while True:
+        # Refresh data via paper_trader.py (skip on first run or if --no-refresh)
+        if not first_run and not args.no_refresh:
+            print("\n=== Refreshing trade data via paper_trader.py ===")
+            try:
+                result = subprocess.run(
+                    ["python3", "paper_trader.py", "--monitor"],
+                    capture_output=True,
+                    text=True,
+                    timeout=120
+                )
+                if result.returncode == 0:
+                    print("Trade data refreshed successfully")
+                else:
+                    print(f"Warning: paper_trader.py returned {result.returncode}")
+                    if result.stderr:
+                        print(f"Error: {result.stderr[:200]}")
+            except subprocess.TimeoutExpired:
+                print("Warning: paper_trader.py timed out")
+            except Exception as e:
+                print(f"Warning: Could not refresh data: {e}")
+
         # Generate both English and German dashboards
         path_en = generate_dashboard(start_date=args.start, output_dir=output_dir, german=False)
         path_de = generate_dashboard(start_date=args.start, output_dir=output_dir, german=True)
         print(f"\nOpen with: xdg-open {path_en}")
         print(f"German:    xdg-open {path_de}")
+
+        first_run = False
 
         if not args.loop:
             break
