@@ -524,9 +524,9 @@ def backtest_supertrend(df, atr_stop_mult=None, direction="long", min_hold_bars=
             continue
 
         price_diff = exit_price - entry_price if long_mode else entry_price - exit_price
-        gross_pnl = price_diff / entry_price * stake
-        fees = stake * FEE_RATE * 2.0
-        pnl_usd = gross_pnl - fees
+        size_units = stake / entry_price
+        fees = (entry_price + exit_price) * size_units * FEE_RATE
+        pnl_usd = size_units * price_diff - fees
         equity += pnl_usd
         trades.append({
             "Zeit": entry_ts,
@@ -552,9 +552,9 @@ def backtest_supertrend(df, atr_stop_mult=None, direction="long", min_hold_bars=
         exit_price = float(last["close"])
         stake = entry_capital if entry_capital is not None else equity * RISK_FRACTION
         price_diff = exit_price - entry_price if long_mode else entry_price - exit_price
-        gross_pnl = price_diff / entry_price * stake
-        fees = stake * FEE_RATE * 2.0
-        pnl_usd = gross_pnl - fees
+        size_units = stake / entry_price
+        fees = (entry_price + exit_price) * size_units * FEE_RATE
+        pnl_usd = size_units * price_diff - fees
         equity += pnl_usd
         trades.append({
             "Zeit": entry_ts,

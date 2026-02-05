@@ -10,6 +10,8 @@ Task Scheduler). On each invocation it
 from __future__ import annotations
 
 import argparse
+import hashlib
+import hmac
 import json
 import os
 import time
@@ -18,6 +20,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+import requests
 import plotly.graph_objects as go
 
 import numpy as np
@@ -68,6 +71,304 @@ except ImportError:
     def should_filter_entry_by_ema_slope(symbol: str, direction: str, slope: float) -> bool:
         return False
 
+# ========== LOT SIZE / STEP SIZE HANDLING ==========
+# Cache for lot sizes fetched from Binance API
+_LOT_SIZE_CACHE: Dict[str, float] = {}
+_LOT_SIZE_CACHE_LOADED = False
+
+
+def fetch_lot_sizes_from_binance() -> Dict[str, float]:
+    """Fetch lot sizes (stepSize) for all symbols from Binance API."""
+    global _LOT_SIZE_CACHE, _LOT_SIZE_CACHE_LOADED
+    if _LOT_SIZE_CACHE_LOADED:
+        return _LOT_SIZE_CACHE
+
+    try:
+        url = "https://api.binance.com/api/v3/exchangeInfo"
+        response = requests.get(url, timeout=30)
+        if response.status_code == 200:
+            data = response.json()
+            for symbol_info in data.get("symbols", []):
+                symbol = symbol_info.get("symbol", "")
+                for filter_info in symbol_info.get("filters", []):
+                    if filter_info.get("filterType") == "LOT_SIZE":
+                        step_size = float(filter_info.get("stepSize", 1))
+                        _LOT_SIZE_CACHE[symbol] = step_size
+                        break
+            _LOT_SIZE_CACHE_LOADED = True
+            print(f"[LotSize] Loaded {len(_LOT_SIZE_CACHE)} lot sizes from Binance API")
+        else:
+            print(f"[LotSize] Failed to fetch exchange info: HTTP {response.status_code}")
+    except Exception as e:
+        print(f"[LotSize] Error fetching lot sizes: {e}")
+
+    return _LOT_SIZE_CACHE
+
+
+def get_lot_size(symbol: str) -> float:
+    """Get the lot size (stepSize) for a symbol. Returns 1e-8 as fallback."""
+    # Normalize symbol (remove / and handle USDC->USDT)
+    clean_symbol = symbol.replace("/", "").upper()
+
+    # Ensure cache is loaded
+    if not _LOT_SIZE_CACHE_LOADED:
+        fetch_lot_sizes_from_binance()
+
+    # Try exact match
+    if clean_symbol in _LOT_SIZE_CACHE:
+        return _LOT_SIZE_CACHE[clean_symbol]
+
+    # Try USDC -> USDT variant
+    usdt_symbol = clean_symbol.replace("USDC", "USDT")
+    if usdt_symbol in _LOT_SIZE_CACHE:
+        return _LOT_SIZE_CACHE[usdt_symbol]
+
+    # Fallback to very small step size (effectively no rounding)
+    return 1e-8
+
+
+def round_to_lot_size(amount: float, symbol: str) -> float:
+    """Round amount DOWN to the nearest valid lot size for the symbol."""
+    lot_size = get_lot_size(symbol)
+    if lot_size <= 0:
+        return amount
+    # Floor to nearest lot size
+    import math
+    return math.floor(amount / lot_size) * lot_size
+
+
+def correct_historical_trades_pnl(json_path: str = None) -> int:
+    """
+    Correct PnL for all historical trades using the correct formula:
+    - size_units = round_to_lot_size(stake / entry_price)
+    - fees = (entry_price + exit_price) * size_units * fee_rate
+    - pnl = size_units * (exit_price - entry_price) - fees
+
+    Returns number of trades corrected.
+    """
+    # Pre-fetch lot sizes from Binance API
+    fetch_lot_sizes_from_binance()
+
+    if json_path is None:
+        json_path = SIMULATION_LOG_JSON
+
+    if not os.path.exists(json_path):
+        return 0
+
+    try:
+        with open(json_path, 'r') as f:
+            trades = json.load(f)
+
+        if not isinstance(trades, list):
+            return 0
+
+        fee_rate = st.FEE_RATE
+        corrected = 0
+
+        for t in trades:
+            entry_price = float(t.get('entry_price', 0) or 0)
+            exit_price = float(t.get('exit_price', 0) or 0)
+            stake = float(t.get('stake', 0) or 0)
+            symbol = str(t.get('symbol', '')).replace('/', '')  # Convert "TNSR/USDT" to "TNSRUSDT"
+
+            if entry_price > 0 and exit_price > 0 and stake > 0:
+                raw_size = stake / entry_price
+                size_units = round_to_lot_size(raw_size, symbol) if symbol else raw_size
+                fees = (entry_price + exit_price) * size_units * fee_rate
+                direction = str(t.get('direction', 'Long')).lower()
+
+                if direction == 'long':
+                    new_pnl = size_units * (exit_price - entry_price) - fees
+                else:
+                    new_pnl = size_units * (entry_price - exit_price) - fees
+
+                # Only update if different (avoid unnecessary writes)
+                old_pnl = float(t.get('pnl', 0) or 0)
+                if abs(new_pnl - old_pnl) > 0.001:
+                    t['pnl'] = round(new_pnl, 8)
+                    t['fees'] = round(fees, 8)
+                    t['size_units'] = size_units
+                    corrected += 1
+
+        if corrected > 0:
+            with open(json_path, 'w') as f:
+                json.dump(trades, f, indent=2, default=str)
+            print(f"[PnL-Fix] Corrected {corrected} trades in {json_path}")
+
+        return corrected
+    except Exception as e:
+        print(f"[PnL-Fix] Error correcting trades: {e}")
+        return 0
+
+
+def recalculate_trades_variable_stake(
+    trades_df: pd.DataFrame,
+    start_capital: float = None,
+    max_positions: int = 10,
+) -> Tuple[pd.DataFrame, float]:
+    """
+    Recalculate all trades with variable stake based on running capital.
+
+    Formula (matching Supertrend_5Min.py):
+    - stake = current_capital / max_positions
+    - size_units = stake / entry_price
+    - PnL = size_units * (exit_price - entry_price) for long
+    - fees = (entry_price + exit_price) * size_units * st.FEE_RATE  (0.075% per side)
+    - net_pnl = PnL - fees
+    - capital += net_pnl
+
+    Uses st.FEE_RATE from exchange config (VIP Level 1 = 0.00075).
+    Returns: (updated DataFrame, final capital)
+    """
+    if start_capital is None:
+        start_capital = 16_500.0  # Default START_TOTAL_CAPITAL
+
+    if trades_df.empty:
+        return trades_df.copy(), start_capital
+
+    df = trades_df.copy()
+
+    # Ensure we have required columns
+    entry_col = "entry_time" if "entry_time" in df.columns else "Zeit"
+    entry_price_col = "entry_price" if "entry_price" in df.columns else "Entry"
+    exit_price_col = "exit_price" if "exit_price" in df.columns else "ExitPreis"
+    direction_col = "direction" if "direction" in df.columns else "Direction"
+
+    # Convert entry_time to datetime for sorting
+    if entry_col in df.columns:
+        df[entry_col] = pd.to_datetime(df[entry_col], utc=True, format='mixed')
+
+    # Sort by entry time (chronological order)
+    df = df.sort_values(entry_col).reset_index(drop=True)
+
+    current_capital = start_capital
+
+    for idx in range(len(df)):
+        entry_price = float(df.loc[idx, entry_price_col] if entry_price_col in df.columns else 0)
+        exit_price = float(df.loc[idx, exit_price_col] if exit_price_col in df.columns else 0)
+        direction = str(df.loc[idx, direction_col] if direction_col in df.columns else "long").lower()
+
+        if entry_price <= 0 or exit_price <= 0:
+            continue
+
+        # Variable stake based on current capital
+        stake = current_capital / max_positions
+
+        # Amount (size in units)
+        amount = stake / entry_price
+
+        # PnL calculation
+        if direction == "long":
+            pnl_raw = amount * (exit_price - entry_price)
+        else:
+            pnl_raw = amount * (entry_price - exit_price)
+
+        # Fees: (entry + exit) * size_units * fee_rate (same as Supertrend_5Min.py)
+        fees = (entry_price + exit_price) * amount * st.FEE_RATE
+
+        # Net PnL
+        net_pnl = pnl_raw - fees
+
+        # Update capital
+        new_capital = current_capital + net_pnl
+
+        # Update DataFrame with recalculated values
+        df.loc[idx, "stake"] = stake
+        df.loc[idx, "size_units"] = amount
+        df.loc[idx, "fees"] = fees
+        df.loc[idx, "pnl"] = net_pnl
+        df.loc[idx, "equity_after"] = new_capital
+
+        current_capital = new_capital
+
+    return df, current_capital
+
+
+def recalculate_open_positions_variable_stake(
+    open_positions: List[Dict],
+    closed_trades_df: pd.DataFrame,
+    start_capital: float = None,
+    max_positions: int = 10,
+) -> List[Dict]:
+    """
+    Recalculate open positions with variable stake based on capital at entry time.
+
+    For each open position:
+    1. Find all closed trades that happened BEFORE this position was opened
+    2. Calculate the capital at that point (start_capital + sum of closed PnLs)
+    3. Recalculate stake = capital_at_entry / max_positions
+    4. Recalculate size_units = stake / entry_price
+    5. Recalculate unrealized_pnl based on new size_units (no fees for open positions)
+
+    Note: Fees are not deducted from unrealized PnL - only charged when position closes.
+    Uses st.FEE_RATE from exchange config (VIP Level 1 = 0.00075).
+    Returns: List of updated position dicts
+    """
+    if start_capital is None:
+        start_capital = 16_500.0  # Default START_TOTAL_CAPITAL
+
+    if not open_positions:
+        return []
+
+    recalculated = []
+
+    # Sort closed trades by entry time
+    if not closed_trades_df.empty:
+        entry_col = "entry_time" if "entry_time" in closed_trades_df.columns else "Zeit"
+        if entry_col in closed_trades_df.columns:
+            closed_trades_df = closed_trades_df.copy()
+            closed_trades_df[entry_col] = pd.to_datetime(closed_trades_df[entry_col], utc=True, format='mixed')
+            closed_trades_df = closed_trades_df.sort_values(entry_col)
+
+    for pos in open_positions:
+        pos_copy = pos.copy()
+        entry_time = pd.to_datetime(pos.get("entry_time"), utc=True, format='mixed')
+        entry_price = float(pos.get("entry_price", 0))
+        direction = str(pos.get("direction", "long")).lower()
+        last_price = float(pos.get("last_price", entry_price))
+
+        if entry_price <= 0:
+            recalculated.append(pos_copy)
+            continue
+
+        # Calculate capital at the time this position was opened
+        # = start_capital + sum of PnL from all closed trades that closed BEFORE this entry
+        capital_at_entry = start_capital
+
+        if not closed_trades_df.empty:
+            entry_col = "entry_time" if "entry_time" in closed_trades_df.columns else "Zeit"
+            exit_col = "exit_time" if "exit_time" in closed_trades_df.columns else "ExitZeit"
+            pnl_col = "pnl" if "pnl" in closed_trades_df.columns else "PnL"
+
+            if exit_col in closed_trades_df.columns and pnl_col in closed_trades_df.columns:
+                closed_trades_df[exit_col] = pd.to_datetime(closed_trades_df[exit_col], utc=True, format='mixed')
+                # Get trades that CLOSED before this position was opened
+                prior_trades = closed_trades_df[closed_trades_df[exit_col] < entry_time]
+                if not prior_trades.empty:
+                    capital_at_entry = start_capital + prior_trades[pnl_col].sum()
+
+        # Recalculate stake based on capital at entry
+        new_stake = capital_at_entry / max_positions
+        new_size_units = new_stake / entry_price
+
+        # Recalculate unrealized PnL
+        if direction == "long":
+            unrealized_pnl = new_size_units * (last_price - entry_price)
+        else:
+            unrealized_pnl = new_size_units * (entry_price - last_price)
+
+        # Update position
+        pos_copy["stake"] = new_stake
+        pos_copy["size_units"] = new_size_units
+        pos_copy["unrealized_pnl"] = unrealized_pnl
+        if entry_price > 0:
+            pos_copy["unrealized_pct"] = ((last_price - entry_price) / entry_price) * 100 if direction == "long" else ((entry_price - last_price) / entry_price) * 100
+
+        recalculated.append(pos_copy)
+
+    return recalculated
+
+
 CONFIG_FILE = "paper_trading_config.csv"
 STATE_FILE = "paper_trading_state.json"
 TRADE_LOG_FILE = "paper_trading_log.csv"
@@ -87,21 +388,117 @@ def get_report_dir(use_testnet: bool = False) -> str:
 BEST_PARAMS_CSV = st.OVERALL_PARAMS_CSV
 START_TOTAL_CAPITAL = 16_500.0
 MAX_OPEN_POSITIONS = 10
-STAKE_DIVISOR = 10  # stake = current total_capital / STAKE_DIVISOR = 16500/10 = 1650
+STAKE_DIVISOR = 10  # stake = current total_capital / STAKE_DIVISOR = 16500/10 = 1650.00
+# Separate limits for Long (Spot) vs Short (Margin)
+MAX_LONG_POSITIONS = 10
+MAX_SHORT_POSITIONS = 0  # Shorts disabled for long-only mode
+LONG_STAKE = 1650.0  # 16500 / 10 positions (dynamic: capital/10)
+SHORT_STAKE = 200.0  # 1000 / 5 positions
 DEFAULT_DIRECTION_CAPITAL = 2_800.0
 BASE_BAR_MINUTES = st.timeframe_to_minutes(st.TIMEFRAME)
 DEFAULT_SYMBOL_ALLOWLIST = [sym.strip() for sym in st.SYMBOLS if sym and sym.strip()]
 DEFAULT_FIXED_STAKE = 2000.0  # Fixed stake per trade
-DEFAULT_ALLOWED_DIRECTIONS = ["long", "short"]  # Enable both long and short trades
+DEFAULT_ALLOWED_DIRECTIONS = ["long"]  # Long only mode
 DEFAULT_USE_TESTNET = False  # Testnet should be opt-in with --testnet flag
 USE_TIME_BASED_EXIT = True  # Enable time-based exits based on optimal hold times
+DISABLE_TREND_FLIP_EXIT = False  # Enable trend flip exits (like original working version)
 SIGNAL_DEBUG = False
 USE_FUTURES_SIGNALS = False  # Use futures data for signal generation (Option 1 from futures lead analysis)
+USE_TREND_STRENGTH_FILTER = False  # Only enter if price is far enough from HTF indicator
+TREND_STRENGTH_MIN_PCT = 0.5  # Minimum distance from HTF indicator in % (0.5 = 0.5%)
+_TESTNET_ACTIVE = False  # Track if testnet mode is active for dashboard updates
 DEFAULT_SIGNAL_INTERVAL_MIN = 15
 DEFAULT_SPIKE_INTERVAL_MIN = 5
 DEFAULT_ATR_SPIKE_MULT = 2.5
 DEFAULT_POLL_SECONDS = 30
 TESTNET_DEFAULT_STAKE = 2000.0
+TESTNET_POSITIONS_FILE = "crypto9_testnet_positions.json"
+TESTNET_CLOSED_TRADES_FILE = "crypto9_testnet_closed_trades.json"
+
+
+def save_testnet_position(position: Dict, use_testnet: bool = False) -> None:
+    """Save a position to the Crypto9 testnet tracking file."""
+    if not use_testnet:
+        return
+    try:
+        positions = load_testnet_positions()
+        # Add timestamp if not present
+        if "tracked_at" not in position:
+            position["tracked_at"] = datetime.now().isoformat()
+        # Check if position already exists (by symbol + direction)
+        key = f"{position.get('symbol', '')}_{position.get('direction', '')}"
+        existing_idx = None
+        for i, p in enumerate(positions):
+            p_key = f"{p.get('symbol', '')}_{p.get('direction', '')}"
+            if p_key == key:
+                existing_idx = i
+                break
+        if existing_idx is not None:
+            positions[existing_idx] = position
+        else:
+            positions.append(position)
+        with open(TESTNET_POSITIONS_FILE, "w") as f:
+            json.dump(positions, f, indent=2, default=str)
+        print(f"[Testnet] Position gespeichert: {position.get('symbol')} {position.get('direction')}")
+    except Exception as e:
+        print(f"[Testnet] Fehler beim Speichern der Position: {e}")
+
+
+def load_testnet_positions() -> List[Dict]:
+    """Load Crypto9 testnet positions from local file."""
+    try:
+        if os.path.exists(TESTNET_POSITIONS_FILE):
+            with open(TESTNET_POSITIONS_FILE, "r") as f:
+                return json.load(f)
+    except Exception as e:
+        print(f"[Testnet] Fehler beim Laden der Positionen: {e}")
+    return []
+
+
+def remove_testnet_position(symbol: str, direction: str) -> None:
+    """Remove a closed position from testnet tracking."""
+    try:
+        positions = load_testnet_positions()
+        key = f"{symbol}_{direction}"
+        positions = [p for p in positions if f"{p.get('symbol', '')}_{p.get('direction', '')}" != key]
+        with open(TESTNET_POSITIONS_FILE, "w") as f:
+            json.dump(positions, f, indent=2, default=str)
+    except Exception as e:
+        print(f"[Testnet] Fehler beim Entfernen der Position: {e}")
+
+
+def save_testnet_closed_trade(trade: Dict) -> None:
+    """Save a closed trade to the Crypto9 testnet closed trades file (with duplicate check)."""
+    try:
+        trades = []
+        if os.path.exists(TESTNET_CLOSED_TRADES_FILE):
+            with open(TESTNET_CLOSED_TRADES_FILE, "r") as f:
+                trades = json.load(f)
+
+        # Check for duplicate before adding
+        trade_key = (
+            trade.get("symbol", ""),
+            trade.get("entry_time", ""),
+            trade.get("exit_time", ""),
+            trade.get("indicator", ""),
+        )
+        for existing in trades:
+            existing_key = (
+                existing.get("symbol", ""),
+                existing.get("entry_time", ""),
+                existing.get("exit_time", ""),
+                existing.get("indicator", ""),
+            )
+            if trade_key == existing_key:
+                print(f"[Testnet] Trade already exists, skipping duplicate: {trade.get('symbol')}")
+                return
+
+        trade["closed_at"] = datetime.now().isoformat()
+        trades.append(trade)
+        with open(TESTNET_CLOSED_TRADES_FILE, "w") as f:
+            json.dump(trades, f, indent=2, default=str)
+    except Exception as e:
+        print(f"[Testnet] Fehler beim Speichern des geschlossenen Trades: {e}")
 
 
 def set_max_open_positions(value: int) -> None:
@@ -127,6 +524,12 @@ def set_use_futures_signals(enabled: bool) -> None:
     USE_FUTURES_SIGNALS = bool(enabled)
     if USE_FUTURES_SIGNALS:
         print("[Config] Using FUTURES data for signal generation")
+
+
+def set_testnet_active(enabled: bool) -> None:
+    """Track if testnet mode is active for dashboard updates."""
+    global _TESTNET_ACTIVE
+    _TESTNET_ACTIVE = bool(enabled)
 
 
 def load_env_file(path: str = ".env") -> None:
@@ -281,6 +684,170 @@ class BinanceOrderExecutor(OrderExecutor):
         if symbol:
             return self._submit(symbol, side, amount)
         return None
+
+
+# Futures Testnet URL
+FUTURES_TESTNET_URL = "https://testnet.binancefuture.com"
+
+
+class BinanceFuturesOrderExecutor(OrderExecutor):
+    """Order executor for Binance Futures Testnet (used for SHORT trades)."""
+
+    def __init__(self, api_key: str = None, api_secret: str = None):
+        self.api_key = api_key or os.getenv("BINANCE_API_KEY_TEST", "")
+        self.api_secret = api_secret or os.getenv("BINANCE_API_SECRET_TEST", "")
+        self.base_url = FUTURES_TESTNET_URL
+        self.session = requests.Session()
+        self._precision_cache: Dict[str, int] = {}
+
+    def _sign(self, params: dict) -> str:
+        """Create HMAC SHA256 signature."""
+        query_string = "&".join([f"{k}={v}" for k, v in params.items()])
+        signature = hmac.new(
+            self.api_secret.encode(),
+            query_string.encode(),
+            hashlib.sha256
+        ).hexdigest()
+        return signature
+
+    def _request(self, method: str, endpoint: str, params: dict = None, signed: bool = False) -> Optional[dict]:
+        """Execute API request."""
+        if params is None:
+            params = {}
+        headers = {"X-MBX-APIKEY": self.api_key}
+        url = f"{self.base_url}{endpoint}"
+
+        if signed:
+            params["timestamp"] = int(time.time() * 1000)
+            params["signature"] = self._sign(params)
+
+        try:
+            if method == "GET":
+                response = self.session.get(url, params=params, headers=headers, timeout=30)
+            elif method == "POST":
+                response = self.session.post(url, params=params, headers=headers, timeout=30)
+            else:
+                return None
+
+            if response.status_code == 200:
+                return response.json()
+            else:
+                print(f"[Futures] API Error: {response.status_code} - {response.text}")
+                return None
+        except Exception as e:
+            print(f"[Futures] Request Error: {e}")
+            return None
+
+    def _get_precision(self, symbol: str) -> int:
+        """Get quantity precision for a symbol."""
+        if symbol in self._precision_cache:
+            return self._precision_cache[symbol]
+        result = self._request("GET", "/fapi/v1/exchangeInfo")
+        if result:
+            for s in result.get("symbols", []):
+                self._precision_cache[s["symbol"]] = s.get("quantityPrecision", 3)
+        return self._precision_cache.get(symbol, 3)
+
+    def _get_price(self, symbol: str) -> Optional[float]:
+        """Get current futures price."""
+        result = self._request("GET", "/fapi/v1/ticker/price", {"symbol": symbol})
+        if result:
+            return float(result.get("price", 0))
+        return None
+
+    def _ccxt_to_binance_symbol(self, symbol: str) -> str:
+        """Convert CCXT symbol (BTC/USDT) to Binance format (BTCUSDT)."""
+        return symbol.replace("/", "")
+
+    def _submit_futures_order(self, symbol: str, side: str, amount: float) -> Optional[dict]:
+        """Submit a futures market order."""
+        binance_symbol = self._ccxt_to_binance_symbol(symbol)
+        precision = self._get_precision(binance_symbol)
+        quantity = round(amount, precision)
+
+        if quantity <= 0:
+            print(f"[Futures] Skipping {side} {symbol}: quantity too small")
+            return None
+
+        params = {
+            "symbol": binance_symbol,
+            "side": side.upper(),
+            "type": "MARKET",
+            "quantity": quantity,
+        }
+
+        result = self._request("POST", "/fapi/v1/order", params, signed=True)
+        if result:
+            order_id = result.get("orderId", "unknown")
+            avg_price = float(result.get("avgPrice", 0)) or self._get_price(binance_symbol)
+            print(f"[Futures] {side.upper()} {quantity:.6f} {symbol} @ ${avg_price:.2f} -> {order_id}")
+            return result
+        return None
+
+    def submit_entry(self, position: Dict):
+        """Submit SHORT entry (SELL to open)."""
+        direction = str(position.get("direction", "long")).lower()
+        if direction != "short":
+            print(f"[Futures] Skipping non-short entry: {direction}")
+            return None
+        amount = float(position.get("size_units", 0.0) or 0.0)
+        symbol = position.get("symbol")
+        if symbol and amount > 0:
+            return self._submit_futures_order(symbol, "SELL", amount)
+        return None
+
+    def submit_exit(self, position: Dict, trade: TradeResult):
+        """Submit SHORT exit (BUY to close)."""
+        direction = str(position.get("direction", "long")).lower()
+        if direction != "short":
+            print(f"[Futures] Skipping non-short exit: {direction}")
+            return None
+        amount = float(position.get("size_units", trade.size_units))
+        symbol = position.get("symbol")
+        if symbol and amount > 0:
+            return self._submit_futures_order(symbol, "BUY", amount)
+        return None
+
+
+class HybridOrderExecutor(OrderExecutor):
+    """Routes Long trades to Spot, Short trades to Futures."""
+
+    def __init__(self, spot_executor: OrderExecutor, futures_executor: OrderExecutor):
+        self.spot_executor = spot_executor
+        self.futures_executor = futures_executor
+
+    def submit_entry(self, position: Dict):
+        direction = str(position.get("direction", "long")).lower()
+        if direction == "short":
+            return self.futures_executor.submit_entry(position)
+        else:
+            return self.spot_executor.submit_entry(position)
+
+    def submit_exit(self, position: Dict, trade: TradeResult):
+        direction = str(position.get("direction", "long")).lower()
+        if direction == "short":
+            return self.futures_executor.submit_exit(position, trade)
+        else:
+            return self.spot_executor.submit_exit(position, trade)
+
+
+def create_order_executor(use_testnet: bool = False) -> OrderExecutor:
+    """Create the appropriate order executor based on mode.
+
+    For testnet:
+      - Long trades → Spot Testnet (via ccxt)
+      - Short trades → Futures Testnet (via direct API)
+    For live:
+      - All trades → Spot (via ccxt)
+    """
+    spot_executor = BinanceOrderExecutor(st.get_exchange())
+
+    if use_testnet:
+        futures_executor = BinanceFuturesOrderExecutor()
+        print("[Config] Using HybridOrderExecutor: Long→Spot, Short→Futures")
+        return HybridOrderExecutor(spot_executor, futures_executor)
+    else:
+        return spot_executor
 
 
 def derive_fill_price(order: Dict) -> float:
@@ -521,7 +1088,7 @@ def select_best_indicator_per_symbol(df: pd.DataFrame) -> pd.DataFrame:
     return reduced_df.reset_index(drop=True)
 
 
-def determine_position_size(symbol: str, state: Dict, fixed_stake: Optional[float]) -> float:
+def determine_position_size(symbol: str, state: Dict, fixed_stake: Optional[float], direction: str = "long") -> float:
     """
     Determine position size for a trade.
 
@@ -529,23 +1096,28 @@ def determine_position_size(symbol: str, state: Dict, fixed_stake: Optional[floa
         symbol: Trading symbol
         state: Current state dict with total_capital
         fixed_stake: Fixed stake amount (if provided), None for dynamic sizing
+        direction: Trade direction ("long" or "short")
 
     Returns:
         Position size in USDT
 
     Notes:
-        - If fixed_stake is None or 0: Uses dynamic sizing = total_capital / STAKE_DIVISOR (7)
-        - If fixed_stake is set: Uses that fixed amount
-        - Dynamic sizing provides compounding effect as capital grows
+        - Long (Spot): Dynamic sizing = total_capital / MAX_LONG_POSITIONS
+        - Short (Margin): Static 200 USDT (limited by 999 USD margin)
     """
     # Use fixed stake if provided and > 0
     if fixed_stake is not None and fixed_stake > 0:
         return fixed_stake
 
-    # Dynamic sizing based on current capital
-    total_capital = float(state.get("total_capital", START_TOTAL_CAPITAL))
-    dynamic_stake = total_capital / STAKE_DIVISOR
-    return max(dynamic_stake, 0.0)
+    # Direction-specific stake sizes
+    if direction.lower() == "short":
+        # Short: Static stake (limited by margin)
+        return SHORT_STAKE
+    else:
+        # Long: Dynamic sizing based on current capital
+        total_capital = float(state.get("total_capital", START_TOTAL_CAPITAL))
+        dynamic_stake = total_capital / MAX_LONG_POSITIONS
+        return max(dynamic_stake, 100.0)  # Minimum 100 USDT
 
 
 def record_symbol_trade(state: Dict, symbol: str) -> None:
@@ -629,7 +1201,12 @@ def ensure_config(symbols: List[str]) -> pd.DataFrame:
 def load_config_lookup(df: pd.DataFrame) -> Dict[str, ConfigEntry]:
     lookup: Dict[str, ConfigEntry] = {}
     for _, row in df.iterrows():
-        symbol = row["Symbol"].strip()
+        raw_symbol = row.get("Symbol")
+        if pd.isna(raw_symbol) or not isinstance(raw_symbol, str):
+            continue  # Skip invalid rows
+        symbol = raw_symbol.strip()
+        if not symbol:
+            continue
         lookup[symbol] = ConfigEntry(
             symbol=symbol,
             enable_long=bool(row.get("EnableLong", True)),
@@ -659,6 +1236,50 @@ def load_state() -> Dict:
 def save_state(state: Dict) -> None:
     with open(STATE_FILE, "w", encoding="utf-8") as fh:
         json.dump(state, fh, indent=2)
+
+
+def sync_simulation_positions(state: Dict, use_testnet: bool = False) -> int:
+    """Sync simulation open positions to paper trading state.
+
+    If simulation shows a position that isn't in paper trading state, add it.
+    This ensures the monitor catches up with positions from the last backtest.
+    Returns the number of positions synced.
+    """
+    sim_file = SIMULATION_OPEN_POSITIONS_JSON
+    if not os.path.exists(sim_file):
+        return 0
+
+    try:
+        with open(sim_file, "r", encoding="utf-8") as fh:
+            sim_positions = json.load(fh)
+    except Exception as e:
+        print(f"[Sync] Could not load simulation positions: {e}")
+        return 0
+
+    if not sim_positions:
+        return 0
+
+    # Get existing position keys
+    existing_keys = set()
+    for pos in state.get("positions", []):
+        key = f"{pos.get('symbol', '')}|{pos.get('direction', '')}|{pos.get('indicator', '')}|{pos.get('htf', '')}"
+        existing_keys.add(key)
+
+    synced = 0
+    for sim_pos in sim_positions:
+        sim_key = f"{sim_pos.get('symbol', '')}|{sim_pos.get('direction', '')}|{sim_pos.get('indicator', '')}|{sim_pos.get('htf', '')}"
+        if sim_key not in existing_keys:
+            # Add simulation position to state
+            state.setdefault("positions", []).append(sim_pos)
+            existing_keys.add(sim_key)
+            synced += 1
+            print(f"[Sync] Added position from simulation: {sim_pos.get('symbol')} {sim_pos.get('direction')} {sim_pos.get('indicator')}/{sim_pos.get('htf')}")
+
+    if synced > 0:
+        save_state(state)
+        print(f"[Sync] Synced {synced} positions from simulation to paper trading state")
+
+    return synced
 
 
 def clone_state(use_saved_state: bool = False) -> Dict:
@@ -801,8 +1422,8 @@ def build_strategy_context(row: pd.Series) -> StrategyContext:
     htf_value = str(row.get("HTF", st.HIGHER_TIMEFRAME) or st.HIGHER_TIMEFRAME).strip()
     param_a, param_b = normalize_params(row, indicator_key)
     atr_mult = parse_float(row.get("ATRStopMultValue", row.get("ATRStopMult")))
-    min_hold_days = int(parse_float(row.get("MinHoldDays")) or 0)
-    min_hold_bars = int(min_hold_days * st.BARS_PER_DAY)
+    # MinHoldBars from CSV - number of HTF bars before forced exit
+    min_hold_bars = int(parse_float(row.get("MinHoldBars")) or 0)
     return StrategyContext(
         symbol=symbol,
         direction=direction,
@@ -969,6 +1590,10 @@ def build_indicator_dataframe(symbol: str, indicator_key: str, htf_value: str, p
     st.apply_higher_timeframe(htf_value)
     df_raw = st.prepare_symbol_dataframe(symbol, use_all_cached_data=use_all_data)
 
+    # Return empty DataFrame if no data available for this symbol
+    if df_raw.empty:
+        return pd.DataFrame()
+
     # Option 1: Use futures data for signal generation (futures lead analysis)
     if USE_FUTURES_SIGNALS:
         # Fetch futures data for the same time period
@@ -1036,13 +1661,13 @@ def position_key(symbol: str, indicator: str, htf: str, direction: str) -> str:
 
 def find_position(state: Dict, key: str) -> Optional[Dict]:
     for pos in state["positions"]:
-        if pos["key"] == key:
+        if pos.get("key") == key:
             return pos
     return None
 
 
 def remove_position(state: Dict, key: str) -> None:
-    state["positions"] = [pos for pos in state["positions"] if pos["key"] != key]
+    state["positions"] = [pos for pos in state["positions"] if pos.get("key") != key]
 
 
 def bars_in_position(entry_iso: str, latest_ts: pd.Timestamp, htf_timeframe: Optional[str] = None) -> int:
@@ -1151,6 +1776,18 @@ def evaluate_entry(df: pd.DataFrame, direction: str) -> tuple[bool, str]:
         signal = trend_prev == 1 and trend_curr == -1
     if not signal:
         return False, "Trend did not flip"
+
+    # Trend strength filter: only enter if price is far enough from HTF indicator
+    if USE_TREND_STRENGTH_FILTER and "htf_indicator" in curr.index:
+        close_price = float(curr["close"])
+        htf_ind = float(curr["htf_indicator"])
+        if htf_ind > 0:
+            distance_pct = ((close_price - htf_ind) / htf_ind) * 100
+            if direction == "long" and distance_pct < TREND_STRENGTH_MIN_PCT:
+                return False, f"Trend strength too weak: {distance_pct:.2f}% < {TREND_STRENGTH_MIN_PCT}%"
+            if direction == "short" and distance_pct > -TREND_STRENGTH_MIN_PCT:
+                return False, f"Trend strength too weak: {distance_pct:.2f}% > -{TREND_STRENGTH_MIN_PCT}%"
+
     allows, reason = filters_allow_entry(direction, df)
     if not allows:
         return False, reason
@@ -1210,28 +1847,20 @@ def evaluate_exit(position: Dict, df: pd.DataFrame, atr_mult: Optional[float], m
             exit_price = stop_price
             reason = f"ATR stop x{atr_mult:.2f}"
 
-    # Time-based exit: Exit after optimal hold time based on peak profit analysis
-    # Analysis showed peak profit occurs at ~65% of trade duration on average
-    # Long trades especially need tighter exits (gave back 22,733% on average)
-
+    # Time-based exit: FORCED exit after optimal hold time (regardless of profit/loss)
     # Get symbol-specific optimal hold time from configuration
     symbol = position.get("symbol", "")
     direction_str = "long" if long_mode else "short"
     optimal_hold_bars = get_optimal_hold_bars(symbol, direction_str) if USE_TIME_BASED_EXIT else 0
 
     if USE_TIME_BASED_EXIT and exit_price is None:
-        # Check if we've reached optimal hold time AND have some profit
+        # FORCED exit after optimal_hold_bars - cuts losses early
         if bars_held >= optimal_hold_bars:
             current_price = float(curr["close"])
-            unrealized_pnl_pct = ((current_price - entry_price) / entry_price) if long_mode else ((entry_price - current_price) / entry_price)
-
-            # Exit if we have profit (or close to breakeven within 1%)
-            if unrealized_pnl_pct >= -0.01:  # -1% or better
-                exit_price = current_price
-                reason = f"Time-based exit ({bars_held} bars, optimal={optimal_hold_bars})"
+            exit_price = current_price
+            reason = f"Time-based exit ({bars_held} bars, optimal={optimal_hold_bars})"
 
     # Trend flip exit - but only AFTER optimal hold time if time-based exits enabled
-    # This prevents premature exits before the optimal time is reached
     trend_curr = int(curr["trend_flag"])
     trend_prev = int(prev["trend_flag"])
     flip_long = long_mode and trend_prev == 1 and trend_curr == -1
@@ -1239,8 +1868,6 @@ def evaluate_exit(position: Dict, df: pd.DataFrame, atr_mult: Optional[float], m
     trend_flipped = flip_long or flip_short
 
     # Determine minimum bars before allowing trend flip exit
-    # If time-based exits enabled: wait for optimal hold time OR traditional min_hold_bars (whichever is higher)
-    # If time-based exits disabled: use traditional min_hold_bars
     min_bars_for_trend_flip = max(optimal_hold_bars, min_hold_bars) if USE_TIME_BASED_EXIT else max(0, min_hold_bars)
 
     if exit_price is None and trend_flipped and bars_held >= min_bars_for_trend_flip:
@@ -1250,9 +1877,15 @@ def evaluate_exit(position: Dict, df: pd.DataFrame, atr_mult: Optional[float], m
     if exit_price is None:
         return None
 
-    gross_pnl = (exit_price - entry_price) / entry_price * stake if long_mode else (entry_price - exit_price) / entry_price * stake
-    fees = stake * st.FEE_RATE * 2.0
-    pnl = gross_pnl - fees
+    # Correct PnL calculation using amount (size_units)
+    size_units = float(position.get("size_units", 0.0) or (stake / entry_price if entry_price else 0.0))
+    # Fees based on total traded volume (entry + exit)
+    fees = (entry_price + exit_price) * size_units * st.FEE_RATE
+    # PnL = amount * price_diff - fees
+    if long_mode:
+        pnl = size_units * (exit_price - entry_price) - fees
+    else:
+        pnl = size_units * (entry_price - exit_price) - fees
     return {
         "exit_price": exit_price,
         "reason": reason,
@@ -1329,10 +1962,13 @@ def process_snapshot(
                     fill_price = derive_fill_price(order) if order else 0.0
                     if fill_price > 0:
                         trade.exit_price = fill_price
-                        gross_pnl = (fill_price - entry_price_val) / entry_price_val * stake_val if context.direction == "long" else (entry_price_val - fill_price) / entry_price_val * stake_val
-                        fees = stake_val * st.FEE_RATE * 2.0
+                        # Correct PnL calculation using amount (size_units)
+                        fees = (entry_price_val + fill_price) * size_units * st.FEE_RATE
                         trade.fees = fees
-                        trade.pnl = gross_pnl - fees
+                        if context.direction == "long":
+                            trade.pnl = size_units * (fill_price - entry_price_val) - fees
+                        else:
+                            trade.pnl = size_units * (entry_price_val - fill_price) - fees
                         trade.equity_after = prior_total + trade.pnl
                 except Exception as exc:
                     print(f"[Order] Exit submission failed for {context.symbol}: {exc}")
@@ -1345,16 +1981,51 @@ def process_snapshot(
                     print(f"[Notify] Exit alert failed for {context.symbol}: {exc}")
             trades.append(trade)
             remove_position(state, context.key)
+            save_state(state)  # Always save state after closing position
+            # Save closed trade to testnet tracking file
+            if use_testnet:
+                closed_trade_data = {
+                    "symbol": context.symbol,
+                    "direction": context.direction,
+                    "indicator": context.indicator,
+                    "htf": context.htf,
+                    "entry_time": existing_entry_time if 'existing_entry_time' in dir() else trade.entry_time,
+                    "entry_price": trade.entry_price,
+                    "exit_time": trade.exit_time,
+                    "exit_price": trade.exit_price,
+                    "stake": trade.stake,
+                    "size_units": trade.size_units,
+                    "fees": trade.fees,
+                    "pnl": trade.pnl,
+                    "pnl_pct": (trade.pnl / trade.stake * 100) if trade.stake else 0,
+                    "reason": trade.reason,
+                }
+                save_testnet_closed_trade(closed_trade_data)
+                remove_testnet_position(context.symbol, context.direction)
             existing = None
 
     if existing is None:
         open_positions = state.get("positions", [])
+        # Count Long and Short positions separately
+        long_count = sum(1 for p in open_positions if p.get("direction", "").lower() == "long")
+        short_count = sum(1 for p in open_positions if p.get("direction", "").lower() == "short")
+
+        # Check direction-specific limits
+        if context.direction.lower() == "long" and long_count >= MAX_LONG_POSITIONS:
+            if emit_entry_log:
+                print(f"[Entry] Skip {context.symbol} {context.direction} – max {MAX_LONG_POSITIONS} Long-Positionen erreicht")
+            _signal_log(f"{context.symbol} {context.direction} blocked: max long positions reached ({MAX_LONG_POSITIONS})")
+            return trades
+        if context.direction.lower() == "short" and short_count >= MAX_SHORT_POSITIONS:
+            if emit_entry_log:
+                print(f"[Entry] Skip {context.symbol} {context.direction} – max {MAX_SHORT_POSITIONS} Short-Positionen erreicht")
+            _signal_log(f"{context.symbol} {context.direction} blocked: max short positions reached ({MAX_SHORT_POSITIONS})")
+            return trades
+        # Also check total limit
         if len(open_positions) >= MAX_OPEN_POSITIONS:
             if emit_entry_log:
                 print(f"[Entry] Skip {context.symbol} {context.direction} – max {MAX_OPEN_POSITIONS} Positionen erreicht")
-            _signal_log(
-                f"{context.symbol} {context.direction} blocked: max positions reached ({MAX_OPEN_POSITIONS})"
-            )
+            _signal_log(f"{context.symbol} {context.direction} blocked: max positions reached ({MAX_OPEN_POSITIONS})")
             return trades
 
     if existing is not None:
@@ -1380,10 +2051,14 @@ def process_snapshot(
         return trades
 
     entry_price = float(df_slice.iloc[-1]["close"])
-    # Use small fixed stake on testnet to avoid insufficient balance
-    stake_override = fixed_stake if fixed_stake is not None else (TESTNET_DEFAULT_STAKE if use_testnet else None)
-    stake = determine_position_size(context.symbol, state, stake_override)
-    size_units = stake / entry_price if entry_price else 0.0
+    # Dynamic stake: total_capital / 10 (or fixed if explicitly provided)
+    current_capital = float(state.get("total_capital", START_TOTAL_CAPITAL))
+    stake = determine_position_size(context.symbol, state, fixed_stake, context.direction)
+    # Log dynamic sizing info for verification
+    if fixed_stake is None:
+        _signal_log(f"[Dynamic Stake] Capital: ${current_capital:.2f} → Stake: ${stake:.2f} (capital/{MAX_LONG_POSITIONS})")
+    # Round to valid lot size for the symbol
+    size_units = round_to_lot_size(stake / entry_price, context.symbol) if entry_price else 0.0
     entry = Position(
         key=context.key,
         symbol=context.symbol,
@@ -1403,6 +2078,7 @@ def process_snapshot(
     entry_record = dict(entry.__dict__)
     state.setdefault("positions", []).append(entry_record)
     record_symbol_trade(state, context.symbol)
+    save_state(state)  # Always save state after opening position
     _signal_log(f"{context.symbol} {context.direction} entry triggered at {entry_price:.4f} (stake={stake:.2f})")
     if order_executor is not None:
         try:
@@ -1411,7 +2087,7 @@ def process_snapshot(
             if fill_price > 0:
                 entry_record["entry_price_live"] = fill_price
                 entry_record["entry_price"] = fill_price
-                entry_record["size_units"] = entry_record["stake"] / fill_price if fill_price else entry_record["size_units"]
+                entry_record["size_units"] = round_to_lot_size(entry_record["stake"] / fill_price, context.symbol) if fill_price else entry_record["size_units"]
                 save_state(state)
         except Exception as exc:
             print(f"[Order] Entry submission failed for {context.symbol}: {exc}")
@@ -1571,8 +2247,9 @@ def enrich_open_positions(positions: List[Dict]) -> pd.DataFrame:
             unrealized_pnl = unrealized_pct * stake
         status = "Gewinn" if unrealized_pnl > 0 else "Verlust" if unrealized_pnl < 0 else "Flat"
         entry_time = pos.get("entry_time")
-        bars_held = bars_in_position(entry_time, latest_ts) if entry_time else 0
+        bars_held = bars_in_position(entry_time, latest_ts, context.htf) if entry_time else 0
         enriched.append({
+            "key": pos.get("key", f"{context.symbol}|{context.direction}|{context.indicator}|{context.htf}"),
             "symbol": context.symbol,
             "direction": context.direction,
             "indicator": context.indicator,
@@ -1580,6 +2257,7 @@ def enrich_open_positions(positions: List[Dict]) -> pd.DataFrame:
             "entry_time": entry_time,
             "entry_price": entry_price,
             "stake": stake,
+            "size_units": pos.get("size_units", stake / entry_price if entry_price else 0),
             "param_a": context.param_a,
             "param_b": context.param_b,
             "atr_mult": context.atr_mult,
@@ -1611,8 +2289,61 @@ def _write_dataframe_outputs(df: pd.DataFrame, csv_path: Optional[str], json_pat
     print(f"[Simulation] Wrote {row_count} {label} rows to {target_text}")
 
 
-def write_closed_trades_report(trades_df: pd.DataFrame, csv_path: str, json_path: str) -> None:
-    _write_dataframe_outputs(trades_df, csv_path, json_path, label="closed trades")
+def _get_trade_key(row) -> tuple:
+    """Create unique key for a trade based on symbol, entry_time, exit_time, indicator."""
+    return (
+        str(row.get("symbol", "")),
+        str(row.get("entry_time", "")),
+        str(row.get("exit_time", "")),
+        str(row.get("indicator", "")),
+    )
+
+
+def write_closed_trades_report(trades_df: pd.DataFrame, csv_path: str, json_path: str, append_mode: bool = True) -> None:
+    """Write closed trades report, merging with existing trades if append_mode is True."""
+    if trades_df.empty:
+        print(f"[Simulation] No closed trades written (no rows) – keeping previous files if any.")
+        return
+
+    if append_mode:
+        # Load existing trades and merge
+        existing_trades = []
+        if csv_path and os.path.exists(csv_path):
+            try:
+                existing_df = pd.read_csv(csv_path)
+                existing_trades = existing_df.to_dict("records")
+                print(f"[Simulation] Loaded {len(existing_trades)} existing trades from {csv_path}")
+            except Exception as e:
+                print(f"[Simulation] Could not load existing trades: {e}")
+
+        # Create set of existing trade keys
+        existing_keys = set()
+        for trade in existing_trades:
+            existing_keys.add(_get_trade_key(trade))
+
+        # Add new trades that don't already exist
+        new_trades = trades_df.to_dict("records")
+        added_count = 0
+        for trade in new_trades:
+            trade_key = _get_trade_key(trade)
+            if trade_key not in existing_keys:
+                existing_trades.append(trade)
+                existing_keys.add(trade_key)
+                added_count += 1
+
+        if added_count > 0:
+            print(f"[Simulation] Appending {added_count} new trades to existing {len(existing_trades) - added_count}")
+            merged_df = pd.DataFrame(existing_trades)
+            # Normalize entry_time to string for consistent sorting
+            if "entry_time" in merged_df.columns:
+                merged_df["entry_time"] = merged_df["entry_time"].astype(str)
+                merged_df = merged_df.sort_values("entry_time").reset_index(drop=True)
+            _write_dataframe_outputs(merged_df, csv_path, json_path, label="closed trades (merged)")
+        else:
+            print(f"[Simulation] No new trades to add (all {len(new_trades)} already exist)")
+    else:
+        # Overwrite mode - original behavior
+        _write_dataframe_outputs(trades_df, csv_path, json_path, label="closed trades")
 
 
 def write_open_positions_report(positions: List[Dict], csv_path: str, json_path: Optional[str]) -> None:
@@ -2085,7 +2816,7 @@ def generate_trade_charts(trades_df: pd.DataFrame, open_positions_df: pd.DataFra
                 for _, trade in symbol_trades.iterrows():
                     try:
                         if "entry_time" in trade:
-                            entry_ts = pd.to_datetime(trade["entry_time"])
+                            entry_ts = pd.to_datetime(trade["entry_time"], utc=True, format='mixed')
                             entry_price = float(trade.get("entry_price", np.nan))
                             entries_x.append(entry_ts)
                             # Offset by -2.5 * ATR
@@ -2095,7 +2826,7 @@ def generate_trade_charts(trades_df: pd.DataFrame, open_positions_df: pd.DataFra
                                 offset = 2.5 * atr_val
                             entries_y.append(entry_price - offset if entry_price else entry_price)
                         if "exit_time" in trade and pd.notna(trade["exit_time"]):
-                            exit_ts = pd.to_datetime(trade["exit_time"])
+                            exit_ts = pd.to_datetime(trade["exit_time"], utc=True, format='mixed')
                             exit_price = float(trade.get("exit_price", np.nan))
                             exits_x.append(exit_ts)
                             # Offset by +2.5 * ATR
@@ -2112,7 +2843,7 @@ def generate_trade_charts(trades_df: pd.DataFrame, open_positions_df: pd.DataFra
                 for _, pos in symbol_open.iterrows():
                     try:
                         if "entry_time" in pos:
-                            entry_ts = pd.to_datetime(pos["entry_time"])
+                            entry_ts = pd.to_datetime(pos["entry_time"], utc=True, format='mixed')
                             entry_price = float(pos.get("entry_price", np.nan))
                             open_entries_x.append(entry_ts)
                             # Offset by -2.5 * ATR
@@ -2166,7 +2897,7 @@ def generate_equity_curve(
         print("[Equity] Missing required columns (exit_time, pnl).")
         return
 
-    df["exit_time"] = pd.to_datetime(df["exit_time"], errors="coerce")
+    df["exit_time"] = pd.to_datetime(df["exit_time"], errors="coerce", utc=True)
     df = df.dropna(subset=["exit_time", "pnl"])
     df = df.sort_values("exit_time").reset_index(drop=True)
 
@@ -2445,7 +3176,7 @@ def _derive_summary_window(trades_df: pd.DataFrame) -> Tuple[pd.Timestamp, pd.Ti
     if trades_df.empty or "exit_time" not in trades_df.columns:
         # Default to 7 days back if no trades
         return end_ts - pd.Timedelta(days=7), end_ts
-    exit_times = pd.to_datetime(trades_df["exit_time"], errors="coerce")
+    exit_times = pd.to_datetime(trades_df["exit_time"], errors="coerce", utc=True, format='mixed')
     exit_times = exit_times.dropna()
     if exit_times.empty:
         return end_ts - pd.Timedelta(days=7), end_ts
@@ -2458,22 +3189,57 @@ def _derive_summary_window(trades_df: pd.DataFrame) -> Tuple[pd.Timestamp, pd.Ti
     return start_ts, end_ts
 
 
-def write_live_reports(final_state: Dict, closed_trades: List[TradeResult]) -> None:
+def write_live_reports(final_state: Dict, closed_trades: List[TradeResult], filter_start_ts: Optional[pd.Timestamp] = None) -> None:
     # Append new trades to cumulative log FIRST
     for trade in closed_trades:
         append_trade_log(trade)
-    
+
     # Also write to snapshot files
     current_trades_df = trades_to_dataframe(closed_trades)
     write_closed_trades_report(current_trades_df, SIMULATION_LOG_FILE, SIMULATION_LOG_JSON)
-    
-    # NOW load ALL historical trades from cumulative log for display
-    all_trades_df = _load_trade_log_dataframe(TRADE_LOG_FILE)
+
+    # Load trades for display - use SIMULATION_LOG_FILE when filtering (monitor/simulate mode)
+    # Otherwise use TRADE_LOG_FILE (live trading cumulative log)
+    if filter_start_ts is not None:
+        all_trades_df = _load_trade_log_dataframe(SIMULATION_LOG_FILE)
+        print(f"[Filter] Loaded {len(all_trades_df)} trades from simulation log")
+    else:
+        all_trades_df = _load_trade_log_dataframe(TRADE_LOG_FILE)
     if all_trades_df.empty:
         all_trades_df = current_trades_df
-    
-    # Use ALL historical trades for summary and charts
+
+    # Filter trades by start date if specified (--start CLI option)
+    if filter_start_ts is not None and not all_trades_df.empty:
+        entry_col = "entry_time" if "entry_time" in all_trades_df.columns else "Zeit"
+        if entry_col in all_trades_df.columns:
+            all_trades_df[entry_col] = pd.to_datetime(all_trades_df[entry_col], utc=True)
+            all_trades_df[entry_col] = all_trades_df[entry_col].dt.tz_convert(st.BERLIN_TZ)
+            original_count = len(all_trades_df)
+            all_trades_df = all_trades_df[all_trades_df[entry_col] >= filter_start_ts]
+            filtered_count = len(all_trades_df)
+            if original_count != filtered_count:
+                print(f"[Filter] Filtered trades from {original_count} to {filtered_count} (from {filter_start_ts.strftime('%Y-%m-%d')})")
+            # Recalculate ALL filtered trades with variable stake starting from START_TOTAL_CAPITAL
+            # Formula: stake = capital / 10, amount = stake / entry_price, PnL = amount * price_diff - fees
+            all_trades_df, final_capital = recalculate_trades_variable_stake(
+                all_trades_df, start_capital=START_TOTAL_CAPITAL, max_positions=MAX_LONG_POSITIONS
+            )
+            final_state["total_capital"] = final_capital
+            pnl_col = "pnl" if "pnl" in all_trades_df.columns else "PnL"
+            if pnl_col in all_trades_df.columns:
+                filtered_pnl = all_trades_df[pnl_col].sum()
+                print(f"[Recalc] Variable stake PnL: ${filtered_pnl:,.2f}, Final capital: ${final_capital:,.2f}")
+
+    # Use filtered (or all) historical trades for summary and charts
     open_positions = final_state.get("positions", [])
+
+    # Also recalculate open positions with variable stake if filtering is active
+    if filter_start_ts is not None and open_positions:
+        open_positions = recalculate_open_positions_variable_stake(
+            open_positions, all_trades_df, start_capital=START_TOTAL_CAPITAL, max_positions=MAX_LONG_POSITIONS
+        )
+        final_state["positions"] = open_positions
+        print(f"[Recalc] Recalculated {len(open_positions)} open positions with variable stake")
     write_open_positions_report(open_positions, SIMULATION_OPEN_POSITIONS_FILE, SIMULATION_OPEN_POSITIONS_JSON)
     open_df = open_positions_to_dataframe(open_positions)
     start_ts, end_ts = _derive_summary_window(all_trades_df)
@@ -2496,6 +3262,19 @@ def write_live_reports(final_state: Dict, closed_trades: List[TradeResult]) -> N
         print(f"[Live] Snapshot updated with no new trades this cycle. Total history: {len(all_trades_df)} trades.")
     else:
         print(f"[Live] Snapshot includes {len(current_trades_df)} new trade(s). Total history: {len(all_trades_df)} trades.")
+
+    # Update testnet dashboard if in testnet mode
+    if _TESTNET_ACTIVE:
+        try:
+            from TestnetDashboard import generate_dashboard
+            # Pass filter_start_date to dashboard for proper filtering and stake recalculation
+            filter_date_str = filter_start_ts.strftime("%Y-%m-%d") if filter_start_ts else None
+            print(f"[Dashboard] Generating with filter_start_date={filter_date_str}")
+            generate_dashboard(filter_start_date=filter_date_str)
+            print("[Dashboard] Testnet dashboard updated")
+        except Exception as e:
+            print(f"[Dashboard] Failed to update: {e}")
+
     return float(summary.get("final_capital", final_state.get("total_capital", 0.0)))
 
 
@@ -2513,8 +3292,68 @@ def run_signal_cycle(
     use_testnet: bool,
     order_executor: Optional[OrderExecutor],
     trade_notifier: Optional[TradeNotifier],
+    filter_start_ts: Optional[pd.Timestamp] = None,
 ) -> None:
     print(f"[{_now_str()}] Running scheduled trading cycle (symbols={symbols or 'ALL'})")
+
+    # First, run a mini-simulation to get current simulated positions
+    # This updates paper_trading_actual_trades.json with current state
+    now = pd.Timestamp.now(tz=st.BERLIN_TZ)
+    # Use provided start date or default for paper trading - ensures stable history (no rolling window)
+    sim_start = filter_start_ts if filter_start_ts is not None else pd.Timestamp("2025-12-01", tz=st.BERLIN_TZ)
+    print(f"[{_now_str()}] Running simulation from {sim_start.strftime('%Y-%m-%d')} to update positions...")
+
+    # Temporarily enable synthetic bars for the simulation
+    # This ensures we get current price data even if the current hour isn't complete
+    original_skip_synthetic = st.SKIP_SYNTHETIC_BARS
+    st.SKIP_SYNTHETIC_BARS = False
+    # Clear data cache to ensure fresh synthetic bars are fetched
+    st.DATA_CACHE.clear()
+
+    try:
+        trades, sim_state = run_simulation(
+            sim_start,
+            now,
+            use_saved_state=False,
+            emit_entry_log=False,
+            allowed_symbols=list(symbols) if symbols else None,
+            allowed_indicators=list(indicators) if indicators else None,
+            fixed_stake=stake,
+            use_testnet=use_testnet,
+            refresh_params=False,
+            reset_state=False,
+            clear_outputs=False,
+        )
+        # Write simulation results to files
+        sim_positions = sim_state.get("positions", [])
+        trades_df = trades_to_dataframe(trades)
+
+        # Recalculate with variable stake starting from 16500
+        if not trades_df.empty:
+            trades_df, final_capital = recalculate_trades_variable_stake(
+                trades_df, start_capital=START_TOTAL_CAPITAL, max_positions=MAX_LONG_POSITIONS
+            )
+            sim_state["total_capital"] = final_capital
+            print(f"[{_now_str()}] Recalculated {len(trades_df)} trades with variable stake, PnL: ${trades_df['pnl'].sum():,.2f}")
+
+        # Recalculate open positions with variable stake
+        if sim_positions:
+            sim_positions = recalculate_open_positions_variable_stake(
+                sim_positions, trades_df, start_capital=START_TOTAL_CAPITAL, max_positions=MAX_LONG_POSITIONS
+            )
+            sim_state["positions"] = sim_positions
+
+        # Write to files
+        write_closed_trades_report(trades_df, SIMULATION_LOG_FILE, SIMULATION_LOG_JSON)
+        write_open_positions_report(sim_positions, SIMULATION_OPEN_POSITIONS_FILE, SIMULATION_OPEN_POSITIONS_JSON)
+        print(f"[{_now_str()}] Simulation complete: {len(trades)} trades, {len(sim_positions)} open positions")
+    except Exception as e:
+        print(f"[{_now_str()}] Simulation failed: {e}")
+    finally:
+        # Restore original setting
+        st.SKIP_SYNTHETIC_BARS = original_skip_synthetic
+
+    # Now run the regular signal check (paper trading)
     main(
         allowed_symbols=list(symbols) if symbols else None,
         allowed_indicators=list(indicators) if indicators else None,
@@ -2523,6 +3362,7 @@ def run_signal_cycle(
         order_executor=order_executor,
         trade_notifier=trade_notifier,
         configure_exchange=False,
+        filter_start_ts=sim_start,
     )
     print_daily_closed_trades()
 
@@ -2563,6 +3403,7 @@ def monitor_loop(
     poll_seconds: float,
     order_executor: Optional[OrderExecutor],
     trade_notifier: Optional[TradeNotifier],
+    filter_start_ts: Optional[pd.Timestamp] = None,
 ) -> None:
     st.configure_exchange(use_testnet=use_testnet)
     next_signal = 0.0
@@ -2571,13 +3412,13 @@ def monitor_loop(
         while True:
             now = time.time()
             if now >= next_signal:
-                run_signal_cycle(symbols, indicators, stake, use_testnet, order_executor, trade_notifier)
+                run_signal_cycle(symbols, indicators, stake, use_testnet, order_executor, trade_notifier, filter_start_ts)
                 next_signal = now + signal_interval_min * 60.0
             if now >= next_spike:
                 spike_symbols = detect_atr_spikes(symbols, atr_mult, use_testnet)
                 if spike_symbols:
                     print(f"[{_now_str()}] Spike trigger for {', '.join(spike_symbols)}")
-                    run_signal_cycle(spike_symbols, indicators, stake, use_testnet, order_executor, trade_notifier)
+                    run_signal_cycle(spike_symbols, indicators, stake, use_testnet, order_executor, trade_notifier, filter_start_ts)
                 next_spike = now + spike_interval_min * 60.0
             time.sleep(max(1.0, poll_seconds))
     except KeyboardInterrupt:
@@ -2625,24 +3466,37 @@ def force_entry_position(
     if best_df.empty:
         print("[Force] Keine Strategiedaten gefunden (weder detailed HTML noch overall CSV).")
         return False
-    filtered = filter_best_rows_by_symbol(best_df, [requested_symbol])
+    # For testnet: map USDT symbol to USDC equivalent for parameter lookup
+    param_symbol = st.map_symbol_for_params(requested_symbol) if use_testnet else requested_symbol
+    print(f"[Force] Suche Parameter für {param_symbol} (trade as {requested_symbol})")
+    filtered = filter_best_rows_by_symbol(best_df, [param_symbol])
     filtered = filter_best_rows_by_direction(filtered, [direction_value])
     filtered = select_best_indicator_per_symbol(filtered)
     if filtered.empty:
-        print(f"[Force] Keine Strategiezeile für {requested_symbol} {direction_value} vorhanden.")
+        print(f"[Force] Keine Strategiezeile für {param_symbol} {direction_value} vorhanden.")
         return False
     row = filtered.iloc[0]
     context = build_strategy_context(row)
+    # For testnet: override context symbol to use USDT pair for trading
+    if use_testnet and context.symbol != requested_symbol:
+        context.symbol = requested_symbol
+        print(f"[Force] Symbol für Trade auf {requested_symbol} gesetzt (key={context.key})")
     df = build_dataframe_for_context(context)
     if df.empty:
         print(f"[Force] Keine Marktdaten für {requested_symbol} verfügbar.")
         return False
     signal_ts, entry_price, within_window = find_last_signal_bar(df, direction_value, lookback_hours=lookback_hours)
     if not within_window:
-        print(
-            f"[Force] Kein Signal in den letzten {lookback_hours:g}h für {requested_symbol} {direction_value} gefunden."
-        )
-        return False
+        if use_testnet:
+            # Testnet has limited data - use current price for forced entry
+            print(f"[Force] Kein Signal gefunden - verwende aktuellen Preis (Testnet-Modus)")
+            signal_ts = df.index[-1]
+            entry_price = float(df.iloc[-1]["close"])
+        else:
+            print(
+                f"[Force] Kein Signal in den letzten {lookback_hours:g}h für {requested_symbol} {direction_value} gefunden."
+            )
+            return False
     if entry_price is None or pd.isna(entry_price):
         print(f"[Force] Schlusskurs für {requested_symbol} nicht verfügbar.")
         return False
@@ -2658,9 +3512,12 @@ def force_entry_position(
     if find_position(state, context.key):
         print(f"[Force] Position {context.key} ist bereits offen.")
         return False
-    # Use small fixed stake on testnet to avoid insufficient balance
-    stake_override = fixed_stake if fixed_stake is not None else (TESTNET_DEFAULT_STAKE if use_testnet else None)
-    stake_value = determine_position_size(context.symbol, state, stake_override)
+    # Use direction-specific stake sizes (SHORT_STAKE for shorts, dynamic for longs)
+    current_capital = float(state.get("total_capital", START_TOTAL_CAPITAL))
+    stake_value = determine_position_size(context.symbol, state, fixed_stake, context.direction)
+    # Log dynamic sizing info
+    if fixed_stake is None:
+        print(f"[Force] Dynamic sizing: Capital ${current_capital:.2f} → Stake ${stake_value:.2f}")
     if stake_value <= 0:
         print("[Force] Stake-Betrag ist 0 – prüfe Kapital oder --stake.")
         return False
@@ -2685,7 +3542,7 @@ def force_entry_position(
         entry_time=entry_iso,
         entry_atr=entry_atr_val,
         stake=stake_value,
-        size_units=stake_value / entry_price,
+        size_units=round_to_lot_size(stake_value / entry_price, context.symbol),
     )
     entry_record = dict(entry.__dict__)
     positions.append(entry_record)
@@ -2704,8 +3561,11 @@ def force_entry_position(
             if fill_price > 0:
                 entry_record["entry_price_live"] = fill_price
                 entry_record["entry_price"] = fill_price
-                entry_record["size_units"] = entry_record["stake"] / fill_price if fill_price else entry_record["size_units"]
+                entry_record["size_units"] = round_to_lot_size(entry_record["stake"] / fill_price, context.symbol) if fill_price else entry_record["size_units"]
                 save_state(state)
+            # Save to Crypto9 testnet tracking file
+            if use_testnet:
+                save_testnet_position(entry_record, use_testnet=True)
         except Exception as exc:
             print(f"[Force] Orderausführung fehlgeschlagen: {exc}")
             # Remove the paper position if live order failed
@@ -2903,7 +3763,11 @@ def main(
     reset_state: bool = False,
     clear_outputs: bool = False,
     configure_exchange: bool = True,
+    filter_start_ts: Optional[pd.Timestamp] = None,
 ) -> None:
+    # Auto-correct any historical trades with wrong PnL formula
+    correct_historical_trades_pnl()
+
     if refresh_params:
         st.run_overall_best_params()
     if clear_outputs:
@@ -2942,6 +3806,8 @@ def main(
         print("[Skip] best_params_overall.csv enthält keine Daten.")
         return
     state = load_state()
+    # Sync positions from simulation (catch up with backtest)
+    sync_simulation_positions(state, use_testnet=use_testnet)
     prune_state_for_indicators(state, allowed_indicators)
     # Pass stake through: None = dynamic sizing, value = fixed stake
     stake_value = fixed_stake
@@ -2960,14 +3826,14 @@ def main(
             continue
         closed_trades.extend(trades)
     save_state(state)
-    marked_capital = write_live_reports(state, closed_trades)
+    marked_capital = write_live_reports(state, closed_trades, filter_start_ts=filter_start_ts)
     print(f"[Done] Total capital now {marked_capital:.2f} USDT (incl. open PnL - exit fees)")
 
 
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Paper trading runner for overall-best strategies")
     parser.add_argument("--simulate", action="store_true", help="Run a historical simulation instead of a single live tick")
-    parser.add_argument("--start", type=str, default=None, help="Simulation start timestamp (ISO, default: 24h before end)")
+    parser.add_argument("--start", type=str, default=None, help="Start date filter (ISO format, e.g. 2025-12-01). For --simulate: simulation start. For --monitor: filter trades from this date onwards. Default: 2025-12-01 for monitor, 24h before end for simulate.")
     parser.add_argument("--end", type=str, default=None, help="Simulation end timestamp (ISO, default: now)")
     parser.add_argument("--use-saved-state", action="store_true", help="Seed simulations with the saved JSON state instead of a fresh account")
     parser.add_argument("--sim-log", type=str, default=SIMULATION_LOG_FILE, help="CSV path for simulated trades")
@@ -2999,6 +3865,11 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         "--clear-outputs",
         action="store_true",
         help="Delete generated CSV/JSON/HTML outputs before writing new ones",
+    )
+    parser.add_argument(
+        "--close-at-end",
+        action="store_true",
+        help="Force close all open positions at simulation end (marks them as 'simulation_end' exit)",
     )
     parser.add_argument("--monitor", action="store_true", help="Run continuous monitor loop (scheduled cycle + optional ATR spikes)")
     parser.add_argument("--signal-interval", type=float, default=DEFAULT_SIGNAL_INTERVAL_MIN, help="Minutes between scheduled monitor cycles (default 15)")
@@ -3051,6 +3922,7 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
     force_symbol, force_direction = parse_force_entry_argument(args.force_entry)
 
     use_testnet = bool(args.testnet or DEFAULT_USE_TESTNET)
+    set_testnet_active(use_testnet)
 
     # Handle stake sizing: dynamic by default, fixed if --stake provided
     if args.stake is not None:
@@ -3100,7 +3972,7 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
         st.configure_exchange(use_testnet=use_testnet)
         order_executor = None
         if args.place_orders:
-            order_executor = BinanceOrderExecutor(st.get_exchange())
+            order_executor = create_order_executor(use_testnet)
         success = force_entry_position(
             force_symbol,
             force_direction,
@@ -3125,7 +3997,11 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
         st.configure_exchange(use_testnet=use_testnet)
         order_executor = None
         if args.place_orders:
-            order_executor = BinanceOrderExecutor(st.get_exchange())
+            order_executor = create_order_executor(use_testnet)
+        # Parse --start filter for monitor mode (default: 2025-12-01)
+        default_monitor_start = pd.Timestamp("2025-12-01", tz=st.BERLIN_TZ)
+        monitor_start_ts = resolve_timestamp(args.start, default_monitor_start)
+        print(f"[Monitor] Filtering trades from {monitor_start_ts.strftime('%Y-%m-%d')}")
         monitor_loop(
             allowed_symbols,
             allowed_indicators,
@@ -3137,6 +4013,7 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
             poll_seconds=args.poll_seconds,
             order_executor=order_executor,
             trade_notifier=sms_notifier,
+            filter_start_ts=monitor_start_ts,
         )
         return
 
@@ -3144,7 +4021,7 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
     configure_exchange_flag = True
     if args.place_orders:
         st.configure_exchange(use_testnet=use_testnet)
-        order_executor = BinanceOrderExecutor(st.get_exchange())
+        order_executor = create_order_executor(use_testnet)
         configure_exchange_flag = False
 
     if args.simulate:
@@ -3208,14 +4085,113 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
             )
             trades_df = trades_to_dataframe(trades)
             open_positions = final_state.get("positions", [])
+
+            # Force close all open positions at simulation end if requested
+            if args.close_at_end and open_positions:
+                print(f"[Simulation] Force closing {len(open_positions)} open positions at simulation end...")
+                for pos in open_positions[:]:  # Copy list to allow modification
+                    # Get last price from cache or use entry price as fallback
+                    symbol = pos.get("symbol", "")
+                    try:
+                        df_1h = st.load_ohlcv_from_cache(symbol, "1h")
+                        if df_1h is not None and not df_1h.empty:
+                            last_price = float(df_1h['close'].iloc[-1])
+                        else:
+                            last_price = float(pos.get("entry_price", 0))
+                    except Exception:
+                        last_price = float(pos.get("entry_price", 0))
+
+                    entry_price = float(pos.get("entry_price", 0))
+                    stake = float(pos.get("stake", 0))
+                    direction = pos.get("direction", "long").lower()
+
+                    # Calculate PnL
+                    if direction == "long":
+                        pnl_pct = (last_price - entry_price) / entry_price if entry_price else 0
+                    else:
+                        pnl_pct = (entry_price - last_price) / entry_price if entry_price else 0
+                    pnl_usd = stake * pnl_pct
+
+                    # Create trade result
+                    size_units = float(pos.get("size_units", stake / entry_price if entry_price else 0))
+                    fees = (entry_price + last_price) * size_units * st.FEE_RATE
+                    pnl = pnl_usd - fees
+                    trade = TradeResult(
+                        symbol=symbol,
+                        direction=pos.get("direction", "Long"),
+                        indicator=pos.get("indicator", ""),
+                        htf=pos.get("htf", ""),
+                        param_desc=pos.get("param_desc", ""),
+                        entry_time=pos.get("entry_time", ""),
+                        exit_time=end_ts.isoformat(),
+                        entry_price=entry_price,
+                        exit_price=last_price,
+                        stake=stake,
+                        fees=fees,
+                        pnl=pnl,
+                        equity_after=final_state["total_capital"] + pnl,
+                        reason="simulation_end",
+                        size_units=size_units,
+                    )
+                    trades.append(trade)
+                    final_state["total_capital"] += pnl
+                    print(f"  Closed {symbol} {direction}: PnL {pnl:+.2f} USDT ({pnl_pct*100:+.1f}%)")
+
+                # Clear positions after force close
+                final_state["positions"] = []
+                open_positions = []
+                trades_df = trades_to_dataframe(trades)
+                print(f"[Simulation] All positions closed. New total: {len(trades)} trades")
+
             print(f"[Simulation] Generated {len(trades)} trades during simulation")
         log_path = args.sim_log or SIMULATION_LOG_FILE
         log_json_path = args.sim_json or SIMULATION_LOG_JSON
+
+        # Filter trades to only include those opening from start_ts onwards
+        if not trades_df.empty and start_ts is not None:
+            entry_col = "entry_time" if "entry_time" in trades_df.columns else "Zeit"
+            if entry_col in trades_df.columns:
+                trades_df[entry_col] = pd.to_datetime(trades_df[entry_col], utc=True)
+                trades_df[entry_col] = trades_df[entry_col].dt.tz_convert(st.BERLIN_TZ)
+                original_count = len(trades_df)
+                trades_df = trades_df[trades_df[entry_col] >= start_ts]
+                filtered_count = len(trades_df)
+                if original_count != filtered_count:
+                    print(f"[Filter] Filtered trades from {original_count} to {filtered_count} (opening from {start_ts.strftime('%Y-%m-%d')})")
+                # Recalculate ALL filtered trades with variable stake starting from START_TOTAL_CAPITAL
+                # Formula: stake = capital / 10, amount = stake / entry_price, PnL = amount * price_diff - fees
+                trades_df, final_capital = recalculate_trades_variable_stake(
+                    trades_df, start_capital=START_TOTAL_CAPITAL, max_positions=MAX_LONG_POSITIONS
+                )
+                final_state["total_capital"] = final_capital
+                pnl_col = "pnl" if "pnl" in trades_df.columns else "PnL"
+                if pnl_col in trades_df.columns:
+                    filtered_pnl = trades_df[pnl_col].sum()
+                    print(f"[Recalc] Variable stake PnL: ${filtered_pnl:,.2f}, Final capital: ${final_capital:,.2f}")
+
+                # Also recalculate open positions with variable stake
+                if open_positions:
+                    open_positions = recalculate_open_positions_variable_stake(
+                        open_positions, trades_df, start_capital=START_TOTAL_CAPITAL, max_positions=MAX_LONG_POSITIONS
+                    )
+                    final_state["positions"] = open_positions
+                    print(f"[Recalc] Recalculated {len(open_positions)} open positions with variable stake")
+
         write_closed_trades_report(trades_df, log_path, log_json_path)
         print(f"[Simulation] Final capital: {final_state['total_capital']:.2f} USDT")
         open_path = args.open_log or SIMULATION_OPEN_POSITIONS_FILE
         open_json_path = args.open_json or SIMULATION_OPEN_POSITIONS_JSON
         write_open_positions_report(open_positions, open_path, open_json_path)
+
+        # Auto-sync simulation positions to paper trading state
+        paper_state = load_state()
+        synced = sync_simulation_positions(paper_state, use_testnet=use_testnet)
+        if synced > 0:
+            save_state(paper_state)
+            print(f"[Sync] Added {synced} simulation positions to paper trading state")
+        else:
+            print(f"[Sync] Paper trading state already up to date ({len(paper_state.get('positions', []))} positions)")
+
         open_df = open_positions_to_dataframe(open_positions)
         summary_data = build_summary_payload(trades_df, open_df, final_state, start_ts, end_ts)
         summary_html_path = args.summary_html or SIMULATION_SUMMARY_HTML
