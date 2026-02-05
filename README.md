@@ -1,5 +1,18 @@
 # Crypto9 - Supertrend Trading Bot
 
+## Stabile Versionen
+
+| Version | Commit | Beschreibung |
+|---------|--------|--------------|
+| **v1.0** | `8d967d2` | Erste korrekte Version - trading_summary.json als einzige Datenquelle |
+
+Wiederherstellen:
+```bash
+git checkout 8d967d2
+```
+
+---
+
 ## Overview
 Paper trading and backtesting system for Supertrend-based crypto strategies with multiple indicators (JMA, KAMA, MAMA, etc.) and higher timeframe filters.
 
