@@ -547,6 +547,17 @@ def generate_dashboard(start_date: str = None, output_dir: Path = None, german: 
     </div>
 """
 
+    # Format prices - use more decimals for small prices like LUNC
+    def fmt_price(price):
+        if price < 0.0001:
+            return f"{price:.8f}"
+        elif price < 1:
+            return f"{price:.6f}"
+        elif price < 100:
+            return f"{price:.4f}"
+        else:
+            return fmt_de(price)
+
     # Open Positions section (FIRST - before closed trades)
     html += f"""
     <div class="section">
@@ -573,8 +584,8 @@ def generate_dashboard(start_date: str = None, output_dir: Path = None, german: 
             <td>{p.get('indicator', 'N/A')}</td>
             <td>{p.get('htf', 'N/A')}</td>
             <td>{entry_str}</td>
-            <td>{p.get('entry_price', 0):.6g}</td>
-            <td>{p.get('last_price', 0):.6g}</td>
+            <td>{fmt_price(p.get('entry_price', 0))}</td>
+            <td>{fmt_price(p.get('last_price', 0))}</td>
             <td>{fmt_de(p.get('stake', 0))}</td>
             <td>{p.get('bars_held', 0)}</td>
             <td class="{pnl_class}">{fmt_de(pnl)}</td>
@@ -588,7 +599,7 @@ def generate_dashboard(start_date: str = None, output_dir: Path = None, german: 
     # Helper function to generate closed trade table rows
     def trade_rows(trades):
         if not trades:
-            return "        <tr><td colspan='9'>-</td></tr>\n"
+            return "        <tr><td colspan='11'>-</td></tr>\n"
         rows = ""
         for t in trades:
             entry_time = t.get("entry_time", "")
@@ -608,13 +619,17 @@ def generate_dashboard(start_date: str = None, output_dir: Path = None, german: 
             stake = t.get("stake", 0)
             pnl_pct = t.get("pnl_pct", 0)
             pnl_class = "positive" if pnl >= 0 else "negative"
+            entry_price = t.get("entry_price", 0)
+            exit_price = t.get("exit_price", 0)
 
             rows += f"""        <tr>
             <td>{t.get('symbol', 'N/A')}</td>
             <td>{t.get('indicator', 'N/A')}</td>
             <td>{t.get('htf', 'N/A')}</td>
             <td>{entry_str}</td>
+            <td>{fmt_price(entry_price)}</td>
             <td>{exit_str}</td>
+            <td>{fmt_price(exit_price)}</td>
             <td>{fmt_de(stake)}</td>
             <td class="{pnl_class}">{fmt_de(pnl)}</td>
             <td class="{pnl_class}">{pnl_pct:+.2f}%</td>
@@ -627,7 +642,7 @@ def generate_dashboard(start_date: str = None, output_dir: Path = None, german: 
     <div class="section">
     <h2>Closed Trades ({len(long_trades)}, PnL: <span class="{'positive' if long_pnl >= 0 else 'negative'}">{fmt_de(long_pnl)}</span>)</h2>
     <table>
-        <tr class="long-header"><th>Symbol</th><th>Indicator</th><th>HTF</th><th>Entry Time</th><th>Exit Time</th><th>Stake</th><th>PnL</th><th>%</th><th>Reason</th></tr>
+        <tr class="long-header"><th>Symbol</th><th>Indicator</th><th>HTF</th><th>Entry Time</th><th>Entry Price</th><th>Exit Time</th><th>Exit Price</th><th>Stake</th><th>PnL</th><th>%</th><th>Reason</th></tr>
 """
     html += trade_rows(long_trades)
 
