@@ -4254,14 +4254,12 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
                 pass
 
             # Determine end time:
-            # - Fresh start: end at HISTORICAL_END (2026-01-01) to allow testing merge
-            # - Append mode: end at NOW to fill the gap to current time
-            HISTORICAL_END = pd.Timestamp("2026-01-01", tz=st.BERLIN_TZ)
+            # - Always end at NOW (or provided --end) to simulate up to current time
             now_ts = pd.Timestamp.now(tz=st.BERLIN_TZ)
 
             if is_fresh_start:
-                end_ts = HISTORICAL_END if not args.end else resolve_timestamp(args.end, HISTORICAL_END)
-                print(f"[Simulation] Fresh start - will end at: {end_ts.strftime('%Y-%m-%d')}")
+                end_ts = now_ts if not args.end else resolve_timestamp(args.end, now_ts)
+                print(f"[Simulation] Fresh start - will end at: {end_ts.strftime('%Y-%m-%d %H:%M')}")
             else:
                 # Append mode: always use NOW (or provided --end) to fill gap to current time
                 end_ts = resolve_timestamp(args.end, now_ts)
