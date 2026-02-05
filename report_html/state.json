@@ -1,0 +1,27 @@
+{
+  "total_capital": 16500.0,
+  "positions": [
+    {
+      "key": "LUNC/USDT|jma|12h|long",
+      "symbol": "LUNC/USDT",
+      "direction": "long",
+      "indicator": "jma",
+      "htf": "12h",
+      "param_a": 20.0,
+      "param_b": 0.0,
+      "atr_mult": null,
+      "min_hold_bars": 12,
+      "entry_price": 3.673e-05,
+      "entry_time": "2026-01-30T15:00:00+01:00",
+      "entry_atr": 0.0,
+      "stake": 80541.63,
+      "size_units": 2192802341.410291
+    }
+  ],
+  "last_processed_bar": {
+    "LUNC/USDT|jma|12h|long": "2026-01-30T15:00:00+01:00"
+  },
+  "symbol_trade_counts": {
+    "LUNC/USDT": 1
+  }
+}
