@@ -649,6 +649,62 @@ def generate_dashboard(start_date: str = None, output_dir: Path = None, german: 
     return output_path
 
 
+def get_last_trade_date() -> str | None:
+    """Get the exit time of the most recent trade from trading_summary.json."""
+    if not SOURCE_JSON.exists():
+        return None
+    try:
+        data = load_json(SOURCE_JSON)
+        trades = data.get("trades", [])
+        if not trades:
+            return None
+        # Find the newest exit_time
+        newest = max(trades, key=lambda t: t.get("exit_time", "") or "")
+        exit_time = newest.get("exit_time", "")
+        if exit_time:
+            # Return just the date part for --start parameter
+            return exit_time[:10]  # YYYY-MM-DD
+    except Exception as e:
+        print(f"Error reading last trade date: {e}")
+    return None
+
+
+def refresh_simulation_data() -> bool:
+    """Run paper_trader.py --simulate to fill gap from last trade to now."""
+    import subprocess
+
+    last_date = get_last_trade_date()
+    if not last_date:
+        print("No existing trades found, running full simulation...")
+        cmd = ["python3", "paper_trader.py", "--simulate", "--start", "2024-01-31"]
+    else:
+        print(f"Last trade date: {last_date}, simulating gap to now...")
+        cmd = ["python3", "paper_trader.py", "--simulate", "--start", last_date, "--use-saved-state"]
+
+    print(f"Running: {' '.join(cmd)}")
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        if result.returncode == 0:
+            print("Simulation completed successfully")
+            if result.stdout:
+                # Show last few lines of output
+                lines = result.stdout.strip().split('\n')
+                for line in lines[-5:]:
+                    print(f"  {line}")
+            return True
+        else:
+            print(f"Simulation failed with code {result.returncode}")
+            if result.stderr:
+                print(f"Error: {result.stderr[:500]}")
+            return False
+    except subprocess.TimeoutExpired:
+        print("Simulation timed out (10 min)")
+        return False
+    except Exception as e:
+        print(f"Could not run simulation: {e}")
+        return False
+
+
 if __name__ == "__main__":
     import argparse
     import subprocess
@@ -660,32 +716,34 @@ if __name__ == "__main__":
     parser.add_argument("--loop", action="store_true", help="Run continuously")
     parser.add_argument("--interval", type=int, default=300, help="Loop interval in seconds (default: 300)")
     parser.add_argument("--no-refresh", action="store_true", help="Skip paper_trader.py refresh (use existing data)")
+    parser.add_argument("--testnet", action="store_true", help="Send trades to testnet and get feedback")
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)
     first_run = True
 
     while True:
-        # Refresh data via paper_trader.py (skip on first run or if --no-refresh)
+        # Refresh data via paper_trader.py simulation (skip on first run or if --no-refresh)
         if not first_run and not args.no_refresh:
             print("\n=== Refreshing trade data via paper_trader.py ===")
+            refresh_simulation_data()
+
+        # Testnet integration
+        if args.testnet and not first_run:
+            print("\n=== Sending trades to testnet ===")
             try:
                 result = subprocess.run(
-                    ["python3", "paper_trader.py", "--monitor"],
+                    ["python3", "paper_trader.py", "--testnet"],
                     capture_output=True,
                     text=True,
                     timeout=120
                 )
                 if result.returncode == 0:
-                    print("Trade data refreshed successfully")
+                    print("Testnet sync completed")
                 else:
-                    print(f"Warning: paper_trader.py returned {result.returncode}")
-                    if result.stderr:
-                        print(f"Error: {result.stderr[:200]}")
-            except subprocess.TimeoutExpired:
-                print("Warning: paper_trader.py timed out")
+                    print(f"Testnet sync failed: {result.returncode}")
             except Exception as e:
-                print(f"Warning: Could not refresh data: {e}")
+                print(f"Testnet error: {e}")
 
         # Generate both English and German dashboards
         path_en = generate_dashboard(start_date=args.start, output_dir=output_dir, german=False)
