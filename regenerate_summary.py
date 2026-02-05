@@ -1,293 +1,428 @@
 #!/usr/bin/env python3
-"""Regenerate trading summary from existing simulation logs (offline)."""
+"""Regenerate trading_summary.html with filtered start date and compound growth stakes."""
 
 import json
-import os
-import sys
-from datetime import datetime, timezone
-
-import pandas as pd
-
-# Import summary generation functions from paper_trader
-sys.path.insert(0, os.path.dirname(__file__))
-
-START_EQUITY = 16000.0
-BERLIN_TZ = "Europe/Berlin"
+import re
+from datetime import datetime
+from pathlib import Path
+from html.parser import HTMLParser
 
 
-def calc_symbol_stats(trades_df):
-    """Calculate per-symbol statistics."""
-    if trades_df.empty or "symbol" not in trades_df.columns:
-        return []
-
-    symbol_stats = []
-    for symbol in sorted(trades_df["symbol"].unique()):
-        sym_df = trades_df[trades_df["symbol"] == symbol].copy()
-        if sym_df.empty:
-            continue
-
-        if "exit_time" in sym_df.columns:
-            sym_df = sym_df.sort_values("exit_time")
-
-        total_trades = len(sym_df)
-        pnl_series = sym_df["pnl"] if "pnl" in sym_df.columns else pd.Series([0.0])
-        total_pnl = float(pnl_series.sum())
-        avg_pnl = float(pnl_series.mean())
-
-        winners = len(sym_df[sym_df["pnl"] > 0]) if "pnl" in sym_df.columns else 0
-        losers = len(sym_df[sym_df["pnl"] < 0]) if "pnl" in sym_df.columns else 0
-        win_rate = (winners / total_trades * 100.0) if total_trades else 0.0
-
-        best_trade = float(pnl_series.max()) if not pnl_series.empty else 0.0
-        worst_trade = float(pnl_series.min()) if not pnl_series.empty else 0.0
-
-        cumulative_pnl = pnl_series.cumsum()
-        running_max = cumulative_pnl.cummax()
-        drawdown = running_max - cumulative_pnl
-        max_drawdown = float(drawdown.max()) if not drawdown.empty else 0.0
-
-        long_trades = len(sym_df[sym_df["direction"].str.lower() == "long"]) if "direction" in sym_df.columns else 0
-        short_trades = len(sym_df[sym_df["direction"].str.lower() == "short"]) if "direction" in sym_df.columns else 0
-
-        long_pnl = float(sym_df[sym_df["direction"].str.lower() == "long"]["pnl"].sum()) if "direction" in sym_df.columns and "pnl" in sym_df.columns else 0.0
-        short_pnl = float(sym_df[sym_df["direction"].str.lower() == "short"]["pnl"].sum()) if "direction" in sym_df.columns and "pnl" in sym_df.columns else 0.0
-
-        gross_profit = float(pnl_series[pnl_series > 0].sum()) if not pnl_series.empty else 0.0
-        gross_loss = abs(float(pnl_series[pnl_series < 0].sum())) if not pnl_series.empty else 0.0
-        profit_factor = gross_profit / gross_loss if gross_loss > 0 else float('inf') if gross_profit > 0 else 0.0
-
-        symbol_stats.append({
-            "symbol": symbol,
-            "trades": total_trades,
-            "winners": winners,
-            "losers": losers,
-            "win_rate": round(win_rate, 2),
-            "total_pnl": round(total_pnl, 2),
-            "avg_pnl": round(avg_pnl, 2),
-            "best_trade": round(best_trade, 2),
-            "worst_trade": round(worst_trade, 2),
-            "max_drawdown": round(max_drawdown, 2),
-            "profit_factor": round(profit_factor, 2) if profit_factor != float('inf') else "∞",
-            "long_trades": long_trades,
-            "short_trades": short_trades,
-            "long_pnl": round(long_pnl, 2),
-            "short_pnl": round(short_pnl, 2),
-        })
-
-    symbol_stats.sort(key=lambda x: x["total_pnl"], reverse=True)
-    return symbol_stats
+# Configuration
+START_DATE = "2024-01-31"  # Filter trades from this date
+START_CAPITAL = 16500.0
+MAX_POSITIONS = 10
+INPUT_HTML = Path("report_html/trading_summary.html")
+OUTPUT_HTML = Path("report_html/trading_summary.html")
+OUTPUT_JSON = Path("report_html/trading_summary.json")
 
 
-def build_summary(trades_df, start_ts, end_ts):
-    """Build summary payload from trades DataFrame."""
-    total_trades = len(trades_df)
-    winners = len(trades_df[trades_df["pnl"] > 0]) if not trades_df.empty else 0
-    losers = len(trades_df[trades_df["pnl"] < 0]) if not trades_df.empty else 0
-    pnl_sum = float(trades_df["pnl"].sum()) if not trades_df.empty else 0.0
-    avg_pnl = float(trades_df["pnl"].mean()) if not trades_df.empty else 0.0
-    win_rate = (winners / total_trades * 100.0) if total_trades else 0.0
+class PandasTableParser(HTMLParser):
+    """Parse pandas-generated HTML tables."""
 
-    final_capital = START_EQUITY + pnl_sum
+    def __init__(self):
+        super().__init__()
+        self.in_table = False
+        self.in_thead = False
+        self.in_tbody = False
+        self.in_row = False
+        self.in_cell = False
+        self.is_header_cell = False
+        self.current_row = []
+        self.headers = []
+        self.rows = []
+        self.tables = []
+        self.current_table_name = ""
+        self.in_h2 = False
+        self.h2_text = ""
 
-    # Direction stats
-    def calc_direction_stats(df, direction_name):
-        if "direction" not in df.columns or df.empty:
-            return {}
-        dir_df = df[df["direction"].str.lower() == direction_name.lower()]
-        if dir_df.empty:
-            return {
-                f"{direction_name}_trades": 0,
-                f"{direction_name}_pnl": 0.0,
-                f"{direction_name}_avg_pnl": 0.0,
-                f"{direction_name}_win_rate": 0.0,
-                f"{direction_name}_winners": 0,
-                f"{direction_name}_losers": 0,
-            }
-        count = len(dir_df)
-        wins = len(dir_df[dir_df["pnl"] > 0])
-        losses = len(dir_df[dir_df["pnl"] < 0])
-        pnl = float(dir_df["pnl"].sum())
-        avg = float(dir_df["pnl"].mean())
-        wr = (wins / count * 100.0) if count else 0.0
-        return {
-            f"{direction_name}_trades": int(count),
-            f"{direction_name}_pnl": round(pnl, 6),
-            f"{direction_name}_avg_pnl": round(avg, 6),
-            f"{direction_name}_win_rate": round(wr, 4),
-            f"{direction_name}_winners": int(wins),
-            f"{direction_name}_losers": int(losses),
-        }
+    def handle_starttag(self, tag, attrs):
+        if tag == "table":
+            self.in_table = True
+            self.rows = []
+            self.headers = []
+        elif tag == "thead":
+            self.in_thead = True
+        elif tag == "tbody":
+            self.in_tbody = True
+        elif tag == "tr" and self.in_table:
+            self.in_row = True
+            self.current_row = []
+        elif tag == "th" and self.in_row:
+            self.in_cell = True
+            self.is_header_cell = True
+        elif tag == "td" and self.in_row:
+            self.in_cell = True
+            self.is_header_cell = False
+        elif tag == "h2":
+            self.in_h2 = True
+            self.h2_text = ""
 
-    long_stats = calc_direction_stats(trades_df, "long")
-    short_stats = calc_direction_stats(trades_df, "short")
+    def handle_endtag(self, tag):
+        if tag == "table":
+            self.in_table = False
+            if self.headers or self.rows:
+                self.tables.append({
+                    "name": self.current_table_name,
+                    "headers": self.headers,
+                    "rows": self.rows
+                })
+            self.rows = []
+            self.headers = []
+        elif tag == "thead":
+            self.in_thead = False
+        elif tag == "tbody":
+            self.in_tbody = False
+        elif tag == "tr":
+            self.in_row = False
+            if self.current_row:
+                if self.in_thead:
+                    self.headers = self.current_row
+                else:
+                    self.rows.append(self.current_row)
+            self.current_row = []
+        elif tag in ("th", "td"):
+            self.in_cell = False
+            self.is_header_cell = False
+        elif tag == "h2":
+            self.in_h2 = False
+            self.current_table_name = self.h2_text.strip()
 
-    symbol_stats = calc_symbol_stats(trades_df)
-
-    return {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-        "start": start_ts.isoformat(),
-        "end": end_ts.isoformat(),
-        "closed_trades": int(total_trades),
-        "open_positions": 0,
-        "closed_pnl": round(pnl_sum, 6),
-        "avg_trade_pnl": round(avg_pnl, 6),
-        "win_rate_pct": round(win_rate, 4),
-        "winners": int(winners),
-        "losers": int(losers),
-        "open_equity": 0.0,
-        "final_capital": round(final_capital, 6),
-        **long_stats,
-        **short_stats,
-        "long_open": 0,
-        "long_open_equity": 0.0,
-        "short_open": 0,
-        "short_open_equity": 0.0,
-        "symbol_stats": symbol_stats,
-    }
+    def handle_data(self, data):
+        if self.in_cell:
+            self.current_row.append(data.strip())
+        elif self.in_h2:
+            self.h2_text += data
 
 
-def generate_html(summary, trades_df, path):
-    """Generate HTML summary."""
-    html_parts = [
-        "<html><head><meta charset='utf-8'>",
-        "<title>Paper Trading Simulation Summary</title>",
-        "<style>body{font-family:Arial,sans-serif;margin:20px;}table{border-collapse:collapse;margin-top:12px;width:auto;}th,td{border:1px solid #ccc;padding:6px 10px;text-align:right;}th{text-align:center;background:#f0f0f0;font-weight:bold;}td:first-child{text-align:left;}h1{margin-bottom:10px;}h2{margin-top:30px;margin-bottom:10px;}.stats-container{display:flex;gap:20px;flex-wrap:wrap;}</style>",
-        "</head><body>",
-        f"<h1>Simulation Summary {summary['start']} → {summary['end']}</h1>",
-        "<h2>Overall Statistics</h2>",
-        "<table>",
-        "<tr><th>Metric</th><th>Value</th></tr>",
-        f"<tr><td>Closed trades</td><td>{summary['closed_trades']}</td></tr>",
-        f"<tr><td>Open positions</td><td>{summary['open_positions']}</td></tr>",
-        f"<tr><td>Closed PnL (USDT)</td><td>{summary['closed_pnl']:.2f}</td></tr>",
-        f"<tr><td>Avg trade PnL (USDT)</td><td>{summary['avg_trade_pnl']:.2f}</td></tr>",
-        f"<tr><td>Win rate (%)</td><td>{summary['win_rate_pct']:.2f}</td></tr>",
-        f"<tr><td>Winners</td><td>{summary['winners']}</td></tr>",
-        f"<tr><td>Losers</td><td>{summary['losers']}</td></tr>",
-        f"<tr><td>Final capital (USDT)</td><td>{summary['final_capital']:.2f}</td></tr>",
-        "</table>",
-        "<h2>Statistics by Direction</h2>",
-        "<div class='stats-container'>",
-        "<table>",
-        "<tr><th colspan='2'>Long Statistics</th></tr>",
-        f"<tr><td>Closed trades</td><td>{summary.get('long_trades', 0)}</td></tr>",
-        f"<tr><td>PnL (USDT)</td><td>{summary.get('long_pnl', 0):.2f}</td></tr>",
-        f"<tr><td>Avg PnL (USDT)</td><td>{summary.get('long_avg_pnl', 0):.2f}</td></tr>",
-        f"<tr><td>Win rate (%)</td><td>{summary.get('long_win_rate', 0):.2f}</td></tr>",
-        f"<tr><td>Winners</td><td>{summary.get('long_winners', 0)}</td></tr>",
-        f"<tr><td>Losers</td><td>{summary.get('long_losers', 0)}</td></tr>",
-        "</table>",
-        "<table>",
-        "<tr><th colspan='2'>Short Statistics</th></tr>",
-        f"<tr><td>Closed trades</td><td>{summary.get('short_trades', 0)}</td></tr>",
-        f"<tr><td>PnL (USDT)</td><td>{summary.get('short_pnl', 0):.2f}</td></tr>",
-        f"<tr><td>Avg PnL (USDT)</td><td>{summary.get('short_avg_pnl', 0):.2f}</td></tr>",
-        f"<tr><td>Win rate (%)</td><td>{summary.get('short_win_rate', 0):.2f}</td></tr>",
-        f"<tr><td>Winners</td><td>{summary.get('short_winners', 0)}</td></tr>",
-        f"<tr><td>Losers</td><td>{summary.get('short_losers', 0)}</td></tr>",
-        "</table>",
-        "</div>",
-    ]
+def parse_number(s: str) -> float:
+    """Parse number from string."""
+    if not s or s == "-":
+        return 0.0
+    s = re.sub(r"<[^>]+>", "", s)
+    s = s.replace("USDT", "").replace("$", "").strip()
+    if "," in s and "." in s:
+        last_comma = s.rfind(",")
+        last_dot = s.rfind(".")
+        if last_comma > last_dot:
+            s = s.replace(".", "").replace(",", ".")
+        else:
+            s = s.replace(",", "")
+    elif "," in s:
+        s = s.replace(",", ".")
+    try:
+        return float(s)
+    except:
+        return 0.0
 
-    symbol_stats = summary.get("symbol_stats", [])
-    if symbol_stats:
-        html_parts.append("<h2>Statistics by Symbol</h2>")
-        html_parts.append("<table>")
-        html_parts.append("<tr><th>Symbol</th><th>Trades</th><th>Win</th><th>Loss</th><th>Win%</th><th>Total PnL</th><th>Avg PnL</th><th>Best</th><th>Worst</th><th>Max DD</th><th>PF</th><th>Long</th><th>Short</th><th>Long PnL</th><th>Short PnL</th></tr>")
-        for ss in symbol_stats:
-            pnl_color = "green" if ss["total_pnl"] >= 0 else "red"
-            html_parts.append(
-                f"<tr>"
-                f"<td>{ss['symbol']}</td>"
-                f"<td>{ss['trades']}</td>"
-                f"<td>{ss['winners']}</td>"
-                f"<td>{ss['losers']}</td>"
-                f"<td>{ss['win_rate']:.1f}%</td>"
-                f"<td style='color:{pnl_color}'>{ss['total_pnl']:.2f}</td>"
-                f"<td>{ss['avg_pnl']:.2f}</td>"
-                f"<td style='color:green'>{ss['best_trade']:.2f}</td>"
-                f"<td style='color:red'>{ss['worst_trade']:.2f}</td>"
-                f"<td style='color:orange'>{ss['max_drawdown']:.2f}</td>"
-                f"<td>{ss['profit_factor']}</td>"
-                f"<td>{ss['long_trades']}</td>"
-                f"<td>{ss['short_trades']}</td>"
-                f"<td>{ss['long_pnl']:.2f}</td>"
-                f"<td>{ss['short_pnl']:.2f}</td>"
-                f"</tr>"
-            )
-        html_parts.append("</table>")
 
-    html_parts.append("</body></html>")
+def fmt_de(value, decimals=2):
+    """Format number in German style."""
+    formatted = f"{value:,.{decimals}f}"
+    return formatted.replace(",", "X").replace(".", ",").replace("X", ".")
 
-    with open(path, "w", encoding="utf-8") as f:
-        f.write("\n".join(html_parts))
-    print(f"[Summary] HTML written to {path}")
+
+def parse_datetime(s):
+    """Parse datetime string."""
+    try:
+        return datetime.fromisoformat(s.replace("Z", "+00:00"))
+    except:
+        try:
+            return datetime.strptime(s[:19], "%Y-%m-%d %H:%M:%S")
+        except:
+            return datetime.min
 
 
 def main():
-    csv_path = "simulation_logs/full_2025_trades.csv"
-    if not os.path.exists(csv_path):
-        print(f"[Error] {csv_path} not found")
-        return
+    print(f"Reading {INPUT_HTML}...")
+    html_content = INPUT_HTML.read_text(encoding="utf-8")
 
-    print(f"[Summary] Loading trades from {csv_path}")
-    df = pd.read_csv(csv_path, quotechar='"')
+    parser = PandasTableParser()
+    parser.feed(html_content)
 
-    # Normalize column names
-    col_map = {
-        "exit_time": ["exit_time", "ExitZeit", "Exit_Time"],
-        "entry_time": ["entry_time", "Zeit", "Entry_Time"],
-        "pnl": ["pnl", "PnL", "Pnl", "profit"],
-        "symbol": ["symbol", "Symbol"],
-        "direction": ["direction", "Direction"],
+    # Extract Long Trades
+    trades = []
+    open_positions = []
+
+    for table in parser.tables:
+        name = table["name"].lower()
+        headers = [h.lower() for h in table.get("headers", [])]
+        rows = table["rows"]
+
+        if "long trades" in name and "open" not in name:
+            for row in rows:
+                if len(row) < 5:
+                    continue
+                data = {headers[i]: row[i] for i in range(min(len(headers), len(row)))}
+                symbol = data.get("symbol", "")
+                if not symbol or "symbol" in symbol.lower():
+                    continue
+
+                entry_time = data.get("entry_time", "")
+                entry_dt = parse_datetime(entry_time)
+
+                trades.append({
+                    "symbol": symbol,
+                    "direction": data.get("direction", "Long"),
+                    "indicator": data.get("indicator", ""),
+                    "htf": data.get("htf", ""),
+                    "entry_time": entry_time,
+                    "entry_price": parse_number(data.get("entry_price", "0")),
+                    "exit_time": data.get("exit_time", ""),
+                    "exit_price": parse_number(data.get("exit_price", "0")),
+                    "reason": data.get("reason", ""),
+                    "entry_dt": entry_dt,
+                })
+
+        elif "open" in name.lower():
+            for row in rows:
+                if len(row) < 5:
+                    continue
+                data = {headers[i]: row[i] for i in range(min(len(headers), len(row)))}
+                symbol = data.get("symbol", "")
+                if not symbol or "symbol" in symbol.lower():
+                    continue
+
+                entry_time = data.get("entry_time", "")
+                entry_dt = parse_datetime(entry_time)
+
+                open_positions.append({
+                    "symbol": symbol,
+                    "direction": data.get("direction", "Long"),
+                    "indicator": data.get("indicator", ""),
+                    "htf": data.get("htf", ""),
+                    "entry_time": entry_time,
+                    "entry_price": parse_number(data.get("entry_price", "0")),
+                    "last_price": parse_number(data.get("last_price", data.get("exit_price", "0"))),
+                    "bars_held": int(parse_number(data.get("bars_held", data.get("bars", "0")))),
+                    "entry_dt": entry_dt,
+                })
+
+    print(f"Found {len(trades)} Long trades, {len(open_positions)} open positions")
+
+    # Filter by start date
+    start_dt = datetime.fromisoformat(f"{START_DATE}T00:00:00+01:00")
+    trades = [t for t in trades if t["entry_dt"] >= start_dt]
+    open_positions = [p for p in open_positions if p["entry_dt"] >= start_dt]
+
+    print(f"After filtering from {START_DATE}: {len(trades)} trades, {len(open_positions)} open positions")
+
+    # Sort chronologically for compound growth
+    trades.sort(key=lambda t: t["entry_dt"])
+
+    # Recalculate stakes with compound growth
+    capital = START_CAPITAL
+    for t in trades:
+        stake = capital / MAX_POSITIONS
+        entry_price = t["entry_price"]
+        exit_price = t["exit_price"]
+
+        if entry_price > 0:
+            pnl_pct = (exit_price - entry_price) / entry_price
+            pnl = pnl_pct * stake
+        else:
+            pnl_pct = 0
+            pnl = 0
+
+        t["stake"] = stake
+        t["pnl"] = pnl
+        t["pnl_pct"] = pnl_pct * 100
+        capital += pnl
+
+    final_capital = capital
+
+    # Recalculate open positions
+    open_stake = final_capital / MAX_POSITIONS
+    for p in open_positions:
+        entry_price = p["entry_price"]
+        last_price = p["last_price"]
+
+        if entry_price > 0:
+            pnl_pct = (last_price - entry_price) / entry_price
+            unrealized_pnl = pnl_pct * open_stake
+        else:
+            pnl_pct = 0
+            unrealized_pnl = 0
+
+        p["stake"] = open_stake
+        p["unrealized_pnl"] = unrealized_pnl
+        p["unrealized_pct"] = pnl_pct * 100
+        p["status"] = "Gewinn" if unrealized_pnl > 0 else "Verlust" if unrealized_pnl < 0 else "Flat"
+
+    # Sort trades by entry time descending for display
+    trades.sort(key=lambda t: t["entry_dt"], reverse=True)
+    open_positions.sort(key=lambda t: t["entry_dt"], reverse=True)
+
+    # Calculate statistics
+    total_pnl = sum(t["pnl"] for t in trades)
+    winners = [t for t in trades if t["pnl"] > 0]
+    losers = [t for t in trades if t["pnl"] < 0]
+    win_rate = len(winners) / len(trades) * 100 if trades else 0
+    avg_pnl = total_pnl / len(trades) if trades else 0
+    open_equity = sum(p["unrealized_pnl"] for p in open_positions)
+
+    # Calculate by symbol
+    symbol_stats = {}
+    for t in trades:
+        sym = t["symbol"]
+        if sym not in symbol_stats:
+            symbol_stats[sym] = {"trades": [], "pnl": 0}
+        symbol_stats[sym]["trades"].append(t)
+        symbol_stats[sym]["pnl"] += t["pnl"]
+
+    # Build symbol stats list
+    symbol_list = []
+    for sym, data in sorted(symbol_stats.items(), key=lambda x: -x[1]["pnl"]):
+        sym_trades = data["trades"]
+        sym_wins = [t for t in sym_trades if t["pnl"] > 0]
+        sym_losses = [t for t in sym_trades if t["pnl"] < 0]
+        sym_pnl = data["pnl"]
+        best = max(t["pnl"] for t in sym_trades) if sym_trades else 0
+        worst = min(t["pnl"] for t in sym_trades) if sym_trades else 0
+
+        # Max drawdown calculation
+        running = 0
+        peak = 0
+        max_dd = 0
+        for t in sorted(sym_trades, key=lambda x: x["entry_dt"]):
+            running += t["pnl"]
+            if running > peak:
+                peak = running
+            dd = peak - running
+            if dd > max_dd:
+                max_dd = dd
+
+        # Profit factor
+        gross_profit = sum(t["pnl"] for t in sym_wins)
+        gross_loss = abs(sum(t["pnl"] for t in sym_losses))
+        pf = gross_profit / gross_loss if gross_loss > 0 else 0
+
+        symbol_list.append({
+            "symbol": sym,
+            "trades": len(sym_trades),
+            "wins": len(sym_wins),
+            "losses": len(sym_losses),
+            "win_rate": len(sym_wins) / len(sym_trades) * 100 if sym_trades else 0,
+            "pnl": sym_pnl,
+            "avg_pnl": sym_pnl / len(sym_trades) if sym_trades else 0,
+            "best": best,
+            "worst": worst,
+            "max_dd": max_dd,
+            "pf": pf,
+        })
+
+    # Get time range
+    if trades:
+        start_ts = min(t["entry_dt"] for t in trades)
+        end_ts = max(parse_datetime(t["exit_time"]) for t in trades)
+    else:
+        start_ts = start_dt
+        end_ts = datetime.now()
+
+    # Generate HTML
+    html = f"""<html><head><meta charset='utf-8'><title>Paper Trading Simulation Summary</title><style>body{{font-family:Arial,sans-serif;margin:20px;}}table{{border-collapse:collapse;margin-top:12px;width:auto;}}th,td{{border:1px solid #ccc;padding:6px 10px;text-align:right;}}th{{text-align:center;background:#f0f0f0;font-weight:bold;}}td:first-child{{text-align:left;}}h1{{margin-bottom:10px;}}h2{{margin-top:30px;margin-bottom:10px;}}.stats-container{{display:flex;gap:20px;flex-wrap:wrap;}}</style></head><body><h1>Simulation Summary {start_ts.isoformat()} → {end_ts.isoformat()}</h1><h2>Statistics</h2><table><tr><th>Metric</th><th>Overall</th><th>Long</th><th>Short</th></tr><tr><td>Closed trades</td><td>{len(trades)}</td><td>{len(trades)}</td><td>0</td></tr><tr><td>Open positions</td><td>{len(open_positions)}</td><td>{len(open_positions)}</td><td>0</td></tr><tr><td>PnL (USDT)</td><td>{fmt_de(total_pnl)}</td><td>{fmt_de(total_pnl)}</td><td>0,00</td></tr><tr><td>Avg PnL (USDT)</td><td>{fmt_de(avg_pnl)}</td><td>{fmt_de(avg_pnl)}</td><td>0,00</td></tr><tr><td>Win rate (%)</td><td>{fmt_de(win_rate)}</td><td>{fmt_de(win_rate)}</td><td>0,00</td></tr><tr><td>Winners</td><td>{len(winners)}</td><td>{len(winners)}</td><td>0</td></tr><tr><td>Losers</td><td>{len(losers)}</td><td>{len(losers)}</td><td>0</td></tr><tr><td>Open equity (USDT)</td><td>{fmt_de(open_equity)}</td><td>{fmt_de(open_equity)}</td><td>0,00</td></tr><tr style='font-weight:bold;'><td>Final capital (USDT)</td><td>{fmt_de(final_capital + open_equity)}</td><td>-</td><td>-</td></tr></table>"""
+
+    # Symbol stats table
+    html += """<h2>Statistics by Symbol</h2><table><tr><th>Symbol</th><th>Trades</th><th>Win</th><th>Loss</th><th>Win%</th><th>Total PnL</th><th>Avg PnL</th><th>Best</th><th>Worst</th><th>Max DD</th><th>PF</th><th>Long</th><th>Short</th><th>Long PnL</th><th>Short PnL</th></tr>"""
+    for s in symbol_list:
+        html += f"""<tr><td>{s['symbol']}</td><td>{s['trades']}</td><td>{s['wins']}</td><td>{s['losses']}</td><td>{s['win_rate']:.1f}%</td><td style='color:{'green' if s['pnl'] >= 0 else 'red'}'>{fmt_de(s['pnl'])}</td><td>{fmt_de(s['avg_pnl'])}</td><td style='color:green'>{fmt_de(s['best'])}</td><td style='color:red'>{fmt_de(s['worst'])}</td><td style='color:orange'>{fmt_de(s['max_dd'])}</td><td>{s['pf']:.2f}</td><td>{s['trades']}</td><td>0</td><td>{fmt_de(s['pnl'])}</td><td>0,00</td></tr>"""
+    html += "</table>"
+
+    # Open positions table
+    if open_positions:
+        html += f"""<h2>Long Open Positions ({len(open_positions)} positions, Equity: {fmt_de(open_equity)} USDT)</h2><table border="1" class="dataframe"><thead><tr style="text-align: right;"><th>symbol</th><th>direction</th><th>indicator</th><th>htf</th><th>entry_time</th><th>entry_price</th><th>last_price</th><th>stake</th><th>bars_held</th><th>unrealized_pnl</th><th>status</th></tr></thead><tbody>"""
+        for p in open_positions:
+            html += f"""<tr><td>{p['symbol']}</td><td>{p['direction']}</td><td>{p['indicator']}</td><td>{p['htf']}</td><td>{p['entry_time']}</td><td>{p['entry_price']:.8f}</td><td>{p['last_price']:.8f}</td><td>{fmt_de(p['stake'], 8)}</td><td>{p['bars_held']}</td><td>{fmt_de(p['unrealized_pnl'], 8)}</td><td>{p['status']}</td></tr>"""
+        html += "</tbody></table>"
+
+    # Trades table
+    html += f"""<h2>Long Trades ({len(trades)} trades, PnL: {fmt_de(total_pnl)} USDT)</h2><table border="1" class="dataframe"><thead><tr style="text-align: right;"><th>symbol</th><th>direction</th><th>indicator</th><th>htf</th><th>entry_time</th><th>entry_price</th><th>exit_time</th><th>exit_price</th><th>stake</th><th>pnl</th><th>reason</th></tr></thead><tbody>"""
+    for t in trades:
+        html += f"""<tr><td>{t['symbol']}</td><td>{t['direction']}</td><td>{t['indicator']}</td><td>{t['htf']}</td><td>{t['entry_time']}</td><td>{t['entry_price']:.8f}</td><td>{t['exit_time']}</td><td>{t['exit_price']:.8f}</td><td>{fmt_de(t['stake'], 8)}</td><td>{fmt_de(t['pnl'], 8)}</td><td>{t['reason']}</td></tr>"""
+    html += "</tbody></table></body></html>"
+
+    # Write HTML
+    OUTPUT_HTML.write_text(html, encoding="utf-8")
+    print(f"Saved {OUTPUT_HTML}")
+
+    # Build JSON
+    trades_json = []
+    for t in trades:
+        trades_json.append({
+            "symbol": t["symbol"],
+            "direction": t["direction"].lower(),
+            "indicator": t["indicator"],
+            "htf": t["htf"],
+            "entry_time": t["entry_time"],
+            "entry_price": t["entry_price"],
+            "exit_time": t["exit_time"],
+            "exit_price": t["exit_price"],
+            "stake": t["stake"],
+            "pnl": t["pnl"],
+            "reason": t["reason"],
+        })
+
+    open_json = []
+    for p in open_positions:
+        open_json.append({
+            "symbol": p["symbol"],
+            "direction": p["direction"].lower(),
+            "indicator": p["indicator"],
+            "htf": p["htf"],
+            "entry_time": p["entry_time"],
+            "entry_price": p["entry_price"],
+            "last_price": p["last_price"],
+            "stake": p["stake"],
+            "bars_held": p["bars_held"],
+            "unrealized_pnl": p["unrealized_pnl"],
+            "status": p["status"],
+        })
+
+    summary_json = {
+        "generated_at": datetime.now().isoformat(),
+        "start": start_ts.isoformat(),
+        "end": end_ts.isoformat(),
+        "closed_trades": len(trades),
+        "open_positions": len(open_positions),
+        "closed_pnl": round(total_pnl, 6),
+        "avg_trade_pnl": round(avg_pnl, 6),
+        "win_rate_pct": round(win_rate, 4),
+        "winners": len(winners),
+        "losers": len(losers),
+        "open_equity": round(open_equity, 6),
+        "final_capital": round(final_capital + open_equity, 6),
+        "long_trades": len(trades),
+        "long_pnl": round(total_pnl, 6),
+        "long_avg_pnl": round(avg_pnl, 6),
+        "long_win_rate": round(win_rate, 4),
+        "long_winners": len(winners),
+        "long_losers": len(losers),
+        "short_trades": 0,
+        "short_pnl": 0.0,
+        "short_avg_pnl": 0.0,
+        "short_win_rate": 0.0,
+        "short_winners": 0,
+        "short_losers": 0,
+        "long_open": len(open_positions),
+        "long_open_equity": round(open_equity, 6),
+        "short_open": 0,
+        "short_open_equity": 0.0,
+        "symbol_stats": symbol_list,
+        "open_positions_data": open_json,
+        "trades": trades_json,
     }
 
-    for target, sources in col_map.items():
-        for src in sources:
-            if src in df.columns and target not in df.columns:
-                df[target] = df[src]
-                break
+    with open(OUTPUT_JSON, "w", encoding="utf-8") as f:
+        json.dump(summary_json, f, indent=2, default=str)
+    print(f"Saved {OUTPUT_JSON}")
 
-    # Parse dates
-    df["exit_time"] = pd.to_datetime(df["exit_time"], errors="coerce", utc=True)
-    df["entry_time"] = pd.to_datetime(df["entry_time"], errors="coerce", utc=True)
-    df = df.dropna(subset=["exit_time", "pnl"])
-    df = df.sort_values("exit_time").reset_index(drop=True)
-
-    print(f"[Summary] Loaded {len(df)} trades")
-    print(f"[Summary] Columns: {list(df.columns)}")
-
-    # Time range
-    start_ts = df["exit_time"].min()
-    end_ts = df["exit_time"].max()
-
-    # Build summary
-    summary = build_summary(df, start_ts, end_ts)
-
-    # Write outputs
-    os.makedirs("report_html", exist_ok=True)
-
-    html_path = "report_html/trading_summary.html"
-    generate_html(summary, df, html_path)
-
-    json_path = "report_html/trading_summary.json"
-    with open(json_path, "w", encoding="utf-8") as f:
-        json.dump(summary, f, ensure_ascii=False, indent=2)
-    print(f"[Summary] JSON written to {json_path}")
-
-    # Print summary
-    print("\n" + "="*60)
-    print("TRADING SUMMARY")
-    print("="*60)
-    print(f"Period: {summary['start'][:10]} → {summary['end'][:10]}")
-    print(f"Total Trades: {summary['closed_trades']}")
-    print(f"Total PnL: {summary['closed_pnl']:,.2f} USDT")
-    print(f"Win Rate: {summary['win_rate_pct']:.1f}%")
-    print(f"Final Capital: {summary['final_capital']:,.2f} USDT")
-    print("-"*60)
-    print(f"Long: {summary.get('long_trades', 0)} trades, PnL: {summary.get('long_pnl', 0):,.2f}")
-    print(f"Short: {summary.get('short_trades', 0)} trades, PnL: {summary.get('short_pnl', 0):,.2f}")
-    print("="*60)
+    print(f"\nSummary:")
+    print(f"  Trades: {len(trades)}")
+    print(f"  PnL: {fmt_de(total_pnl)} USDT")
+    print(f"  Winners: {len(winners)}")
+    print(f"  Losers: {len(losers)}")
+    print(f"  Win Rate: {win_rate:.2f}%")
+    print(f"  Final Capital: {fmt_de(final_capital + open_equity)} USDT")
 
 
 if __name__ == "__main__":
