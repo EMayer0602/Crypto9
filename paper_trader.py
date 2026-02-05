@@ -257,7 +257,24 @@ LONG_STAKE = 1650.0  # 16500 / 10 positions
 SHORT_STAKE = 200.0  # 1000 / 5 positions
 DEFAULT_DIRECTION_CAPITAL = 2_800.0
 BASE_BAR_MINUTES = st.timeframe_to_minutes(st.TIMEFRAME)
-DEFAULT_SYMBOL_ALLOWLIST = [sym.strip() for sym in st.SYMBOLS if sym and sym.strip()]
+
+# Trading symbols - USDC pairs (except LUNC which only has USDT)
+TRADING_SYMBOLS = [
+    "BTC/USDC",
+    "ETH/USDC",
+    "SOL/USDC",
+    "XRP/USDC",
+    "LINK/USDC",
+    "SUI/USDC",
+    "ZEC/USDC",
+    "TNSR/USDC",
+    "ADA/USDC",
+    "ICP/USDC",
+    "BNB/USDC",
+    "TAO/USDC",
+    "LUNC/USDT",  # nur USDT verfügbar
+]
+DEFAULT_SYMBOL_ALLOWLIST = [sym.strip() for sym in TRADING_SYMBOLS if sym and sym.strip()]
 # Dynamic stake calculation uses STAKE_DIVISOR (see determine_position_size)
 DEFAULT_ALLOWED_DIRECTIONS = ["long"]  # Long only mode
 DEFAULT_USE_TESTNET = False  # Testnet should be opt-in with --testnet flag
@@ -3455,7 +3472,7 @@ def run_signal_cycle(
 
 def detect_atr_spikes(symbols: Sequence[str], atr_mult: float, use_testnet: bool = False) -> List[str]:
     triggered: List[str] = []
-    target_symbols = list(symbols) if symbols else st.get_symbols(use_testnet)
+    target_symbols = list(symbols) if symbols else TRADING_SYMBOLS
     for symbol in target_symbols:
         try:
             df = st.fetch_data(symbol, st.TIMEFRAME, max(st.ATR_WINDOW + 5, 50))
@@ -3685,8 +3702,8 @@ def run_simulation(
     if refresh_params:
         st.run_overall_best_params()
     st.configure_exchange(use_testnet=use_testnet)
-    # Use testnet symbols (USDT pairs) when in testnet mode
-    default_symbols = st.get_symbols(use_testnet)
+    # Always use USDC symbols (defined in TRADING_SYMBOLS)
+    default_symbols = TRADING_SYMBOLS
     raw_symbols = allowed_symbols if allowed_symbols else default_symbols
     config_df = ensure_config(raw_symbols or default_symbols)
     cfg_lookup = load_config_lookup(config_df)
@@ -3858,8 +3875,8 @@ def main(
         st.configure_exchange(use_testnet=use_testnet)
     # Clear data cache to get fresh synthetic bars for current period
     st.clear_data_cache()
-    # Use testnet symbols (USDT pairs) when in testnet mode
-    default_symbols = st.get_symbols(use_testnet)
+    # Always use USDC symbols (defined in TRADING_SYMBOLS)
+    default_symbols = TRADING_SYMBOLS
     raw_symbols = allowed_symbols if allowed_symbols else default_symbols
     print(f"[DEBUG] use_testnet={use_testnet}, raw_symbols={raw_symbols}")
     config_df = ensure_config(raw_symbols or default_symbols)
