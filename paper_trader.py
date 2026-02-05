@@ -3366,7 +3366,7 @@ def write_live_reports(final_state: Dict, closed_trades: List[TradeResult]) -> N
     
     # Use ALL historical trades for summary and charts
     open_positions = final_state.get("positions", [])
-    write_open_positions_report(open_positions, SIMULATION_OPEN_POSITIONS_FILE, SIMULATION_OPEN_POSITIONS_JSON)
+    # Removed: write_open_positions_report - open positions are in trading_summary.json
     open_df = open_positions_to_dataframe(open_positions)
     start_ts, end_ts = _derive_summary_window(all_trades_df)
     summary = build_summary_payload(all_trades_df, open_df, final_state, start_ts, end_ts)
@@ -3447,9 +3447,8 @@ def run_signal_cycle(
             reset_state=False,
             clear_outputs=False,
         )
-        # Write simulated open positions to file
+        # Removed: write_open_positions_report - using trading_summary.json only
         sim_positions = sim_state.get("positions", [])
-        write_open_positions_report(sim_positions, SIMULATION_OPEN_POSITIONS_FILE, SIMULATION_OPEN_POSITIONS_JSON)
         print(f"[{_now_str()}] Simulation complete: {len(trades)} trades, {len(sim_positions)} open positions")
     except Exception as e:
         print(f"[{_now_str()}] Simulation failed: {e}")
@@ -4382,9 +4381,7 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
         log_json_path = args.sim_json or SIMULATION_LOG_JSON
         write_closed_trades_report(trades_df, log_path, log_json_path)
         print(f"[Simulation] Final capital: {final_state['total_capital']:.2f} USDT")
-        open_path = args.open_log or SIMULATION_OPEN_POSITIONS_FILE
-        open_json_path = args.open_json or SIMULATION_OPEN_POSITIONS_JSON
-        write_open_positions_report(open_positions, open_path, open_json_path)
+        # Removed: write_open_positions_report - open positions are in trading_summary.json
 
         # Auto-sync simulation positions to paper trading state
         paper_state = load_state()
