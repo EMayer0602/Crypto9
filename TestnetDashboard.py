@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generate HTML dashboard from simulation trades.
 
-This dashboard reads from report_html/trading_summary.html to show
+This dashboard reads from report_html/trading_summary.json to show
 all trades with recalculated stakes from initial capital.
 """
 
@@ -18,7 +18,8 @@ MAX_POSITIONS = 10
 START_DATE = "2025-12-01"  # Trades before this date are ignored
 
 # Fixed paths
-SOURCE_HTML = Path("report_html/trading_summary.html")
+SOURCE_JSON = Path("report_html/trading_summary.json")
+SOURCE_HTML = Path("report_html/trading_summary.html")  # Fallback only
 OPEN_POSITIONS_JSON = Path("paper_trading_open_positions.json")
 OUTPUT_DIR = Path("report_testnet")
 
@@ -259,6 +260,72 @@ def load_json(path: Path) -> list | dict:
         return []
 
 
+def parse_trades_from_json(json_path: Path) -> tuple[list, list]:
+    """Parse closed trades and open positions from trading_summary.json."""
+    if not json_path.exists():
+        print(f"Warning: {json_path} not found, falling back to HTML")
+        return [], []
+
+    data = load_json(json_path)
+    if not isinstance(data, dict):
+        print(f"Warning: Invalid JSON format in {json_path}")
+        return [], []
+
+    # Get trades from JSON
+    trades = data.get("trades", [])
+    open_positions = data.get("open_positions_data", [])
+
+    # Filter to Long only
+    long_trades = []
+    for t in trades:
+        direction = str(t.get("direction", "long")).lower()
+        if direction != "long":
+            continue
+
+        # Calculate PnL percentage from prices
+        entry_price = float(t.get("entry_price", 0) or 0)
+        exit_price = float(t.get("exit_price", 0) or 0)
+        if entry_price > 0:
+            pnl_pct = (exit_price - entry_price) / entry_price * 100
+        else:
+            pnl_pct = 0
+
+        long_trades.append({
+            "symbol": t.get("symbol", ""),
+            "indicator": t.get("indicator", ""),
+            "htf": t.get("htf", ""),
+            "entry_time": t.get("entry_time", ""),
+            "exit_time": t.get("exit_time", ""),
+            "entry_price": entry_price,
+            "exit_price": exit_price,
+            "original_stake": float(t.get("stake", 0) or 0),
+            "original_pnl": float(t.get("pnl", 0) or 0),
+            "original_pnl_pct": pnl_pct,
+            "reason": t.get("reason", ""),
+            "direction": "long",
+        })
+
+    # Parse open positions
+    parsed_open = []
+    for p in open_positions:
+        direction = str(p.get("direction", "long")).lower()
+        if direction != "long":
+            continue
+
+        parsed_open.append({
+            "symbol": p.get("symbol", ""),
+            "direction": direction,
+            "indicator": p.get("indicator", ""),
+            "htf": p.get("htf", ""),
+            "entry_time": p.get("entry_time", ""),
+            "entry_price": float(p.get("entry_price", 0) or 0),
+            "last_price": float(p.get("last_price", 0) or 0),
+            "bars_held": int(float(p.get("bars_held", 0) or 0)),
+        })
+
+    return long_trades, parsed_open
+
+
 def fmt_de(value: float) -> str:
     """Format number in German style."""
     if abs(value) >= 1000:
@@ -266,23 +333,26 @@ def fmt_de(value: float) -> str:
     return f"{value:.2f}".replace(".", ",")
 
 
-def generate_dashboard(start_date: str = None, output_dir: Path = None):
-    """Generate HTML dashboard from simulation HTML file."""
-    print("Loading simulation data from HTML...")
+def generate_dashboard(start_date: str = None, output_dir: Path = None, german: bool = False):
+    """Generate HTML dashboard from simulation JSON file."""
+    print("Loading simulation data from JSON...")
 
     if output_dir is None:
         output_dir = OUTPUT_DIR
 
-    # Parse trades from HTML
-    closed_trades, html_open_positions = parse_trades_from_html(SOURCE_HTML)
+    # Try JSON first (primary source), fall back to HTML
+    closed_trades, json_open_positions = parse_trades_from_json(SOURCE_JSON)
+    if not closed_trades:
+        print("Falling back to HTML parsing...")
+        closed_trades, json_open_positions = parse_trades_from_html(SOURCE_HTML)
 
-    # Load open positions from JSON
-    json_open_positions = load_json(OPEN_POSITIONS_JSON)
-    if not isinstance(json_open_positions, list):
-        json_open_positions = []
-
-    # Use JSON open positions if available, otherwise HTML
-    open_positions = json_open_positions if json_open_positions else html_open_positions
+    # Load open positions from separate JSON file (paper_trading_open_positions.json)
+    open_positions_file = load_json(OPEN_POSITIONS_JSON)
+    if isinstance(open_positions_file, list) and open_positions_file:
+        # Filter to Long only
+        open_positions = [p for p in open_positions_file if str(p.get("direction", "long")).lower() == "long"]
+    else:
+        open_positions = json_open_positions
 
     print(f"Loaded {len(closed_trades)} closed trades, {len(open_positions)} open positions")
 
@@ -536,7 +606,8 @@ def generate_dashboard(start_date: str = None, output_dir: Path = None):
 
     # Write to file
     output_dir.mkdir(exist_ok=True)
-    output_path = output_dir / "dashboard.html"
+    filename = "dashboard_de.html" if german else "dashboard.html"
+    output_path = output_dir / filename
     output_path.write_text(html, encoding="utf-8")
     print(f"Dashboard saved to: {output_path}")
     return output_path
@@ -556,8 +627,11 @@ if __name__ == "__main__":
     output_dir = Path(args.output_dir)
 
     while True:
-        path = generate_dashboard(start_date=args.start, output_dir=output_dir)
-        print(f"\nOpen with: xdg-open {path}")
+        # Generate both English and German dashboards
+        path_en = generate_dashboard(start_date=args.start, output_dir=output_dir, german=False)
+        path_de = generate_dashboard(start_date=args.start, output_dir=output_dir, german=True)
+        print(f"\nOpen with: xdg-open {path_en}")
+        print(f"German:    xdg-open {path_de}")
 
         if not args.loop:
             break

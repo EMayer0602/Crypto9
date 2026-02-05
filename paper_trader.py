@@ -2313,12 +2313,47 @@ def build_summary_payload(
     symbol_stats = calc_symbol_stats(trades_df)
 
     # Convert trades DataFrame to list of dicts for JSON export
+    # Apply compound growth recalculation: start at 1650 (16500/10)
     trades_list = []
     if not trades_df.empty:
-        # Sort by entry_time descending (newest first) - matches Dashboard compound growth display
         trades_export = trades_df.copy()
+
+        # Sort chronologically (oldest first) for compound growth calculation
+        if "entry_time" in trades_export.columns:
+            trades_export = trades_export.sort_values("entry_time", ascending=True)
+
+        # Recalculate stakes with compound growth starting at 1650
+        capital = 16500.0
+        max_positions = 10
+        new_stakes = []
+        new_pnls = []
+
+        for idx, row in trades_export.iterrows():
+            stake = capital / max_positions
+            entry_price = float(row.get("entry_price", 0) or 0)
+            exit_price = float(row.get("exit_price", 0) or 0)
+            direction = str(row.get("direction", "long")).lower()
+
+            if entry_price > 0:
+                if direction == "long":
+                    pnl_pct = (exit_price - entry_price) / entry_price
+                else:
+                    pnl_pct = (entry_price - exit_price) / entry_price
+                pnl = pnl_pct * stake
+            else:
+                pnl = 0
+
+            new_stakes.append(stake)
+            new_pnls.append(pnl)
+            capital += pnl
+
+        trades_export["stake"] = new_stakes
+        trades_export["pnl"] = new_pnls
+
+        # Sort by entry_time descending (newest first) for display
         if "entry_time" in trades_export.columns:
             trades_export = trades_export.sort_values("entry_time", ascending=False)
+
         # Convert timestamps to ISO strings for JSON serialization
         for col in trades_export.columns:
             if pd.api.types.is_datetime64_any_dtype(trades_export[col]):
@@ -2515,8 +2550,40 @@ def generate_summary_html(
 
     # ===== CLOSED TRADES (after open positions) =====
     if not trades_df.empty:
+        # Recalculate stakes with compound growth starting at 1650 (16500/10)
+        trades_recalc = trades_df.copy()
+        if "entry_time" in trades_recalc.columns:
+            trades_recalc = trades_recalc.sort_values("entry_time", ascending=True)
+
+        capital = 16500.0
+        max_positions = 10
+        new_stakes = []
+        new_pnls = []
+
+        for idx, row in trades_recalc.iterrows():
+            stake = capital / max_positions
+            entry_price = float(row.get("entry_price", 0) or 0)
+            exit_price = float(row.get("exit_price", 0) or 0)
+            direction = str(row.get("direction", "long")).lower()
+
+            if entry_price > 0:
+                if direction == "long":
+                    pnl_pct = (exit_price - entry_price) / entry_price
+                else:
+                    pnl_pct = (entry_price - exit_price) / entry_price
+                pnl = pnl_pct * stake
+            else:
+                pnl = 0
+
+            new_stakes.append(stake)
+            new_pnls.append(pnl)
+            capital += pnl
+
+        trades_recalc["stake"] = new_stakes
+        trades_recalc["pnl"] = new_pnls
+
         # Prepare display DataFrame - ensure numeric columns are actually numeric
-        trades_display = trades_df.copy()
+        trades_display = trades_recalc.copy()
 
         # Remove rows where essential columns are NaN (filter out empty rows)
         if "symbol" in trades_display.columns:
