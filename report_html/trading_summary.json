@@ -2,15 +2,15 @@
   "generated_at": "2026-02-05T15:29:37.625718+00:00",
   "start": "2026-01-30T23:00:00+01:00",
   "end": "2026-02-05T16:29:26.128686+01:00",
-  "closed_trades": 2604,
-  "open_positions": 1,
-  "closed_pnl": 1157406.389149,
+  "closed_trades": 2605,
+  "open_positions": 0,
+  "closed_pnl": 1171717.8,
   "avg_trade_pnl": 444.4725,
   "win_rate_pct": 56.3364,
   "winners": 1467,
   "losers": 1133,
   "open_equity": 14391.953823,
-  "final_capital": 1185798.342972,
+  "final_capital": 1188217.7991487426,
   "long_trades": 2604,
   "long_pnl": 1157406.389149,
   "long_avg_pnl": 444.4725,
@@ -250,26 +250,7 @@
       "short_pnl": 0.0
     }
   ],
-  "open_positions_data": [
-    {
-      "symbol": "LUNC/USDT",
-      "direction": "long",
-      "indicator": "jma",
-      "htf": "12h",
-      "entry_time": "2026-01-30T15:00:00+01:00",
-      "entry_price": 3.673e-05,
-      "stake": 80541.63,
-      "param_a": 20.0,
-      "param_b": 0.0,
-      "atr_mult": null,
-      "min_hold_bars": 12,
-      "last_price": 4.333e-05,
-      "bars_held": 0,
-      "unrealized_pct": 17.968962700789536,
-      "unrealized_pnl": 14472.495453307916,
-      "status": "Gewinn"
-    }
-  ],
+  "open_positions_data": [],
   "trades": [
     {
       "symbol": "SOL/USDC",
@@ -34122,6 +34103,22 @@
       "stake": 1650.0,
       "pnl": 237.54987771914,
       "reason": "Time-based exit (4 bars, optimal=4)"
+    },
+    {
+      "Timestamp": "2026-02-06T23:34:40.337133+01:00",
+      "symbol": "LUNC/USDT",
+      "direction": "Long",
+      "indicator": "jma",
+      "htf": "12h",
+      "param_desc": "ParamA=20.0, ParamB=0.0",
+      "entry_time": "2026-01-30T15:00:00+01:00",
+      "entry_price": 3.673e-05,
+      "exit_time": "2026-02-01T15:00:00+01:00",
+      "exit_price": 4.333e-05,
+      "stake": 80541.63,
+      "fees": 161.08,
+      "pnl": 14311.41,
+      "reason": "Time-based exit (14 bars >= 4 optimal)"
     }
   ]
 }
