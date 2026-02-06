@@ -2431,6 +2431,7 @@ def generate_summary_html(
 
     html_parts = [
         "<html><head><meta charset='utf-8'>",
+        "<meta http-equiv='refresh' content='60'>",
         "<title>Paper Trading Simulation Summary</title>",
         "<style>body{font-family:Arial,sans-serif;margin:20px;}table{border-collapse:collapse;margin-top:12px;width:auto;}th,td{border:1px solid #ccc;padding:6px 10px;text-align:right;}th{text-align:center;background:#f0f0f0;font-weight:bold;}td:first-child{text-align:left;}h1{margin-bottom:10px;}h2{margin-top:30px;margin-bottom:10px;}.stats-container{display:flex;gap:20px;flex-wrap:wrap;}</style>",
         "</head><body>",

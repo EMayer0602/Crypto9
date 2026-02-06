@@ -519,6 +519,7 @@ def generate_dashboard(start_date: str = None, output_dir: Path = None, german: 
 <html>
 <head>
     <meta charset="utf-8">
+    <meta http-equiv="refresh" content="60">
     <title>Trading Dashboard</title>
     <style>
         body {{ font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }}
