@@ -448,9 +448,25 @@ def get_exchange():
 
 
 def get_data_exchange():
+	"""
+	Get exchange for fetching market data.
+	ALWAYS uses live Binance (not testnet) because:
+	1. Historical data is only available on live exchange
+	2. Testnet doesn't have all pairs (especially USDC pairs)
+	"""
 	global _data_exchange
 	if _data_exchange is None:
-		_data_exchange = _build_exchange(include_keys=False)
+		# Always use live exchange for data, never testnet
+		cls = getattr(ccxt, EXCHANGE_ID)
+		args = {"enableRateLimit": True}
+		_data_exchange = cls(args)
+		# Disable currency warnings
+		options = dict(getattr(_data_exchange, "options", {}))
+		options["warnOnFetchCurrenciesWithoutPermission"] = False
+		_data_exchange.options = options
+		if hasattr(_data_exchange, "has") and isinstance(_data_exchange.has, dict):
+			_data_exchange.has["fetchCurrencies"] = False
+		print("[Data Exchange] Using live Binance for market data (never testnet)")
 	return _data_exchange
 
 
@@ -574,6 +590,47 @@ def _maybe_append_synthetic_bar(df, symbol, timeframe):
 	return df
 
 
+def _fill_cache_gap(symbol, timeframe, cached_df):
+	"""
+	Check if cache has a gap (ends before current time) and fill it.
+	Returns the updated DataFrame with gap filled.
+	"""
+	if cached_df.empty:
+		return cached_df
+
+	now = pd.Timestamp.now(tz=BERLIN_TZ)
+	cache_end = cached_df.index[-1]
+	tf_minutes = timeframe_to_minutes(timeframe)
+
+	# Gap threshold: 2x the timeframe (e.g., 2 hours for 1h timeframe)
+	gap_threshold = pd.Timedelta(minutes=tf_minutes * 2)
+	gap = now - cache_end
+
+	if gap > gap_threshold:
+		# Cache is outdated - fetch missing data
+		print(f"[Cache Gap] {symbol} {timeframe}: Cache ends at {cache_end.strftime('%Y-%m-%d %H:%M')}, {gap.days} days {gap.seconds//3600}h behind")
+		print(f"[Cache Gap] Fetching missing data from {cache_end.strftime('%Y-%m-%d %H:%M')} to now...")
+
+		# Start from cache end (plus one bar to avoid duplicates)
+		start_date = cache_end + pd.Timedelta(minutes=tf_minutes)
+
+		try:
+			# Use download_historical_ohlcv to fetch missing data
+			new_data = download_historical_ohlcv(symbol, timeframe, start_date, now)
+
+			if not new_data.empty:
+				# Merge with existing cache
+				combined = pd.concat([cached_df, new_data])
+				combined = combined[~combined.index.duplicated(keep='last')]
+				combined = combined.sort_index()
+				print(f"[Cache Gap] Filled gap: now have {len(combined)} bars up to {combined.index[-1].strftime('%Y-%m-%d %H:%M')}")
+				return combined
+		except Exception as exc:
+			print(f"[Cache Gap] Error filling gap: {exc}")
+
+	return cached_df
+
+
 def fetch_data(symbol, timeframe, limit):
 	key = (symbol, timeframe, limit)
 	if key in DATA_CACHE:
@@ -581,6 +638,10 @@ def fetch_data(symbol, timeframe, limit):
 	else:
 		# Try loading from persistent cache first
 		persistent_df = load_ohlcv_from_cache(symbol, timeframe)
+
+		# Check for cache gap and fill if needed
+		if not persistent_df.empty:
+			persistent_df = _fill_cache_gap(symbol, timeframe, persistent_df)
 
 		# If limit is None or 0, return ALL cached data (for simulations)
 		if limit is None or limit == 0:
