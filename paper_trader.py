@@ -4364,13 +4364,13 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
                     final_state["total_capital"] = START_TOTAL_CAPITAL + total_pnl
                     print(f"[Simulation] Recalculated capital: {START_TOTAL_CAPITAL:.2f} + {total_pnl:.2f} PnL = {final_state['total_capital']:.2f}")
 
-                # Load open positions from existing summary if simulation generated none
-                if not open_positions and summary_path and os.path.exists(summary_path):
-                    try:
-                        with open(summary_path, "r", encoding="utf-8") as f:
-                            existing_summary = json.load(f)
-                        existing_open = existing_summary.get("open_positions_data", [])
-                        if existing_open:
+            # ALWAYS re-evaluate existing positions - close if past optimal hold time
+            if summary_path and os.path.exists(summary_path):
+                try:
+                    with open(summary_path, "r", encoding="utf-8") as f:
+                        existing_summary = json.load(f)
+                    existing_open = existing_summary.get("open_positions_data", [])
+                    if existing_open:
                             # Re-evaluate each position - close if past optimal hold time
                             still_open = []
                             now_ts = pd.Timestamp.now(tz=st.BERLIN_TZ)
@@ -4457,12 +4457,24 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
                                     still_open.append(pos)
                                     print(f"[Hold] {symbol} {direction}: {bars_held} bars < {optimal_bars} optimal")
 
-                            open_positions = still_open
-                            final_state["positions"] = still_open
-                            trades_df = trades_to_dataframe(trades)
-                            print(f"[Simulation] After re-evaluation: {len(still_open)} positions still open")
-                    except Exception as e:
-                        print(f"[Simulation] Could not load open positions: {e}")
+                        # Merge: keep new simulation positions + existing positions that are still open
+                        # Avoid duplicates by checking symbol+direction
+                        existing_keys = set()
+                        for pos in open_positions:
+                            key = (pos.get("symbol", ""), pos.get("direction", ""))
+                            existing_keys.add(key)
+
+                        for pos in still_open:
+                            key = (pos.get("symbol", ""), pos.get("direction", ""))
+                            if key not in existing_keys:
+                                open_positions.append(pos)
+                                existing_keys.add(key)
+
+                        final_state["positions"] = open_positions
+                        trades_df = trades_to_dataframe(trades)
+                        print(f"[Simulation] After re-evaluation: {len(open_positions)} positions total ({len(still_open)} from existing)")
+                except Exception as e:
+                    print(f"[Simulation] Could not load open positions: {e}")
 
             # Force close all open positions at simulation end if requested
             if args.close_at_end and open_positions:
