@@ -4338,9 +4338,76 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
                             existing_summary = json.load(f)
                         existing_open = existing_summary.get("open_positions_data", [])
                         if existing_open:
-                            open_positions = existing_open
-                            final_state["positions"] = existing_open
-                            print(f"[Simulation] Loaded {len(existing_open)} open positions from existing summary")
+                            # Re-evaluate each position - close if past optimal hold time
+                            still_open = []
+                            now_ts = pd.Timestamp.now(tz=st.BERLIN_TZ)
+                            for pos in existing_open:
+                                symbol = pos.get("symbol", "")
+                                direction = pos.get("direction", "long").lower()
+                                entry_time_str = pos.get("entry_time", "")
+                                htf = pos.get("htf", "12h")
+
+                                # Calculate bars held
+                                try:
+                                    entry_ts = pd.to_datetime(entry_time_str)
+                                    if entry_ts.tzinfo is None:
+                                        entry_ts = entry_ts.tz_localize(st.BERLIN_TZ)
+                                    bars_held = bars_in_position(entry_time_str, now_ts, htf)
+                                except:
+                                    bars_held = 0
+
+                                # Get optimal hold bars for this symbol
+                                optimal_bars = get_optimal_hold_bars(symbol, direction)
+
+                                if bars_held >= optimal_bars:
+                                    # Position should be closed - get current price and create trade
+                                    try:
+                                        df_1h = st.load_ohlcv_from_cache(symbol, "1h")
+                                        if df_1h is not None and not df_1h.empty:
+                                            exit_price = float(df_1h['close'].iloc[-1])
+                                        else:
+                                            exit_price = float(pos.get("last_price", pos.get("entry_price", 0)))
+                                    except:
+                                        exit_price = float(pos.get("last_price", pos.get("entry_price", 0)))
+
+                                    entry_price = float(pos.get("entry_price", 0))
+                                    stake = float(pos.get("stake", 0))
+
+                                    # Calculate PnL
+                                    if direction == "long":
+                                        pnl_pct = (exit_price - entry_price) / entry_price if entry_price else 0
+                                    else:
+                                        pnl_pct = (entry_price - exit_price) / entry_price if entry_price else 0
+                                    pnl_usd = stake * pnl_pct
+
+                                    # Create trade result
+                                    trade = TradeResult(
+                                        symbol=symbol,
+                                        direction=direction.capitalize(),
+                                        indicator=pos.get("indicator", "jma"),
+                                        htf=htf,
+                                        entry_time=entry_time_str,
+                                        exit_time=now_ts.isoformat(),
+                                        entry_price=entry_price,
+                                        exit_price=exit_price,
+                                        stake=stake,
+                                        pnl_pct=pnl_pct * 100,
+                                        pnl_usd=pnl_usd,
+                                        exit_reason=f"Time-based exit ({bars_held} bars, optimal={optimal_bars})",
+                                        equity_after=final_state["total_capital"] + pnl_usd,
+                                    )
+                                    trades.append(trade)
+                                    final_state["total_capital"] += pnl_usd
+                                    print(f"[Exit] Closed {symbol} {direction}: {bars_held} bars >= {optimal_bars} optimal, PnL {pnl_usd:+.2f} ({pnl_pct*100:+.1f}%)")
+                                else:
+                                    # Position stays open
+                                    still_open.append(pos)
+                                    print(f"[Hold] {symbol} {direction}: {bars_held} bars < {optimal_bars} optimal")
+
+                            open_positions = still_open
+                            final_state["positions"] = still_open
+                            trades_df = trades_to_dataframe(trades)
+                            print(f"[Simulation] After re-evaluation: {len(still_open)} positions still open")
                     except Exception as e:
                         print(f"[Simulation] Could not load open positions: {e}")
 
