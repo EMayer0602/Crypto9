@@ -238,10 +238,14 @@ def get_report_dir(use_testnet: bool = False, is_simulation: bool = False) -> st
     """Return the appropriate report directory based on mode.
 
     Now simulation uses the SAME directory as live mode so trades accumulate:
-    - Testnet mode (with or without simulation): report_testnet/
-    - Normal mode (with or without simulation): report_html/
+    - Testnet mode OR USDC symbols: report_testnet/
+    - Normal mode with EUR symbols: report_html/
     """
-    return "report_testnet" if use_testnet else "report_html"
+    # Auto-detect USDC mode: if TRADING_SYMBOLS contains USDC pairs, use report_testnet
+    has_usdc = any("USDC" in sym or "USDT" in sym for sym in TRADING_SYMBOLS)
+    if use_testnet or has_usdc:
+        return "report_testnet"
+    return "report_html"
 
 
 # Source of truth for trade signals (always report_html)
@@ -4325,6 +4329,30 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
                     trades_df = existing_trades_df
                 print(f"[Simulation] Total trades after merge: {len(trades_df)}")
 
+                # Recalculate final capital based on ALL merged trades
+                pnl_col = None
+                for col in ["pnl", "pnl_usd", "PnL"]:
+                    if col in trades_df.columns:
+                        pnl_col = col
+                        break
+                if pnl_col:
+                    total_pnl = trades_df[pnl_col].sum()
+                    final_state["total_capital"] = START_TOTAL_CAPITAL + total_pnl
+                    print(f"[Simulation] Recalculated capital: {START_TOTAL_CAPITAL:.2f} + {total_pnl:.2f} PnL = {final_state['total_capital']:.2f}")
+
+                # Load open positions from existing summary if simulation generated none
+                if not open_positions and summary_path and os.path.exists(summary_path):
+                    try:
+                        with open(summary_path, "r", encoding="utf-8") as f:
+                            existing_summary = json.load(f)
+                        existing_open = existing_summary.get("open_positions_data", [])
+                        if existing_open:
+                            open_positions = existing_open
+                            final_state["positions"] = existing_open
+                            print(f"[Simulation] Loaded {len(existing_open)} open positions from existing summary")
+                    except Exception as e:
+                        print(f"[Simulation] Could not load open positions: {e}")
+
             # Force close all open positions at simulation end if requested
             if args.close_at_end and open_positions:
                 print(f"[Simulation] Force closing {len(open_positions)} open positions at simulation end...")
@@ -4400,12 +4428,12 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
         summary_json_path = args.summary_json or SIMULATION_SUMMARY_JSON
         write_summary_json(summary_data, summary_json_path)
 
-        # Generate testnet dashboards (to simulation directory)
+        # Generate dashboards to same directory as other outputs
         try:
             dashboard_start = pd.to_datetime(args.dashboard_start).tz_localize(st.BERLIN_TZ)
         except Exception:
             dashboard_start = pd.Timestamp("2025-12-01", tz=st.BERLIN_TZ)
-        generate_testnet_dashboard(trades_df, open_positions, final_state, dashboard_start, output_dir=SIMULATION_TESTNET_DIR)
+        generate_testnet_dashboard(trades_df, open_positions, final_state, dashboard_start, output_dir=REPORT_DIR)
 
         # Print per-symbol statistics to console
         symbol_stats = summary_data.get("symbol_stats", [])
