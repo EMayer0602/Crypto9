@@ -3727,6 +3727,39 @@ def run_simulation(
         print("[Simulation] best_params_overall.csv enthält keine Daten.")
         return [], clone_state(use_saved_state)
     sim_state = clone_state(use_saved_state)
+
+    # Load open positions from trading_summary.json so simulation can process exits
+    summary_json = os.path.join(get_report_dir(), "trading_summary.json")
+    if os.path.exists(summary_json):
+        try:
+            with open(summary_json, "r", encoding="utf-8") as f:
+                saved_summary = json.load(f)
+            saved_positions = saved_summary.get("open_positions_data", [])
+            if saved_positions:
+                # Convert to simulation format and add to state
+                for pos in saved_positions:
+                    pos_record = {
+                        "key": position_key(pos.get("symbol", ""), pos.get("indicator", "jma"),
+                                           pos.get("htf", "12h"), pos.get("direction", "long")),
+                        "symbol": pos.get("symbol", ""),
+                        "direction": pos.get("direction", "long"),
+                        "indicator": pos.get("indicator", "jma"),
+                        "htf": pos.get("htf", "12h"),
+                        "param_a": pos.get("param_a", 20.0),
+                        "param_b": pos.get("param_b", 0.0),
+                        "atr_mult": pos.get("atr_mult"),
+                        "min_hold_bars": pos.get("min_hold_bars", 4),
+                        "entry_price": pos.get("entry_price", 0),
+                        "entry_time": pos.get("entry_time", ""),
+                        "entry_atr": pos.get("entry_atr", 0),
+                        "stake": pos.get("stake", 0),
+                        "size_units": pos.get("size_units", 0) or (pos.get("stake", 0) / pos.get("entry_price", 1) if pos.get("entry_price", 0) else 0),
+                    }
+                    sim_state.setdefault("positions", []).append(pos_record)
+                print(f"[Simulation] Loaded {len(saved_positions)} open positions from {summary_json}")
+        except Exception as e:
+            print(f"[Simulation] Could not load positions from summary: {e}")
+
     prune_state_for_indicators(sim_state, allowed_indicators)
 
     # Pre-download historical data if needed
