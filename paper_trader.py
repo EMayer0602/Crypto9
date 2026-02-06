@@ -235,17 +235,8 @@ def get_state_file(use_testnet: bool = False, is_simulation: bool = False) -> st
 
 
 def get_report_dir(use_testnet: bool = False, is_simulation: bool = False) -> str:
-    """Return the appropriate report directory based on mode.
-
-    Now simulation uses the SAME directory as live mode so trades accumulate:
-    - Testnet mode OR USDC symbols: report_testnet/
-    - Normal mode with EUR symbols: report_html/
-    """
-    # Auto-detect USDC mode: if TRADING_SYMBOLS contains USDC pairs, use report_testnet
-    has_usdc = any("USDC" in sym or "USDT" in sym for sym in TRADING_SYMBOLS)
-    if use_testnet or has_usdc:
-        return "report_testnet"
-    return "report_html"
+    """Immer report_testnet - ein Verzeichnis für alles."""
+    return "report_testnet"
 
 
 # Source of truth for trade signals (always report_html)
