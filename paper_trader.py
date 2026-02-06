@@ -4371,94 +4371,87 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
                         existing_summary = json.load(f)
                     existing_open = existing_summary.get("open_positions_data", [])
                     if existing_open:
-                            # Re-evaluate each position - close if past optimal hold time
-                            still_open = []
-                            now_ts = pd.Timestamp.now(tz=st.BERLIN_TZ)
-                            for pos in existing_open:
-                                symbol = pos.get("symbol", "")
-                                direction = pos.get("direction", "long").lower()
-                                entry_time_str = pos.get("entry_time", "")
-                                htf = pos.get("htf", "12h")
+                        # Re-evaluate each position - close if past optimal hold time
+                        still_open = []
+                        now_ts = pd.Timestamp.now(tz=st.BERLIN_TZ)
+                        for pos in existing_open:
+                            symbol = pos.get("symbol", "")
+                            direction = pos.get("direction", "long").lower()
+                            entry_time_str = pos.get("entry_time", "")
+                            htf = pos.get("htf", "12h")
 
-                                # Calculate bars held
+                            # Calculate bars held
+                            try:
+                                entry_ts = pd.to_datetime(entry_time_str)
+                                if entry_ts.tzinfo is None:
+                                    entry_ts = entry_ts.tz_localize(st.BERLIN_TZ)
+                                else:
+                                    entry_ts = entry_ts.tz_convert(st.BERLIN_TZ)
+                                bars_held = bars_in_position(entry_time_str, now_ts, htf)
+                            except:
+                                bars_held = 0
+                                entry_ts = now_ts
+
+                            # Get optimal hold bars for this symbol
+                            optimal_bars = get_optimal_hold_bars(symbol, direction)
+
+                            if bars_held >= optimal_bars:
+                                # Position should be closed at CORRECT HISTORICAL TIME
+                                htf_minutes = st.timeframe_to_minutes(htf)
+                                correct_exit_ts = entry_ts + pd.Timedelta(minutes=htf_minutes * optimal_bars)
+
+                                # Get historical price at correct exit time from cache
                                 try:
-                                    entry_ts = pd.to_datetime(entry_time_str)
-                                    if entry_ts.tzinfo is None:
-                                        entry_ts = entry_ts.tz_localize(st.BERLIN_TZ)
-                                    else:
-                                        entry_ts = entry_ts.tz_convert(st.BERLIN_TZ)
-                                    bars_held = bars_in_position(entry_time_str, now_ts, htf)
-                                except:
-                                    bars_held = 0
-                                    entry_ts = now_ts
-
-                                # Get optimal hold bars for this symbol
-                                optimal_bars = get_optimal_hold_bars(symbol, direction)
-
-                                if bars_held >= optimal_bars:
-                                    # Position should be closed at CORRECT HISTORICAL TIME
-                                    # Exit time = entry_time + (optimal_bars * htf_minutes)
-                                    htf_minutes = st.timeframe_to_minutes(htf)
-                                    correct_exit_ts = entry_ts + pd.Timedelta(minutes=htf_minutes * optimal_bars)
-
-                                    # Get historical price at correct exit time from cache
-                                    try:
-                                        df_cache = st.load_ohlcv_from_cache(symbol, "1h")
-                                        if df_cache is not None and not df_cache.empty:
-                                            # Find the bar at or just after the correct exit time
-                                            mask = df_cache.index >= correct_exit_ts
-                                            if mask.any():
-                                                exit_bar = df_cache.loc[mask].iloc[0]
-                                                exit_price = float(exit_bar['close'])
-                                                actual_exit_ts = exit_bar.name
-                                            else:
-                                                # Exit time is in the future or no data - use latest
-                                                exit_price = float(df_cache['close'].iloc[-1])
-                                                actual_exit_ts = df_cache.index[-1]
+                                    df_cache = st.load_ohlcv_from_cache(symbol, "1h")
+                                    if df_cache is not None and not df_cache.empty:
+                                        mask = df_cache.index >= correct_exit_ts
+                                        if mask.any():
+                                            exit_bar = df_cache.loc[mask].iloc[0]
+                                            exit_price = float(exit_bar['close'])
+                                            actual_exit_ts = exit_bar.name
                                         else:
-                                            exit_price = float(pos.get("last_price", pos.get("entry_price", 0)))
-                                            actual_exit_ts = correct_exit_ts
-                                    except Exception as e:
-                                        print(f"[Exit] Error getting historical price for {symbol}: {e}")
+                                            exit_price = float(df_cache['close'].iloc[-1])
+                                            actual_exit_ts = df_cache.index[-1]
+                                    else:
                                         exit_price = float(pos.get("last_price", pos.get("entry_price", 0)))
                                         actual_exit_ts = correct_exit_ts
+                                except Exception as e:
+                                    print(f"[Exit] Error getting historical price for {symbol}: {e}")
+                                    exit_price = float(pos.get("last_price", pos.get("entry_price", 0)))
+                                    actual_exit_ts = correct_exit_ts
 
-                                    entry_price = float(pos.get("entry_price", 0))
-                                    stake = float(pos.get("stake", 0))
+                                entry_price = float(pos.get("entry_price", 0))
+                                stake = float(pos.get("stake", 0))
 
-                                    # Calculate PnL
-                                    if direction == "long":
-                                        pnl_pct = (exit_price - entry_price) / entry_price if entry_price else 0
-                                    else:
-                                        pnl_pct = (entry_price - exit_price) / entry_price if entry_price else 0
-                                    pnl_usd = stake * pnl_pct
-
-                                    # Create trade result with CORRECT exit time
-                                    trade = TradeResult(
-                                        symbol=symbol,
-                                        direction=direction.capitalize(),
-                                        indicator=pos.get("indicator", "jma"),
-                                        htf=htf,
-                                        entry_time=entry_time_str,
-                                        exit_time=actual_exit_ts.isoformat() if hasattr(actual_exit_ts, 'isoformat') else str(actual_exit_ts),
-                                        entry_price=entry_price,
-                                        exit_price=exit_price,
-                                        stake=stake,
-                                        pnl_pct=pnl_pct * 100,
-                                        pnl_usd=pnl_usd,
-                                        exit_reason=f"Time-based exit ({optimal_bars} bars)",
-                                        equity_after=final_state["total_capital"] + pnl_usd,
-                                    )
-                                    trades.append(trade)
-                                    final_state["total_capital"] += pnl_usd
-                                    print(f"[Exit] {symbol} {direction}: Entry {entry_ts.strftime('%m-%d %H:%M')} -> Exit {actual_exit_ts.strftime('%m-%d %H:%M')} @ {exit_price:.4f}, PnL {pnl_usd:+.2f} ({pnl_pct*100:+.1f}%)")
+                                if direction == "long":
+                                    pnl_pct = (exit_price - entry_price) / entry_price if entry_price else 0
                                 else:
-                                    # Position stays open
-                                    still_open.append(pos)
-                                    print(f"[Hold] {symbol} {direction}: {bars_held} bars < {optimal_bars} optimal")
+                                    pnl_pct = (entry_price - exit_price) / entry_price if entry_price else 0
+                                pnl_usd = stake * pnl_pct
 
-                        # Merge: keep new simulation positions + existing positions that are still open
-                        # Avoid duplicates by checking symbol+direction
+                                trade = TradeResult(
+                                    symbol=symbol,
+                                    direction=direction.capitalize(),
+                                    indicator=pos.get("indicator", "jma"),
+                                    htf=htf,
+                                    entry_time=entry_time_str,
+                                    exit_time=actual_exit_ts.isoformat() if hasattr(actual_exit_ts, 'isoformat') else str(actual_exit_ts),
+                                    entry_price=entry_price,
+                                    exit_price=exit_price,
+                                    stake=stake,
+                                    pnl_pct=pnl_pct * 100,
+                                    pnl_usd=pnl_usd,
+                                    exit_reason=f"Time-based exit ({optimal_bars} bars)",
+                                    equity_after=final_state["total_capital"] + pnl_usd,
+                                )
+                                trades.append(trade)
+                                final_state["total_capital"] += pnl_usd
+                                print(f"[Exit] {symbol} {direction}: Entry {entry_ts.strftime('%m-%d %H:%M')} -> Exit {actual_exit_ts.strftime('%m-%d %H:%M')} @ {exit_price:.4f}, PnL {pnl_usd:+.2f} ({pnl_pct*100:+.1f}%)")
+                            else:
+                                still_open.append(pos)
+                                print(f"[Hold] {symbol} {direction}: {bars_held} bars < {optimal_bars} optimal")
+
+                        # Merge: new simulation positions + existing still open
                         existing_keys = set()
                         for pos in open_positions:
                             key = (pos.get("symbol", ""), pos.get("direction", ""))
@@ -4472,7 +4465,7 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
 
                         final_state["positions"] = open_positions
                         trades_df = trades_to_dataframe(trades)
-                        print(f"[Simulation] After re-evaluation: {len(open_positions)} positions total ({len(still_open)} from existing)")
+                        print(f"[Simulation] After re-evaluation: {len(open_positions)} positions total")
                 except Exception as e:
                     print(f"[Simulation] Could not load open positions: {e}")
 
