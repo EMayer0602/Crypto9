@@ -3966,7 +3966,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--open-log", type=str, default=SIMULATION_OPEN_POSITIONS_FILE, help="CSV path for simulated open positions")
     parser.add_argument("--open-json", type=str, default=SIMULATION_OPEN_POSITIONS_JSON, help="JSON path for simulated open positions")
     parser.add_argument("--summary-html", type=str, default=SIMULATION_SUMMARY_HTML, help="HTML summary output path")
-    parser.add_argument("--summary-json", type=str, default=SIMULATION_SUMMARY_JSON, help="JSON summary output path")
+    parser.add_argument("--summary-json", type=str, default=None, help="JSON summary output path (default: REPORT_DIR/trading_summary.json)")
     parser.add_argument("--replay-trades-csv", type=str, default=None, help="Use a precomputed trades CSV (e.g. last48_from_detailed_all.csv) instead of simulating")
     parser.add_argument("--verbose-sim-entries", action="store_true", help="Print entry messages while simulating")
     parser.add_argument("--symbols", type=str, default=None, help="Comma-separated symbol allowlist (default: st.SYMBOLS)")
@@ -4192,7 +4192,9 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
       HISTORICAL_START = pd.Timestamp("2025-01-01", tz=st.BERLIN_TZ)
 
       # Check if existing trades file has data - if yes, append; if no, start fresh from 2025-01-01
-      summary_path = args.summary_json or SIMULATION_SUMMARY_JSON
+      # HARDCODE to report_testnet to ensure correct path
+      summary_path = args.summary_json or "report_testnet/trading_summary.json"
+      print(f"[Debug] summary_path = {summary_path}")
 
       if not os.path.exists(summary_path):
           # No file exists - FRESH START from 2025-01-01 to now
@@ -4203,6 +4205,99 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
           try:
               with open(summary_path, "r", encoding="utf-8") as f:
                   existing_summary = json.load(f)
+
+              # IMMEDIATELY close positions that are past optimal hold time
+              existing_open = existing_summary.get("open_positions_data", [])
+              if existing_open:
+                  now_ts = pd.Timestamp.now(tz=st.BERLIN_TZ)
+                  still_open = []
+                  closed_now = []
+                  for pos in existing_open:
+                      symbol = pos.get("symbol", "")
+                      direction = pos.get("direction", "long").lower()
+                      entry_time_str = pos.get("entry_time", "")
+                      htf = pos.get("htf", "12h")
+                      entry_price = float(pos.get("entry_price", 0))
+                      stake = float(pos.get("stake", 0))
+
+                      # Calculate bars held
+                      try:
+                          entry_ts = pd.to_datetime(entry_time_str)
+                          if entry_ts.tzinfo is None:
+                              entry_ts = entry_ts.tz_localize(st.BERLIN_TZ)
+                          bars_held = bars_in_position(entry_time_str, now_ts, htf)
+                      except:
+                          bars_held = 0
+                          entry_ts = now_ts
+
+                      optimal_bars = get_optimal_hold_bars(symbol, direction)
+
+                      if bars_held >= optimal_bars:
+                          # Position must be closed NOW
+                          htf_minutes = st.timeframe_to_minutes(htf)
+                          correct_exit_ts = entry_ts + pd.Timedelta(minutes=htf_minutes * optimal_bars)
+
+                          # Try to get historical price, fallback to last_price
+                          exit_price = float(pos.get("last_price", entry_price))
+                          try:
+                              df_cache = st.load_ohlcv_from_cache(symbol, "1h")
+                              if df_cache is not None and not df_cache.empty:
+                                  mask = df_cache.index >= correct_exit_ts
+                                  if mask.any():
+                                      exit_price = float(df_cache.loc[mask].iloc[0]['close'])
+                          except:
+                              pass
+
+                          # Calculate PnL
+                          if direction == "long":
+                              pnl_pct = (exit_price - entry_price) / entry_price * 100
+                          else:
+                              pnl_pct = (entry_price - exit_price) / entry_price * 100
+                          pnl = stake * pnl_pct / 100
+                          fees = stake * 0.002  # 0.2% fees
+                          pnl_after_fees = pnl - fees
+
+                          trade_result = {
+                              "Timestamp": now_ts.isoformat(),
+                              "symbol": symbol,
+                              "direction": direction.capitalize(),
+                              "indicator": pos.get("indicator", "jma"),
+                              "htf": htf,
+                              "param_desc": f"ParamA={pos.get('param_a', 0)}, ParamB={pos.get('param_b', 0)}",
+                              "entry_time": entry_time_str,
+                              "entry_price": entry_price,
+                              "exit_time": correct_exit_ts.isoformat(),
+                              "exit_price": exit_price,
+                              "stake": stake,
+                              "fees": round(fees, 2),
+                              "pnl": round(pnl_after_fees, 2),
+                              "reason": f"Time-based exit ({bars_held} bars >= {optimal_bars} optimal)"
+                          }
+                          closed_now.append(trade_result)
+                          print(f"[Exit] {symbol} {direction}: {bars_held} bars >= {optimal_bars} optimal, exit at {exit_price:.6f}, PnL: {pnl_after_fees:.2f}")
+                      else:
+                          still_open.append(pos)
+
+                  if closed_now:
+                      # Update summary immediately
+                      existing_trades_list = existing_summary.get("trades", [])
+                      existing_trades_list.extend(closed_now)
+                      existing_summary["trades"] = existing_trades_list
+                      existing_summary["open_positions_data"] = still_open
+                      existing_summary["open_positions"] = len(still_open)
+
+                      # Recalculate stats
+                      total_pnl = sum(t.get("pnl", 0) for t in existing_trades_list)
+                      existing_summary["final_capital"] = START_TOTAL_CAPITAL + total_pnl
+                      existing_summary["closed_trades"] = len(existing_trades_list)
+                      existing_summary["closed_pnl"] = round(total_pnl, 2)
+
+                      # Save immediately
+                      with open(summary_path, "w", encoding="utf-8") as f:
+                          json.dump(existing_summary, f, indent=2, default=str)
+                      print(f"[Exit] Closed {len(closed_now)} positions, {len(still_open)} still open")
+                      print(f"[Exit] Updated {summary_path}")
+
               existing_trades = existing_summary.get("trades", [])
               if existing_trades:
                   # Trades exist - APPEND MODE
