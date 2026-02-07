@@ -3806,7 +3806,7 @@ def run_simulation(
                         print(f"[Simulation] {symbol} {timeframe}: Cache outdated (last: {latest.strftime('%Y-%m-%d %H:%M')}), updating to now...")
                         needs_download = True
                     else:
-                        print(f"[Simulation] {symbol} {timeframe}: {len(cached_df)} bars, {earliest.strftime('%Y-%m-%d')} to {latest.strftime('%Y-%m-%d %H:%M')} ✓")
+                        print(f"[Simulation] {symbol} {timeframe}: {len(cached_df)} bars, {earliest.strftime('%Y-%m-%d')} to {latest.strftime('%Y-%m-%d %H:%M')} [OK]")
 
                 if needs_download:
                     st.download_historical_ohlcv(symbol, timeframe, download_start, download_end)
