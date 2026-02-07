@@ -1,15 +1,13 @@
 #!/usr/bin/env python3
-"""Generate HTML dashboard from simulation trades.
+"""Generate HTML dashboard from trading_summary.json.
 
-This dashboard reads from report_html/trading_summary.json to show
-all trades with recalculated stakes from initial capital.
+Single source of truth: trading_summary.json
 """
 
 import json
 import re
 from datetime import datetime
 from pathlib import Path
-from html.parser import HTMLParser
 
 
 def fetch_live_price(symbol: str) -> float | None:
@@ -56,205 +54,7 @@ START_DATE = "2025-12-01"  # Trades before this date are ignored
 
 # Fixed paths
 SOURCE_JSON = Path("report_html/trading_summary.json")
-SOURCE_HTML = Path("report_html/trading_summary.html")  # Fallback only
-# Removed: OPEN_POSITIONS_JSON - now using trading_summary.json only
 OUTPUT_DIR = Path("report_testnet")
-
-
-class PandasTableParser(HTMLParser):
-    """Parse pandas-generated HTML tables from trading_summary.html."""
-
-    def __init__(self):
-        super().__init__()
-        self.in_table = False
-        self.in_thead = False
-        self.in_tbody = False
-        self.in_row = False
-        self.in_cell = False
-        self.is_header_cell = False
-        self.current_row = []
-        self.headers = []
-        self.rows = []
-        self.tables = []
-        self.current_table_name = ""
-        self.in_h2 = False
-        self.h2_text = ""
-
-    def handle_starttag(self, tag, attrs):
-        if tag == "table":
-            self.in_table = True
-            self.rows = []
-            self.headers = []
-        elif tag == "thead":
-            self.in_thead = True
-        elif tag == "tbody":
-            self.in_tbody = True
-        elif tag == "tr" and self.in_table:
-            self.in_row = True
-            self.current_row = []
-        elif tag == "th" and self.in_row:
-            self.in_cell = True
-            self.is_header_cell = True
-        elif tag == "td" and self.in_row:
-            self.in_cell = True
-            self.is_header_cell = False
-        elif tag == "h2":
-            self.in_h2 = True
-            self.h2_text = ""
-
-    def handle_endtag(self, tag):
-        if tag == "table":
-            self.in_table = False
-            if self.headers or self.rows:
-                self.tables.append({
-                    "name": self.current_table_name,
-                    "headers": self.headers,
-                    "rows": self.rows
-                })
-            self.rows = []
-            self.headers = []
-        elif tag == "thead":
-            self.in_thead = False
-        elif tag == "tbody":
-            self.in_tbody = False
-        elif tag == "tr":
-            self.in_row = False
-            if self.current_row:
-                if self.in_thead:
-                    self.headers = self.current_row
-                else:
-                    self.rows.append(self.current_row)
-            self.current_row = []
-        elif tag in ("th", "td"):
-            self.in_cell = False
-            self.is_header_cell = False
-        elif tag == "h2":
-            self.in_h2 = False
-            self.current_table_name = self.h2_text.strip()
-
-    def handle_data(self, data):
-        if self.in_cell:
-            self.current_row.append(data.strip())
-        elif self.in_h2:
-            self.h2_text += data
-
-
-def parse_trades_from_html(html_path: Path) -> tuple[list, list]:
-    """Parse closed trades and open positions from trading_summary.html."""
-    if not html_path.exists():
-        print(f"Warning: {html_path} not found")
-        return [], []
-
-    html_content = html_path.read_text(encoding="utf-8")
-
-    parser = PandasTableParser()
-    parser.feed(html_content)
-
-    long_trades = []
-    short_trades = []
-    open_positions = []
-
-    for table in parser.tables:
-        name = table["name"].lower()
-        headers = [h.lower() for h in table.get("headers", [])]
-        rows = table["rows"]
-
-        if "long trades" in name and "open" not in name:
-            # Parse Long Trades table (pandas format)
-            for row in rows:
-                trade = parse_pandas_trade_row(headers, row, "long")
-                if trade:
-                    long_trades.append(trade)
-
-        elif "short trades" in name and "open" not in name:
-            # Parse Short Trades table (pandas format)
-            for row in rows:
-                trade = parse_pandas_trade_row(headers, row, "short")
-                if trade:
-                    short_trades.append(trade)
-
-        elif "open" in name.lower():
-            # Parse Open Positions table
-            for row in rows:
-                pos = parse_pandas_open_position_row(headers, row)
-                if pos:
-                    open_positions.append(pos)
-
-    # Only Long trades - we don't trade Short
-    closed_trades = long_trades
-    return closed_trades, open_positions
-
-
-def parse_pandas_trade_row(headers: list, row: list, default_direction: str) -> dict | None:
-    """Parse a single trade row from pandas-generated HTML table."""
-    if not row or len(row) < 5:
-        return None
-
-    # Create a dict from headers and row values
-    data = {}
-    for i, h in enumerate(headers):
-        if i < len(row):
-            data[h] = row[i]
-
-    symbol = data.get("symbol", "")
-    if not symbol or "symbol" in symbol.lower():
-        return None
-
-    # Get entry and exit prices
-    entry_price = parse_number(data.get("entry_price", "0"))
-    exit_price = parse_number(data.get("exit_price", "0"))
-
-    # Calculate PnL percentage from prices
-    direction = data.get("direction", default_direction).lower()
-    if entry_price > 0:
-        if direction == "long":
-            pnl_pct = (exit_price - entry_price) / entry_price * 100
-        else:
-            pnl_pct = (entry_price - exit_price) / entry_price * 100
-    else:
-        pnl_pct = 0
-
-    return {
-        "symbol": symbol,
-        "indicator": data.get("indicator", ""),
-        "htf": data.get("htf", ""),
-        "entry_time": data.get("entry_time", ""),
-        "exit_time": data.get("exit_time", ""),
-        "entry_price": entry_price,
-        "exit_price": exit_price,
-        "original_stake": parse_number(data.get("stake", "0")),
-        "original_pnl": parse_number(data.get("pnl", "0")),
-        "original_pnl_pct": pnl_pct,
-        "reason": data.get("reason", ""),
-        "direction": direction,
-    }
-
-
-def parse_pandas_open_position_row(headers: list, row: list) -> dict | None:
-    """Parse a single open position row from pandas-generated HTML table."""
-    if not row or len(row) < 5:
-        return None
-
-    # Create a dict from headers and row values
-    data = {}
-    for i, h in enumerate(headers):
-        if i < len(row):
-            data[h] = row[i]
-
-    symbol = data.get("symbol", "")
-    if not symbol or "symbol" in symbol.lower():
-        return None
-
-    return {
-        "symbol": symbol,
-        "direction": data.get("direction", "long").lower(),
-        "indicator": data.get("indicator", ""),
-        "htf": data.get("htf", ""),
-        "entry_time": data.get("entry_time", ""),
-        "entry_price": parse_number(data.get("entry_price", "0")),
-        "last_price": parse_number(data.get("last_price", data.get("exit_price", "0"))),
-        "bars_held": int(parse_number(data.get("bars_held", data.get("bars", "0")))),
-    }
 
 
 def parse_number(s: str) -> float:
@@ -316,7 +116,7 @@ def parse_trades_from_json(json_path: Path, start_date: str = None) -> tuple[lis
         start_date: Optional start date filter (YYYY-MM-DD). Trades before this are skipped.
     """
     if not json_path.exists():
-        print(f"Warning: {json_path} not found, falling back to HTML")
+        print(f"Error: {json_path} not found")
         return [], []
 
     data = load_json(json_path)
@@ -414,19 +214,8 @@ def generate_dashboard(start_date: str = None, output_dir: Path = None, german: 
     if output_dir is None:
         output_dir = OUTPUT_DIR
 
-    # Try JSON first (primary source) - filter is applied during parsing
-    closed_trades, json_open_positions = parse_trades_from_json(SOURCE_JSON, start_date=start_date)
-    if not closed_trades:
-        print("Falling back to HTML parsing...")
-        closed_trades, json_open_positions = parse_trades_from_html(SOURCE_HTML)
-        # Apply filter for HTML fallback
-        if start_date:
-            start_dt = datetime.fromisoformat(start_date + "T00:00:00+01:00")
-            closed_trades = [t for t in closed_trades if parse_entry_time(t.get("entry_time", "")) >= start_dt]
-            json_open_positions = [p for p in json_open_positions if parse_entry_time(p.get("entry_time", "")) >= start_dt]
-
-    # Use open positions from trading_summary.json (single source of truth)
-    open_positions = [p for p in json_open_positions if str(p.get("direction", "long")).lower() == "long"]
+    # Read from JSON (single source of truth)
+    closed_trades, open_positions = parse_trades_from_json(SOURCE_JSON, start_date=start_date)
 
     # Fetch live prices for open positions
     if open_positions:
