@@ -212,6 +212,9 @@ SIMULATION_LOG_JSON = "paper_trading_simulation_log.json"
 REPORT_DIR = "report_html"
 SIMULATION_SUMMARY_HTML = os.path.join("report_html", "trading_summary.html")
 SIMULATION_SUMMARY_JSON = os.path.join("report_html", "trading_summary.json")
+# Separate output directories for --simulate mode
+SIMULATION_OUTPUT_DIR = "report_simulation"
+SIMULATION_TESTNET_DIR = "report_simulation_testnet"
 
 
 def get_report_dir(use_testnet: bool = False, is_simulation: bool = False) -> str:
