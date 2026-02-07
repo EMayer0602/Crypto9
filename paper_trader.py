@@ -2575,15 +2575,15 @@ def write_summary_html(summary: Dict[str, Any], path: str) -> None:
         indicator = pos.get("indicator", "")
         htf = pos.get("htf", "")
         entry_time = pos.get("entry_time", "")[:16] if pos.get("entry_time") else ""
-        entry_price = pos.get("entry_price", "")
+        entry_price_val = float(pos.get("entry_price", 0) or 0)
         last_price = pos.get("last_price", "")
-        stake = fmt(pos.get("stake", 0))
-        amount = fmt(pos.get("amount", 0))
+        stake_val = float(pos.get("stake", 0) or 0)
+        amount = stake_val / entry_price_val if entry_price_val > 0 else 0
         bars_held = pos.get("bars_held", "")
         unrealized_pct = float(pos.get("unrealized_pct", 0) or 0)
         unrealized_pnl = float(pos.get("unrealized_pnl", 0) or 0)
         status = status_text(unrealized_pnl)
-        html_parts.append(f"<tr><td>{symbol}</td><td>{direction}</td><td>{indicator}</td><td>{htf}</td><td>{entry_time}</td><td>{entry_price}</td><td>{last_price}</td><td>{stake}</td><td>{amount}</td><td>{bars_held}</td><td class='{pnl_class(unrealized_pct)}'>{fmt_pct(unrealized_pct)}</td><td class='{pnl_class(unrealized_pnl)}'>{fmt(unrealized_pnl)}</td><td class='{pnl_class(unrealized_pnl)}'>{status}</td></tr>")
+        html_parts.append(f"<tr><td>{symbol}</td><td>{direction}</td><td>{indicator}</td><td>{htf}</td><td>{entry_time}</td><td>{entry_price_val}</td><td>{last_price}</td><td>{fmt(stake_val)}</td><td>{fmt(amount)}</td><td>{bars_held}</td><td class='{pnl_class(unrealized_pct)}'>{fmt_pct(unrealized_pct)}</td><td class='{pnl_class(unrealized_pnl)}'>{fmt(unrealized_pnl)}</td><td class='{pnl_class(unrealized_pnl)}'>{status}</td></tr>")
     html_parts.append("</table>")
 
     # Closed Trades with all columns
@@ -2598,15 +2598,15 @@ def write_summary_html(summary: Dict[str, Any], path: str) -> None:
         indicator = t.get("indicator", "")
         htf = t.get("htf", "")
         entry_time = (t.get("entry_time", "") or "")[:16]
-        entry_price = t.get("entry_price", "")
+        entry_price_val = float(t.get("entry_price", 0) or 0)
         exit_time = (t.get("exit_time", "") or "")[:16]
         exit_price = t.get("exit_price", "")
-        stake = fmt(t.get("stake", 0))
-        amount = fmt(t.get("amount", 0))
+        stake_val = float(t.get("stake", 0) or 0)
+        amount = stake_val / entry_price_val if entry_price_val > 0 else 0
         pnl = float(t.get("pnl", 0) or 0)
         pnl_pct = float(t.get("pnl_pct", 0) or 0)
         reason = t.get("exit_reason", "") or t.get("reason", "")
-        html_parts.append(f"<tr><td>{symbol}</td><td>{direction}</td><td>{indicator}</td><td>{htf}</td><td>{entry_time}</td><td>{entry_price}</td><td>{exit_time}</td><td>{exit_price}</td><td>{stake}</td><td>{amount}</td><td class='{pnl_class(pnl)}'>{fmt(pnl)}</td><td class='{pnl_class(pnl_pct)}'>{fmt_pct(pnl_pct)}</td><td>{reason}</td></tr>")
+        html_parts.append(f"<tr><td>{symbol}</td><td>{direction}</td><td>{indicator}</td><td>{htf}</td><td>{entry_time}</td><td>{entry_price_val}</td><td>{exit_time}</td><td>{exit_price}</td><td>{fmt(stake_val)}</td><td>{fmt(amount)}</td><td class='{pnl_class(pnl)}'>{fmt(pnl)}</td><td class='{pnl_class(pnl_pct)}'>{fmt_pct(pnl_pct)}</td><td>{reason}</td></tr>")
 
     html_parts.append("</table>")
     if total_trades > 100:
