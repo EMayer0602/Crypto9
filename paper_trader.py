@@ -235,8 +235,16 @@ def get_state_file(use_testnet: bool = False, is_simulation: bool = False) -> st
 
 
 def get_report_dir(use_testnet: bool = False, is_simulation: bool = False) -> str:
-    """Immer report_html - ein Verzeichnis für alles."""
-    return "report_html"
+    """Get report directory based on mode.
+
+    IMPORTANT: Testnet and non-testnet use SEPARATE directories to prevent
+    mixing USDT (testnet) and USDC (production) positions. This was a bug
+    that caused USDT positions to be stuck because no USDC cache data exists
+    for USDT symbols.
+    """
+    if is_simulation:
+        return "report_simulation_testnet" if use_testnet else "report_simulation"
+    return "report_testnet" if use_testnet else "report_html"
 
 
 # Source of truth for trade signals (always report_html)
