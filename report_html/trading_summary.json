@@ -3,7 +3,7 @@
   "start": "2026-01-30T23:00:00+01:00",
   "end": "2026-02-05T16:29:26.128686+01:00",
   "closed_trades": 2605,
-  "open_positions": 5,
+  "open_positions": 0,
   "closed_pnl": 1171717.8,
   "avg_trade_pnl": 444.4725,
   "win_rate_pct": 56.3364,
@@ -250,34 +250,7 @@
       "short_pnl": 0.0
     }
   ],
-  "open_positions_data": [
-    {
-      "symbol": "SUI/USDC",
-      "direction": "long",
-      "indicator": "jma",
-      "htf": "12h",
-      "entry_time": "2026-02-02T19:00:00+01:00",
-      "entry_price": 1.1482,
-      "last_price": 1.1482,
-      "stake": 1644.621163331,
-      "bars_held": 0,
-      "unrealized_pnl": 0,
-      "status": "Open"
-    },
-    {
-      "symbol": "LUNC/USDT",
-      "direction": "long",
-      "indicator": "jma",
-      "htf": "12h",
-      "entry_time": "2026-02-01T23:00:00+01:00",
-      "entry_price": 3.749e-05,
-      "last_price": 3.749e-05,
-      "stake": 1341.1278521582801,
-      "bars_held": 0,
-      "unrealized_pnl": 0,
-      "status": "Open"
-    }
-  ],
+  "open_positions_data": [],
   "trades": [
     {
       "symbol": "SOL/USDC",
@@ -34146,10 +34119,36 @@
       "fees": 161.08,
       "pnl": 14311.41,
       "reason": "Time-based exit (14 bars >= 4 optimal)"
+    },
+    {
+      "symbol": "SUI/USDC",
+      "direction": "Long",
+      "indicator": "jma",
+      "htf": "12h",
+      "entry_time": "2026-02-02T19:00:00+01:00",
+      "exit_time": "2026-01-05T14:00:00+01:00",
+      "entry_price": 1.1482,
+      "exit_price": 1.6787,
+      "stake": 1644.621163331,
+      "pnl": 759.8602396334222,
+      "reason": "Time-based exit (4 bars)"
+    },
+    {
+      "symbol": "LUNC/USDT",
+      "direction": "Long",
+      "indicator": "jma",
+      "htf": "12h",
+      "entry_time": "2026-02-01T23:00:00+01:00",
+      "exit_time": "2026-01-05T14:00:00+01:00",
+      "entry_price": 3.749e-05,
+      "exit_price": 4.333e-05,
+      "stake": 1341.1278521582801,
+      "pnl": 208.914021248449,
+      "reason": "Time-based exit (4 bars)"
     }
   ],
   "state": {
-    "total_capital": 1188217.7991487426,
+    "total_capital": 1189186.5734096244,
     "last_processed_bar": {},
     "symbol_trade_counts": {}
   }
