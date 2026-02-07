@@ -235,8 +235,8 @@ def get_state_file(use_testnet: bool = False, is_simulation: bool = False) -> st
 
 
 def get_report_dir(use_testnet: bool = False, is_simulation: bool = False) -> str:
-    """Immer report_testnet - ein Verzeichnis für alles."""
-    return "report_testnet"
+    """Immer report_html - ein Verzeichnis für alles."""
+    return "report_html"
 
 
 # Source of truth for trade signals (always report_html)
@@ -2671,6 +2671,56 @@ def write_summary_json(summary: Dict[str, Any], path: str) -> None:
     print(f"[Simulation] Summary JSON saved to {path}")
 
 
+def load_from_summary_json(path: str = None) -> tuple:
+    """Load trades and open positions from trading_summary.json.
+
+    Returns:
+        (trades_list, open_positions_list) - both as list of dicts
+    """
+    if path is None:
+        path = os.path.join(get_report_dir(), "trading_summary.json")
+
+    if not os.path.exists(path):
+        return [], []
+
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        trades = data.get("trades", [])
+        open_positions = data.get("open_positions_data", [])
+        return trades, open_positions
+    except Exception as e:
+        print(f"[JSON] Error loading {path}: {e}")
+        return [], []
+
+
+def merge_trades(existing_trades: list, new_trades: list) -> list:
+    """Merge new trades into existing trades, avoiding duplicates.
+
+    Duplicate detection: same symbol + entry_time + exit_time
+    """
+    # Build set of existing trade keys
+    existing_keys = set()
+    for t in existing_trades:
+        key = (t.get("symbol", ""), t.get("entry_time", ""), t.get("exit_time", ""))
+        existing_keys.add(key)
+
+    # Add new trades that don't exist yet
+    merged = list(existing_trades)
+    added = 0
+    for t in new_trades:
+        key = (t.get("symbol", ""), t.get("entry_time", ""), t.get("exit_time", ""))
+        if key not in existing_keys:
+            merged.append(t)
+            existing_keys.add(key)
+            added += 1
+
+    if added > 0:
+        print(f"[JSON] Merged {added} new trades (total: {len(merged)})")
+
+    return merged
+
+
 def generate_testnet_dashboard(
     trades_df: pd.DataFrame,
     open_positions: List[Dict[str, Any]],
@@ -3347,18 +3397,17 @@ def _derive_summary_window(trades_df: pd.DataFrame) -> Tuple[pd.Timestamp, pd.Ti
 
 
 def write_live_reports(final_state: Dict, closed_trades: List[TradeResult]) -> None:
-    # Append new trades to cumulative log FIRST
-    for trade in closed_trades:
-        append_trade_log(trade)
-    
-    # Also write to snapshot files
+    # Load existing trades from JSON (single source of truth)
+    json_path = os.path.join(get_report_dir(), "trading_summary.json")
+    existing_trades, _ = load_from_summary_json(json_path)
+
+    # Convert new trades to dict format
     current_trades_df = trades_to_dataframe(closed_trades)
-    write_closed_trades_report(current_trades_df, SIMULATION_LOG_FILE, SIMULATION_LOG_JSON)
-    
-    # NOW load ALL historical trades from cumulative log for display
-    all_trades_df = _load_trade_log_dataframe(TRADE_LOG_FILE)
-    if all_trades_df.empty:
-        all_trades_df = current_trades_df
+    new_trades_list = current_trades_df.to_dict(orient="records") if not current_trades_df.empty else []
+
+    # Merge new trades with existing
+    all_trades_list = merge_trades(existing_trades, new_trades_list)
+    all_trades_df = pd.DataFrame(all_trades_list) if all_trades_list else pd.DataFrame()
     
     # Use ALL historical trades for summary and charts
     open_positions = final_state.get("positions", [])
@@ -4537,13 +4586,20 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
         else:
             print(f"[Sync] Paper trading state already up to date ({len(paper_state.get('positions', []))} positions)")
 
-        open_df = open_positions_to_dataframe(open_positions)
-        summary_data = build_summary_payload(trades_df, open_df, final_state, start_ts, end_ts)
-
-        # 1. JSON schreiben (single source of truth)
+        # Load existing trades from JSON and merge
         summary_json_path = args.summary_json or SIMULATION_SUMMARY_JSON
+        existing_trades, _ = load_from_summary_json(summary_json_path)
+
+        # Convert new trades to dict format and merge
+        new_trades_list = trades_df.to_dict(orient="records") if not trades_df.empty else []
+        all_trades_list = merge_trades(existing_trades, new_trades_list)
+        all_trades_df = pd.DataFrame(all_trades_list) if all_trades_list else pd.DataFrame()
+
+        open_df = open_positions_to_dataframe(open_positions)
+        summary_data = build_summary_payload(all_trades_df, open_df, final_state, start_ts, end_ts)
+
+        # JSON schreiben (single source of truth)
         write_summary_json(summary_data, summary_json_path)
-        print(f"[Simulation] Summary JSON saved to {summary_json_path}")
 
         # 2. BEIDE HTML-Dateien aus JSON generieren
         try:
@@ -4583,15 +4639,15 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
                 print(f"{ss['symbol']:<12} {ss['trades']:>7} {ss['winners']:>5} {ss['losers']:>5} {ss['win_rate']:>5.1f}% {ss['total_pnl']:>12.2f} {ss['avg_pnl']:>10.2f} {ss['best_trade']:>10.2f} {ss['worst_trade']:>10.2f} {ss['max_drawdown']:>10.2f} {pf_str:>6}")
             print("=" * 120 + "\n")
 
-        generate_trade_charts(trades_df, output_dir=os.path.join(REPORT_DIR, "charts"))
-        generate_equity_curve(trades_df, start_capital=START_TOTAL_CAPITAL, output_dir=os.path.join(REPORT_DIR, "charts"))
+        generate_trade_charts(all_trades_df, output_dir=os.path.join(REPORT_DIR, "charts"))
+        generate_equity_curve(all_trades_df, start_capital=START_TOTAL_CAPITAL, output_dir=os.path.join(REPORT_DIR, "charts"))
         if open_positions:
             print(f"[Simulation] Open positions remaining: {len(open_positions)}")
         else:
             print("[Simulation] No open positions remaining.")
-        if not trades_df.empty:
+        if not all_trades_df.empty:
             # Show last trade from DataFrame (works for both new and merged trades)
-            last_row = trades_df.tail(1).iloc[0]
+            last_row = all_trades_df.tail(1).iloc[0]
             sym_val = last_row.get("symbol") or last_row.get("Symbol") or "?"
             dir_val = last_row.get("direction") or last_row.get("Direction") or "?"
             exit_val = last_row.get("exit_time") or last_row.get("ExitZeit") or "?"
