@@ -220,13 +220,11 @@ SIMULATION_TESTNET_DIR = "report_simulation_testnet"
 def get_report_dir(use_testnet: bool = False, is_simulation: bool = False) -> str:
     """Get report directory based on mode.
 
-    IMPORTANT: Testnet and non-testnet use SEPARATE directories to prevent
-    mixing USDT (testnet) and USDC (production) positions. This was a bug
-    that caused USDT positions to be stuck because no USDC cache data exists
-    for USDT symbols.
+    IMPORTANT: All non-testnet data goes to report_html/ (single source of truth).
+    Testnet data goes to report_testnet/.
+    The is_simulation parameter is ignored - we always use the same directory
+    to avoid Dashboard/Summary reading from different files.
     """
-    if is_simulation:
-        return "report_simulation_testnet" if use_testnet else "report_simulation"
     return "report_testnet" if use_testnet else "report_html"
 
 
