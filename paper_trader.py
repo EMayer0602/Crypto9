@@ -228,6 +228,81 @@ def get_report_dir(use_testnet: bool = False, is_simulation: bool = False) -> st
     return "report_testnet" if use_testnet else "report_html"
 
 
+# Binance-supported timeframes (non-standard ones are synthesized from 1h)
+BINANCE_SUPPORTED_TIMEFRAMES = {"1h", "2h", "4h", "6h", "8h", "12h", "1d"}
+
+
+def update_cache_for_trading(
+    symbols: List[str],
+    timeframes: Optional[List[str]] = None,
+    max_age_hours: float = 2.0,
+    warmup_days: int = 30,
+) -> None:
+    """Update OHLCV cache for trading symbols if outdated.
+
+    This ensures both live and simulation modes have fresh data.
+
+    Args:
+        symbols: List of trading symbols (e.g., ["BTC/USDC", "ETH/USDC"])
+        timeframes: List of timeframes to update. Defaults to ["1h"] (base for synthesis).
+        max_age_hours: Max age before cache is considered outdated. Default 2 hours.
+        warmup_days: Days of historical data to ensure. Default 30.
+    """
+    if not symbols:
+        print("[Cache] No symbols to update")
+        return
+
+    # Always need 1h for synthesis of non-standard timeframes
+    if timeframes is None:
+        timeframes = ["1h"]
+    elif "1h" not in timeframes:
+        timeframes = ["1h"] + list(timeframes)
+
+    # Filter to Binance-supported timeframes only
+    timeframes = [tf for tf in timeframes if tf in BINANCE_SUPPORTED_TIMEFRAMES]
+
+    now = pd.Timestamp.now(tz=st.BERLIN_TZ)
+    download_start = now - pd.Timedelta(days=warmup_days)
+    download_end = now
+
+    print(f"[Cache] Checking {len(symbols)} symbols x {len(timeframes)} timeframes...")
+
+    updated_count = 0
+    for symbol in symbols:
+        for timeframe in timeframes:
+            try:
+                cached_df = st.load_ohlcv_from_cache(symbol, timeframe)
+
+                needs_download = False
+                if cached_df.empty:
+                    print(f"[Cache] No data for {symbol} {timeframe} - downloading...")
+                    needs_download = True
+                else:
+                    latest = cached_df.index.max()
+
+                    # Check if cache is outdated
+                    if latest < now - pd.Timedelta(hours=max_age_hours):
+                        print(f"[Cache] {symbol} {timeframe}: outdated (last: {latest.strftime('%Y-%m-%d %H:%M')}) - updating...")
+                        needs_download = True
+
+                if needs_download:
+                    st.download_historical_ohlcv(symbol, timeframe, download_start, download_end)
+                    updated_count += 1
+
+                    # Clear memory cache to force reload from persistent cache
+                    for key in list(st.DATA_CACHE.keys()):
+                        if key[0] == symbol and key[1] == timeframe:
+                            del st.DATA_CACHE[key]
+
+            except Exception as exc:
+                print(f"[Cache] Warning: Could not update {symbol} {timeframe}: {exc}")
+
+    if updated_count > 0:
+        print(f"[Cache] Updated {updated_count} cache files")
+    else:
+        print(f"[Cache] All cache files up to date")
+
+
 # Source of truth for trade signals (always report_html)
 SIGNAL_SOURCE_DIR = "report_html"
 BEST_PARAMS_CSV = st.OVERALL_PARAMS_CSV
@@ -3381,64 +3456,17 @@ def run_simulation(
 
     prune_state_for_indicators(sim_state, allowed_indicators)
 
-    # Pre-download historical data if needed
-    print(f"[Simulation] Checking historical data availability...")
-    unique_symbols = best_df['Symbol'].unique() if 'Symbol' in best_df.columns else []
+    # Update cache for simulation symbols
+    unique_symbols = list(best_df['Symbol'].unique()) if 'Symbol' in best_df.columns else []
 
-    # Only download Binance-supported timeframes
-    # Non-standard timeframes (3h, 9h, 15h, 18h, 21h, etc.) will be synthesized from 1h at runtime
-    BINANCE_SUPPORTED_TIMEFRAMES = {"1h", "2h", "4h", "6h", "8h", "12h", "1d"}
+    # Collect timeframes from best_df
     unique_timeframes = ["1h"]  # Always need 1h for synthesis
     if 'HTF' in best_df.columns:
         for tf in best_df['HTF'].unique():
             if tf in BINANCE_SUPPORTED_TIMEFRAMES and tf not in unique_timeframes:
                 unique_timeframes.append(tf)
 
-    # Add buffer for indicator warmup (30 days before start for safety)
-    download_start = start_ts - pd.Timedelta(days=30)
-
-    # Always update to latest available data (now)
-    now = pd.Timestamp.now(tz=st.BERLIN_TZ)
-    download_end = max(end_ts, now)
-
-    for symbol in unique_symbols:
-        for timeframe in unique_timeframes:
-            try:
-                # Check persistent cache directly (not limit-constrained)
-                cached_df = st.load_ohlcv_from_cache(symbol, timeframe)
-
-                needs_download = False
-                if cached_df.empty:
-                    print(f"[Simulation] No cached data for {symbol} {timeframe} - downloading...")
-                    needs_download = True
-                else:
-                    earliest = cached_df.index.min()
-                    latest = cached_df.index.max()
-
-                    # Check if we need historical data
-                    if earliest > download_start:
-                        print(f"[Simulation] {symbol} {timeframe}: Cache starts {earliest.strftime('%Y-%m-%d')}, need {download_start.strftime('%Y-%m-%d')} - downloading...")
-                        needs_download = True
-
-                    # Check if cache is outdated (older than 2 hours)
-                    elif latest < now - pd.Timedelta(hours=2):
-                        print(f"[Simulation] {symbol} {timeframe}: Cache outdated (last: {latest.strftime('%Y-%m-%d %H:%M')}), updating to now...")
-                        needs_download = True
-                    else:
-                        print(f"[Simulation] {symbol} {timeframe}: {len(cached_df)} bars, {earliest.strftime('%Y-%m-%d')} to {latest.strftime('%Y-%m-%d %H:%M')} [OK]")
-
-                if needs_download:
-                    st.download_historical_ohlcv(symbol, timeframe, download_start, download_end)
-
-                    # Clear memory cache to force reload from persistent cache
-                    for key in list(st.DATA_CACHE.keys()):
-                        if key[0] == symbol and key[1] == timeframe:
-                            del st.DATA_CACHE[key]
-
-            except Exception as exc:
-                print(f"[Simulation] Warning: Could not check/download {symbol} {timeframe}: {exc}")
-
-    print(f"[Simulation] Historical data check complete")
+    update_cache_for_trading(unique_symbols, unique_timeframes)
 
     buffer = pd.Timedelta(minutes=BASE_BAR_MINUTES * 5)
     all_trades: List[TradeResult] = []
@@ -3520,11 +3548,16 @@ def main(
         reset_state_file()
     if configure_exchange:
         st.configure_exchange(use_testnet=use_testnet)
-    # Clear data cache to get fresh synthetic bars for current period
-    st.clear_data_cache()
+
     # Always use USDC symbols (defined in TRADING_SYMBOLS)
     default_symbols = TRADING_SYMBOLS
     raw_symbols = allowed_symbols if allowed_symbols else default_symbols
+
+    # Update cache for trading symbols before processing signals
+    update_cache_for_trading(raw_symbols)
+
+    # Clear memory cache to force reload from persistent (now-updated) cache
+    st.clear_data_cache()
     print(f"[DEBUG] use_testnet={use_testnet}, raw_symbols={raw_symbols}")
     config_df = ensure_config(raw_symbols or default_symbols)
     cfg_lookup = load_config_lookup(config_df)
