@@ -212,9 +212,6 @@ SIMULATION_LOG_JSON = "paper_trading_simulation_log.json"
 REPORT_DIR = "report_html"
 SIMULATION_SUMMARY_HTML = os.path.join("report_html", "trading_summary.html")
 SIMULATION_SUMMARY_JSON = os.path.join("report_html", "trading_summary.json")
-# Separate output directories for --simulate mode
-SIMULATION_OUTPUT_DIR = "report_simulation"
-SIMULATION_TESTNET_DIR = "report_simulation_testnet"
 
 
 def get_report_dir(use_testnet: bool = False, is_simulation: bool = False) -> str:
@@ -3735,16 +3732,9 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
     SIMULATION_SUMMARY_JSON = os.path.join(REPORT_DIR, "trading_summary.json")
     print(f"[Config] Data file: {SIMULATION_SUMMARY_JSON}")
 
-    # Create report directory and state file parent
+    # Create report directory
     os.makedirs(REPORT_DIR, exist_ok=True)
-
-    # Create simulation directories if needed
-    if is_simulation:
-        os.makedirs(SIMULATION_OUTPUT_DIR, exist_ok=True)
-        os.makedirs(SIMULATION_TESTNET_DIR, exist_ok=True)
-        os.makedirs(os.path.join(SIMULATION_OUTPUT_DIR, "charts"), exist_ok=True)
-        print(f"[Config] Simulation mode: output to {REPORT_DIR}")
-    elif use_testnet:
+    if use_testnet:
         print(f"[Config] Using testnet report directory: {REPORT_DIR}")
 
     set_signal_debug(args.debug_signals)
