@@ -2499,6 +2499,96 @@ def write_summary_json(summary: Dict[str, Any], path: str) -> None:
         json.dump(summary, fh, ensure_ascii=False, indent=2)
     print(f"[Simulation] Summary JSON saved to {path}")
 
+    # Also generate trading_summary.html
+    html_path = path.replace(".json", ".html")
+    write_summary_html(summary, html_path)
+
+
+def write_summary_html(summary: Dict[str, Any], path: str) -> None:
+    """Generate trading_summary.html from summary data."""
+    trades = summary.get("trades", [])
+    open_positions = summary.get("open_positions_data", [])
+
+    # Statistics
+    total_trades = len(trades)
+    open_count = len(open_positions)
+    total_pnl = sum(float(t.get("pnl", 0) or 0) for t in trades)
+    winners = sum(1 for t in trades if float(t.get("pnl", 0) or 0) > 0)
+    losers = sum(1 for t in trades if float(t.get("pnl", 0) or 0) < 0)
+    win_rate = (winners / total_trades * 100) if total_trades > 0 else 0
+
+    def fmt(val):
+        """Format number with German locale."""
+        if val is None:
+            return ""
+        try:
+            return f"{float(val):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        except:
+            return str(val)
+
+    def pnl_class(val):
+        try:
+            return "pos" if float(val) >= 0 else "neg"
+        except:
+            return ""
+
+    html_parts = [
+        "<html><head><meta charset='utf-8'><title>Trading Summary</title>",
+        "<style>body{font-family:Arial;margin:20px}table{border-collapse:collapse;margin:12px 0}",
+        "th,td{border:1px solid #ccc;padding:6px 10px;text-align:right}th{background:#f0f0f0}",
+        "td:first-child{text-align:left}.pos{color:green}.neg{color:red}</style></head><body>",
+        "<h1>Trading Summary</h1>",
+        "<h2>Statistics</h2>",
+        "<table><tr><th>Metric</th><th>Value</th></tr>",
+        f"<tr><td>Closed trades</td><td>{total_trades}</td></tr>",
+        f"<tr><td>Open positions</td><td>{open_count}</td></tr>",
+        f"<tr><td>Total PnL</td><td class=\"{pnl_class(total_pnl)}\">{fmt(total_pnl)} USDT</td></tr>",
+        f"<tr><td>Winners</td><td>{winners}</td></tr>",
+        f"<tr><td>Losers</td><td>{losers}</td></tr>",
+        f"<tr><td>Win Rate</td><td>{win_rate:.1f}%</td></tr>",
+        "</table>",
+    ]
+
+    # Open Positions
+    html_parts.append(f"<h2>Open Positions ({open_count})</h2>")
+    html_parts.append("<table><tr><th>Symbol</th><th>Direction</th><th>Indicator</th><th>HTF</th><th>Entry Time</th><th>Entry Price</th><th>Stake</th></tr>")
+    for pos in open_positions:
+        symbol = pos.get("symbol", "")
+        direction = pos.get("direction", "")
+        indicator = pos.get("indicator", "")
+        htf = pos.get("htf", "")
+        entry_time = pos.get("entry_time", "")[:16] if pos.get("entry_time") else ""
+        entry_price = pos.get("entry_price", "")
+        stake = fmt(pos.get("stake", 0))
+        html_parts.append(f"<tr><td>{symbol}</td><td>{direction}</td><td>{indicator}</td><td>{htf}</td><td>{entry_time}</td><td>{entry_price}</td><td>{stake}</td></tr>")
+    html_parts.append("</table>")
+
+    # Closed Trades (show last 100)
+    html_parts.append(f"<h2>Closed Trades ({total_trades})</h2>")
+    html_parts.append("<table><tr><th>Symbol</th><th>Direction</th><th>Entry Time</th><th>Exit Time</th><th>Entry</th><th>Exit</th><th>PnL</th><th>Reason</th></tr>")
+
+    # Sort by exit_time descending and take last 100
+    sorted_trades = sorted(trades, key=lambda t: t.get("exit_time", "") or "", reverse=True)[:100]
+    for t in sorted_trades:
+        symbol = t.get("symbol", "")
+        direction = t.get("direction", "")
+        entry_time = (t.get("entry_time", "") or "")[:16]
+        exit_time = t.get("exit_time", "") or ""
+        entry_price = t.get("entry_price", "")
+        exit_price = t.get("exit_price", "")
+        pnl = float(t.get("pnl", 0) or 0)
+        reason = t.get("exit_reason", "")
+        html_parts.append(f"<tr><td>{symbol}</td><td>{direction}</td><td>{entry_time}</td><td>{exit_time}</td><td>{entry_price}</td><td>{exit_price}</td><td class='{pnl_class(pnl)}'>{fmt(pnl)}</td><td>{reason}</td></tr>")
+
+    html_parts.append("</table>")
+    if total_trades > 100:
+        html_parts.append(f"<p>Showing first 100 of {total_trades} trades</p>")
+    html_parts.append("</body></html>")
+
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write("\n".join(html_parts))
+    print(f"[Summary] HTML saved to {path}")
+
 
 def load_from_summary_json(path: str = None) -> tuple:
     """Load trades and open positions from trading_summary.json.
