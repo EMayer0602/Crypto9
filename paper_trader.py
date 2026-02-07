@@ -2548,12 +2548,14 @@ def write_summary_html(summary: Dict[str, Any], path: str) -> None:
         except:
             return ""
 
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     html_parts = [
-        "<html><head><meta charset='utf-8'><title>Trading Summary</title>",
+        "<html><head><meta charset='utf-8'><meta http-equiv='refresh' content='60'><title>Trading Summary</title>",
         "<style>body{font-family:Arial;margin:20px}table{border-collapse:collapse;margin:12px 0}",
         "th,td{border:1px solid #ccc;padding:6px 10px;text-align:right}th{background:#f0f0f0}",
-        "td:first-child{text-align:left}.pos{color:green}.neg{color:red}</style></head><body>",
+        "td:first-child{text-align:left}.pos{color:green}.neg{color:red}.source-note{color:#666;font-style:italic;margin-bottom:20px}</style></head><body>",
         "<h1>Trading Summary</h1>",
+        f"<p class='source-note'>Updated: {timestamp}</p>",
         "<h2>Statistics</h2>",
         "<table><tr><th>Metric</th><th>Value</th></tr>",
         f"<tr><td>Closed trades</td><td>{total_trades}</td></tr>",
