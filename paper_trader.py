@@ -3076,16 +3076,15 @@ def write_live_reports(final_state: Dict, closed_trades: List[TradeResult]) -> N
     else:
         print(f"[Live] Snapshot includes {len(current_trades_df)} new trade(s). Total history: {len(all_trades_df)} trades.")
 
-    # Update testnet dashboard if in testnet mode
-    if _TESTNET_ACTIVE:
-        try:
-            from TestnetDashboard import generate_dashboard
-            generate_dashboard(trades_since=_DASHBOARD_START, output_dir="report_testnet")
-            generate_dashboard(trades_since=_DASHBOARD_START, output_dir="report_testnet", lang="de")
-            start_str = _DASHBOARD_START.strftime("%Y-%m-%d") if _DASHBOARD_START else "all"
-            print(f"[Dashboard] Testnet dashboard updated (EN + DE) - trades since {start_str}")
-        except Exception as e:
-            print(f"[Dashboard] Failed to update: {e}")
+    # Always regenerate dashboards after updating trading_summary.json
+    try:
+        from TestnetDashboard import generate_dashboard
+        output_dir = Path(REPORT_DIR)
+        generate_dashboard(output_dir=output_dir, german=False)
+        generate_dashboard(output_dir=output_dir, german=True)
+        print(f"[Dashboard] Updated (EN + DE) in {REPORT_DIR}")
+    except Exception as e:
+        print(f"[Dashboard] Failed to update: {e}")
 
     return float(summary.get("final_capital", final_state.get("total_capital", 0.0)))
 
@@ -4179,7 +4178,16 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
 
         # JSON schreiben (single source of truth)
         write_summary_json(summary_data, summary_json_path)
-        # HTML wird von TestnetDashboard.py generiert
+
+        # Regenerate dashboards from updated JSON
+        try:
+            from TestnetDashboard import generate_dashboard
+            output_dir = Path(REPORT_DIR)
+            generate_dashboard(output_dir=output_dir, german=False)
+            generate_dashboard(output_dir=output_dir, german=True)
+            print(f"[Dashboard] Updated (EN + DE) in {REPORT_DIR}")
+        except Exception as e:
+            print(f"[Dashboard] Failed to update: {e}")
 
         # Print per-symbol statistics to console
         symbol_stats = summary_data.get("symbol_stats", [])
