@@ -2516,19 +2516,35 @@ def write_summary_html(summary: Dict[str, Any], path: str) -> None:
     winners = sum(1 for t in trades if float(t.get("pnl", 0) or 0) > 0)
     losers = sum(1 for t in trades if float(t.get("pnl", 0) or 0) < 0)
     win_rate = (winners / total_trades * 100) if total_trades > 0 else 0
+    open_pnl = sum(float(p.get("unrealized_pnl", 0) or 0) for p in open_positions)
 
     def fmt(val):
         """Format number with German locale."""
-        if val is None:
-            return ""
+        if val is None or val == "NaN":
+            return "-"
         try:
             return f"{float(val):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        except:
+            return str(val)
+
+    def fmt_pct(val):
+        """Format percentage."""
+        if val is None or val == "NaN":
+            return "-"
+        try:
+            return f"{float(val):+.2f}%"
         except:
             return str(val)
 
     def pnl_class(val):
         try:
             return "pos" if float(val) >= 0 else "neg"
+        except:
+            return ""
+
+    def status_text(val):
+        try:
+            return "Gewinn" if float(val) >= 0 else "Verlust"
         except:
             return ""
 
@@ -2542,16 +2558,17 @@ def write_summary_html(summary: Dict[str, Any], path: str) -> None:
         "<table><tr><th>Metric</th><th>Value</th></tr>",
         f"<tr><td>Closed trades</td><td>{total_trades}</td></tr>",
         f"<tr><td>Open positions</td><td>{open_count}</td></tr>",
-        f"<tr><td>Total PnL</td><td class=\"{pnl_class(total_pnl)}\">{fmt(total_pnl)} USDT</td></tr>",
+        f"<tr><td>Total PnL (closed)</td><td class=\"{pnl_class(total_pnl)}\">{fmt(total_pnl)} USDT</td></tr>",
+        f"<tr><td>Open PnL (unrealized)</td><td class=\"{pnl_class(open_pnl)}\">{fmt(open_pnl)} USDT</td></tr>",
         f"<tr><td>Winners</td><td>{winners}</td></tr>",
         f"<tr><td>Losers</td><td>{losers}</td></tr>",
         f"<tr><td>Win Rate</td><td>{win_rate:.1f}%</td></tr>",
         "</table>",
     ]
 
-    # Open Positions
-    html_parts.append(f"<h2>Open Positions ({open_count})</h2>")
-    html_parts.append("<table><tr><th>Symbol</th><th>Direction</th><th>Indicator</th><th>HTF</th><th>Entry Time</th><th>Entry Price</th><th>Stake</th></tr>")
+    # Open Positions with all columns
+    html_parts.append(f"<h2>Open Positions ({open_count}, Equity: <span class=\"{pnl_class(open_pnl)}\">{fmt(open_pnl)}</span>)</h2>")
+    html_parts.append("<table><tr><th>Symbol</th><th>Direction</th><th>Indicator</th><th>HTF</th><th>Entry Time</th><th>Entry Price</th><th>Last Price</th><th>Stake</th><th>Amount</th><th>Bars</th><th>PnL %</th><th>PnL</th><th>Status</th></tr>")
     for pos in open_positions:
         symbol = pos.get("symbol", "")
         direction = pos.get("direction", "")
@@ -2559,30 +2576,41 @@ def write_summary_html(summary: Dict[str, Any], path: str) -> None:
         htf = pos.get("htf", "")
         entry_time = pos.get("entry_time", "")[:16] if pos.get("entry_time") else ""
         entry_price = pos.get("entry_price", "")
+        last_price = pos.get("last_price", "")
         stake = fmt(pos.get("stake", 0))
-        html_parts.append(f"<tr><td>{symbol}</td><td>{direction}</td><td>{indicator}</td><td>{htf}</td><td>{entry_time}</td><td>{entry_price}</td><td>{stake}</td></tr>")
+        amount = fmt(pos.get("amount", 0))
+        bars_held = pos.get("bars_held", "")
+        unrealized_pct = float(pos.get("unrealized_pct", 0) or 0)
+        unrealized_pnl = float(pos.get("unrealized_pnl", 0) or 0)
+        status = status_text(unrealized_pnl)
+        html_parts.append(f"<tr><td>{symbol}</td><td>{direction}</td><td>{indicator}</td><td>{htf}</td><td>{entry_time}</td><td>{entry_price}</td><td>{last_price}</td><td>{stake}</td><td>{amount}</td><td>{bars_held}</td><td class='{pnl_class(unrealized_pct)}'>{fmt_pct(unrealized_pct)}</td><td class='{pnl_class(unrealized_pnl)}'>{fmt(unrealized_pnl)}</td><td class='{pnl_class(unrealized_pnl)}'>{status}</td></tr>")
     html_parts.append("</table>")
 
-    # Closed Trades (show last 100)
-    html_parts.append(f"<h2>Closed Trades ({total_trades})</h2>")
-    html_parts.append("<table><tr><th>Symbol</th><th>Direction</th><th>Entry Time</th><th>Exit Time</th><th>Entry</th><th>Exit</th><th>PnL</th><th>Reason</th></tr>")
+    # Closed Trades with all columns
+    html_parts.append(f"<h2>Closed Trades ({total_trades}, PnL: <span class=\"{pnl_class(total_pnl)}\">{fmt(total_pnl)}</span>)</h2>")
+    html_parts.append("<table><tr><th>Symbol</th><th>Direction</th><th>Indicator</th><th>HTF</th><th>Entry Time</th><th>Entry Price</th><th>Exit Time</th><th>Exit Price</th><th>Stake</th><th>Amount</th><th>PnL</th><th>%</th><th>Reason</th></tr>")
 
     # Sort by exit_time descending and take last 100
     sorted_trades = sorted(trades, key=lambda t: t.get("exit_time", "") or "", reverse=True)[:100]
     for t in sorted_trades:
         symbol = t.get("symbol", "")
         direction = t.get("direction", "")
+        indicator = t.get("indicator", "")
+        htf = t.get("htf", "")
         entry_time = (t.get("entry_time", "") or "")[:16]
-        exit_time = t.get("exit_time", "") or ""
         entry_price = t.get("entry_price", "")
+        exit_time = (t.get("exit_time", "") or "")[:16]
         exit_price = t.get("exit_price", "")
+        stake = fmt(t.get("stake", 0))
+        amount = fmt(t.get("amount", 0))
         pnl = float(t.get("pnl", 0) or 0)
-        reason = t.get("exit_reason", "")
-        html_parts.append(f"<tr><td>{symbol}</td><td>{direction}</td><td>{entry_time}</td><td>{exit_time}</td><td>{entry_price}</td><td>{exit_price}</td><td class='{pnl_class(pnl)}'>{fmt(pnl)}</td><td>{reason}</td></tr>")
+        pnl_pct = float(t.get("pnl_pct", 0) or 0)
+        reason = t.get("exit_reason", "") or t.get("reason", "")
+        html_parts.append(f"<tr><td>{symbol}</td><td>{direction}</td><td>{indicator}</td><td>{htf}</td><td>{entry_time}</td><td>{entry_price}</td><td>{exit_time}</td><td>{exit_price}</td><td>{stake}</td><td>{amount}</td><td class='{pnl_class(pnl)}'>{fmt(pnl)}</td><td class='{pnl_class(pnl_pct)}'>{fmt_pct(pnl_pct)}</td><td>{reason}</td></tr>")
 
     html_parts.append("</table>")
     if total_trades > 100:
-        html_parts.append(f"<p>Showing first 100 of {total_trades} trades</p>")
+        html_parts.append(f"<p>Showing last 100 of {total_trades} trades</p>")
     html_parts.append("</body></html>")
 
     with open(path, "w", encoding="utf-8") as fh:
