@@ -34147,5 +34147,10 @@
       "pnl": 14311.41,
       "reason": "Time-based exit (14 bars >= 4 optimal)"
     }
-  ]
+  ],
+  "state": {
+    "total_capital": 1188217.7991487426,
+    "last_processed_bar": {},
+    "symbol_trade_counts": {}
+  }
 }

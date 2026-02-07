@@ -205,33 +205,13 @@ def correct_historical_trades_pnl(json_path: str = None) -> int:
 
 
 CONFIG_FILE = "paper_trading_config.csv"
-STATE_FILE = "paper_trading_state.json"  # Default, will be overridden by get_state_file()
 TRADE_LOG_FILE = "paper_trading_log.csv"
 SIMULATION_LOG_FILE = "paper_trading_simulation_log.csv"
 SIMULATION_LOG_JSON = "paper_trading_simulation_log.json"
-SIMULATION_OPEN_POSITIONS_FILE = "paper_trading_actual_trades.csv"
-SIMULATION_OPEN_POSITIONS_JSON = "paper_trading_actual_trades.json"
 # Default paths - will be overridden by get_report_dir() for testnet
 REPORT_DIR = "report_html"
 SIMULATION_SUMMARY_HTML = os.path.join("report_html", "trading_summary.html")
 SIMULATION_SUMMARY_JSON = os.path.join("report_html", "trading_summary.json")
-
-# Separate output directories for --simulate mode (to not overwrite real trading data)
-SIMULATION_OUTPUT_DIR = "report_simulation"
-SIMULATION_TESTNET_DIR = "report_simulation_testnet"
-
-
-def get_state_file(use_testnet: bool = False, is_simulation: bool = False) -> str:
-    """Return the appropriate state file path based on mode.
-
-    Each mode has its own state file to prevent data mixing:
-    - Normal: report_html/state.json
-    - Testnet: report_testnet/state.json
-    - Simulation: report_simulation/state.json
-    - Simulation + Testnet: report_simulation_testnet/state.json
-    """
-    report_dir = get_report_dir(use_testnet, is_simulation)
-    return os.path.join(report_dir, "state.json")
 
 
 def get_report_dir(use_testnet: bool = False, is_simulation: bool = False) -> str:
@@ -1025,7 +1005,9 @@ def _safe_remove(path: str) -> None:
 
 
 def reset_state_file() -> None:
-    _safe_remove(STATE_FILE)
+    """Reset state in trading_summary.json to defaults."""
+    save_state(default_state())
+    print("[State] Reset state to defaults in trading_summary.json")
 
 
 def clear_positions_in_state() -> None:
@@ -1038,17 +1020,16 @@ def clear_positions_in_state() -> None:
 
 
 def clear_output_artifacts(include_state: bool = False) -> None:
+    """Clear output files. If include_state=True, also reset state in trading_summary.json."""
     targets = [
         TRADE_LOG_FILE,
         SIMULATION_LOG_FILE,
         SIMULATION_LOG_JSON,
-        SIMULATION_OPEN_POSITIONS_FILE,
-        SIMULATION_OPEN_POSITIONS_JSON,
         SIMULATION_SUMMARY_HTML,
-        SIMULATION_SUMMARY_JSON,
     ]
+    # Note: SIMULATION_SUMMARY_JSON is the single source of truth, only clear if include_state
     if include_state:
-        targets.append(STATE_FILE)
+        targets.append(SIMULATION_SUMMARY_JSON)
     for path in targets:
         _safe_remove(path)
 
@@ -1116,69 +1097,92 @@ def default_state() -> Dict:
     }
 
 
+def _get_summary_path() -> str:
+    """Get path to trading_summary.json (single source of truth)."""
+    return os.path.join(REPORT_DIR, "trading_summary.json")
+
+
 def load_state() -> Dict:
-    if os.path.exists(STATE_FILE):
-        with open(STATE_FILE, "r", encoding="utf-8") as fh:
-            return json.load(fh)
+    """Load state from trading_summary.json (single source of truth).
+
+    State fields are stored in trading_summary.json under 'state' key.
+    Positions are read from 'open_positions_data' for consistency.
+    """
+    summary_path = _get_summary_path()
+    if os.path.exists(summary_path):
+        try:
+            with open(summary_path, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+
+            # Extract state from summary
+            state_data = data.get("state", {})
+            positions = data.get("open_positions_data", [])
+
+            # Convert open_positions_data format to internal positions format
+            internal_positions = []
+            for pos in positions:
+                internal_positions.append({
+                    "key": f"{pos.get('symbol', '')}|{pos.get('indicator', 'jma')}|{pos.get('htf', '12h')}|{pos.get('direction', 'long')}",
+                    "symbol": pos.get("symbol", ""),
+                    "direction": pos.get("direction", "long"),
+                    "indicator": pos.get("indicator", "jma"),
+                    "htf": pos.get("htf", "12h"),
+                    "param_a": pos.get("param_a", 20.0),
+                    "param_b": pos.get("param_b", 0.0),
+                    "atr_mult": pos.get("atr_mult"),
+                    "min_hold_bars": pos.get("min_hold_bars", 4),
+                    "entry_price": pos.get("entry_price", 0),
+                    "entry_time": pos.get("entry_time", ""),
+                    "entry_atr": pos.get("entry_atr", 0),
+                    "stake": pos.get("stake", 0),
+                    "size_units": pos.get("size_units", 0),
+                })
+
+            return {
+                "total_capital": state_data.get("total_capital", data.get("final_capital", START_TOTAL_CAPITAL)),
+                "positions": internal_positions,
+                "last_processed_bar": state_data.get("last_processed_bar", {}),
+                "symbol_trade_counts": state_data.get("symbol_trade_counts", {}),
+            }
+        except Exception as e:
+            print(f"[State] Error loading from trading_summary.json: {e}")
     return default_state()
 
 
 def save_state(state: Dict) -> None:
-    with open(STATE_FILE, "w", encoding="utf-8") as fh:
-        json.dump(state, fh, indent=2)
+    """Save state to trading_summary.json (single source of truth).
 
-
-def sync_simulation_positions(state: Dict, use_testnet: bool = False) -> int:
-    """Sync simulation open positions to paper trading state.
-
-    If simulation shows a position that isn't in paper trading state, add it.
-    This ensures the monitor catches up with positions from the last backtest.
-    Returns the number of positions synced.
-
-    Note: Only syncs from the CURRENT report directory's state, not from root files.
+    Updates the 'state' and 'open_positions_data' fields in trading_summary.json.
     """
-    # Use the mode-specific state file, not the old root file
-    # This prevents cross-contamination between modes
-    sim_state_file = os.path.join(REPORT_DIR, "state.json")
-    if not os.path.exists(sim_state_file):
-        return 0
+    summary_path = _get_summary_path()
 
-    # Don't sync if we're already using this file as our state
-    if os.path.abspath(sim_state_file) == os.path.abspath(STATE_FILE):
-        return 0  # Same file, nothing to sync
+    # Load existing summary or create minimal structure
+    if os.path.exists(summary_path):
+        try:
+            with open(summary_path, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+        except:
+            data = {}
+    else:
+        data = {}
 
-    try:
-        with open(sim_state_file, "r", encoding="utf-8") as fh:
-            sim_state = json.load(fh)
-        sim_positions = sim_state.get("positions", [])
-    except Exception as e:
-        print(f"[Sync] Could not load simulation positions: {e}")
-        return 0
+    # Update state fields
+    data["state"] = {
+        "total_capital": state.get("total_capital", START_TOTAL_CAPITAL),
+        "last_processed_bar": state.get("last_processed_bar", {}),
+        "symbol_trade_counts": state.get("symbol_trade_counts", {}),
+    }
 
-    if not sim_positions:
-        return 0
+    # Update open_positions_data from positions
+    positions = state.get("positions", [])
+    data["open_positions_data"] = positions
+    data["open_positions"] = len(positions)
 
-    # Get existing position keys
-    existing_keys = set()
-    for pos in state.get("positions", []):
-        key = f"{pos.get('symbol', '')}|{pos.get('direction', '')}|{pos.get('indicator', '')}|{pos.get('htf', '')}"
-        existing_keys.add(key)
+    # Ensure directory exists
+    os.makedirs(os.path.dirname(summary_path) or ".", exist_ok=True)
 
-    synced = 0
-    for sim_pos in sim_positions:
-        sim_key = f"{sim_pos.get('symbol', '')}|{sim_pos.get('direction', '')}|{sim_pos.get('indicator', '')}|{sim_pos.get('htf', '')}"
-        if sim_key not in existing_keys:
-            # Add simulation position to state
-            state.setdefault("positions", []).append(sim_pos)
-            existing_keys.add(sim_key)
-            synced += 1
-            print(f"[Sync] Added position from simulation: {sim_pos.get('symbol')} {sim_pos.get('direction')} {sim_pos.get('indicator')}/{sim_pos.get('htf')}")
-
-    if synced > 0:
-        save_state(state)
-        print(f"[Sync] Synced {synced} positions from simulation to paper trading state")
-
-    return synced
+    with open(summary_path, "w", encoding="utf-8") as fh:
+        json.dump(data, fh, indent=2, ensure_ascii=False)
 
 
 def clone_state(use_saved_state: bool = False) -> Dict:
@@ -3545,8 +3549,6 @@ def main(
         print("[Skip] best_params_overall.csv enthält keine Daten.")
         return
     state = load_state()
-    # Sync positions from simulation (catch up with backtest)
-    sync_simulation_positions(state, use_testnet=use_testnet)
     prune_state_for_indicators(state, allowed_indicators)
     # Pass stake through: None = dynamic sizing, value = fixed stake
     stake_value = fixed_stake
@@ -3577,8 +3579,6 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--use-saved-state", action="store_true", help="Seed simulations with the saved JSON state instead of a fresh account")
     parser.add_argument("--sim-log", type=str, default=SIMULATION_LOG_FILE, help="CSV path for simulated trades")
     parser.add_argument("--sim-json", type=str, default=SIMULATION_LOG_JSON, help="JSON path for simulated trades")
-    parser.add_argument("--open-log", type=str, default=SIMULATION_OPEN_POSITIONS_FILE, help="CSV path for simulated open positions")
-    parser.add_argument("--open-json", type=str, default=SIMULATION_OPEN_POSITIONS_JSON, help="JSON path for simulated open positions")
     parser.add_argument("--summary-html", type=str, default=SIMULATION_SUMMARY_HTML, help="HTML summary output path")
     parser.add_argument("--summary-json", type=str, default=None, help="JSON summary output path (default: REPORT_DIR/trading_summary.json)")
     parser.add_argument("--replay-trades-csv", type=str, default=None, help="Use a precomputed trades CSV (e.g. last48_from_detailed_all.csv) instead of simulating")
@@ -3694,13 +3694,12 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
 
     # Update output paths based on testnet mode and simulation mode
     # Simulation mode uses separate directories to not overwrite real trading data
-    global SIMULATION_SUMMARY_HTML, SIMULATION_SUMMARY_JSON, REPORT_DIR, STATE_FILE
+    global SIMULATION_SUMMARY_HTML, SIMULATION_SUMMARY_JSON, REPORT_DIR
     is_simulation = bool(args.simulate)
     REPORT_DIR = get_report_dir(use_testnet, is_simulation)
-    STATE_FILE = get_state_file(use_testnet, is_simulation)
     SIMULATION_SUMMARY_HTML = os.path.join(REPORT_DIR, "trading_summary.html")
     SIMULATION_SUMMARY_JSON = os.path.join(REPORT_DIR, "trading_summary.json")
-    print(f"[Config] State file: {STATE_FILE}")
+    print(f"[Config] Data file: {SIMULATION_SUMMARY_JSON}")
 
     # Create report directory and state file parent
     os.makedirs(REPORT_DIR, exist_ok=True)
@@ -4141,15 +4140,6 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
         write_closed_trades_report(trades_df, log_path, log_json_path)
         print(f"[Simulation] Final capital: {final_state['total_capital']:.2f} USDT")
         # Removed: write_open_positions_report - open positions are in trading_summary.json
-
-        # Auto-sync simulation positions to paper trading state
-        paper_state = load_state()
-        synced = sync_simulation_positions(paper_state, use_testnet=use_testnet)
-        if synced > 0:
-            save_state(paper_state)
-            print(f"[Sync] Added {synced} simulation positions to paper trading state")
-        else:
-            print(f"[Sync] Paper trading state already up to date ({len(paper_state.get('positions', []))} positions)")
 
         # Load existing trades from JSON and merge
         summary_json_path = args.summary_json or SIMULATION_SUMMARY_JSON
