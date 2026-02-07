@@ -2,14 +2,66 @@
 
 ## Stabile Versionen
 
-| Version | Commit | Beschreibung |
-|---------|--------|--------------|
+| Version | Tag/Commit | Beschreibung |
+|---------|------------|--------------|
+| **first-live-dashboard** | `first-live-dashboard` | Live Dashboard mit auto-update von trading_summary.html, dashboard.html, dashboard_de.html |
 | **v1.0** | `8d967d2` | Erste korrekte Version - trading_summary.json als einzige Datenquelle |
 
-Wiederherstellen:
+### Wiederherstellen einer Version
+
 ```bash
+# Zur neuesten stabilen Dashboard-Version
+git checkout first-live-dashboard
+
+# Zur v1.0
 git checkout 8d967d2
+
+# Zurück zum aktuellen Stand
+git checkout main
 ```
+
+---
+
+## Design: Single Source of Truth
+
+Das System verwendet `trading_summary.json` als einzige Datenquelle:
+
+```
+┌─────────────────────┐
+│  paper_trader.py    │
+│  (Trading Logic)    │
+└──────────┬──────────┘
+           │ schreibt
+           ▼
+┌─────────────────────┐
+│ trading_summary.json│  ◄── Single Source of Truth
+└──────────┬──────────┘
+           │ generiert automatisch
+           ▼
+┌─────────────────────────────────────┐
+│ trading_summary.html                │
+│ dashboard.html (EN)                 │
+│ dashboard_de.html (DE)              │
+└─────────────────────────────────────┘
+```
+
+### Auto-Update bei jedem Zyklus
+
+Bei jedem `paper_trader.py` Lauf werden automatisch generiert:
+
+| Datei | Inhalt |
+|-------|--------|
+| `trading_summary.json` | Alle Trades + Open Positions (Datenquelle) |
+| `trading_summary.html` | Einfache HTML-Tabelle mit allen Spalten |
+| `dashboard.html` | Interaktives Dashboard (Englisch) |
+| `dashboard_de.html` | Interaktives Dashboard (Deutsch) |
+
+### Berechnete Felder
+
+| Feld | Formel |
+|------|--------|
+| Amount | `Stake / Entry Price` |
+| % | `(Exit Price / Entry Price - 1) * 100` |
 
 ---
 
@@ -306,26 +358,24 @@ python TestnetDashboard.py --loop --interval 30 --start 2026-01-01
 
 ## Output Directory Structure
 
-Different modes write to separate directories to prevent data conflicts:
-
 | Mode | Output Directory | Description |
 |------|------------------|-------------|
-| **Normal** | `report_html/` | Live trading reports |
+| **Normal + Simulation** | `report_html/` | Alle Produktions-Reports (Single Source of Truth) |
 | **Testnet** | `report_testnet/` | Testnet trading reports |
-| **Simulation** | `report_simulation/` | Simulation-only reports |
-| **Simulation + Testnet** | `report_simulation_testnet/` | Testnet simulation reports |
 
-Each directory contains:
+**Wichtig:** Simulation und Live-Modus verwenden dasselbe Verzeichnis (`report_html/`), damit Dashboard und Summary immer synchron sind.
+
+Verzeichnisstruktur:
 ```
-report_*/
-├── trading_summary.html      # HTML summary report
-├── trading_summary.json      # JSON data for dashboard
-├── dashboard.html            # English dashboard
-├── dashboard_de.html         # German dashboard (Deutsch)
+report_html/
+├── trading_summary.json      # Datenquelle (Single Source of Truth)
+├── trading_summary.html      # HTML Summary mit allen Spalten
+├── dashboard.html            # Interaktives Dashboard (EN)
+├── dashboard_de.html         # Interaktives Dashboard (DE)
 └── charts/
-    ├── equity_curve.html     # Capital growth visualization
-    ├── monthly_returns.html  # Monthly PnL bar chart
-    └── [SYMBOL]_chart.html   # Per-symbol price charts
+    ├── equity_curve.html     # Kapitalkurve mit Drawdown
+    ├── monthly_returns.html  # Monatliche PnL-Balken
+    └── [SYMBOL]_chart.html   # Preischarts pro Symbol
 ```
 
 ---
