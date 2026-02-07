@@ -52,9 +52,10 @@ START_CAPITAL = 16500.0
 MAX_POSITIONS = 10
 START_DATE = "2025-12-01"  # Trades before this date are ignored
 
-# Fixed paths
-SOURCE_JSON = Path("report_html/trading_summary.json")
-OUTPUT_DIR = Path("report_testnet")
+# Fixed paths - all in one folder
+REPORT_DIR = Path("report_html")
+SOURCE_JSON = REPORT_DIR / "trading_summary.json"
+OUTPUT_DIR = REPORT_DIR
 
 
 def parse_number(s: str) -> float:
@@ -546,7 +547,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Generate trading dashboard")
     parser.add_argument("--start", type=str, default=START_DATE, help="Start date YYYY-MM-DD (default: 2025-12-01)")
-    parser.add_argument("--output-dir", type=str, default="report_testnet", help="Output directory")
+    parser.add_argument("--output-dir", type=str, default="report_html", help="Output directory")
     parser.add_argument("--loop", action="store_true", help="Run continuously")
     parser.add_argument("--interval", type=int, default=300, help="Loop interval in seconds (default: 300)")
     parser.add_argument("--no-refresh", action="store_true", help="Skip paper_trader.py refresh (use existing data)")
