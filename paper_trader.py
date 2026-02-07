@@ -294,8 +294,9 @@ DEFAULT_SPIKE_INTERVAL_MIN = 5
 DEFAULT_ATR_SPIKE_MULT = 2.5
 DEFAULT_POLL_SECONDS = 30
 # Testnet uses same dynamic sizing as simulation (total_capital / STAKE_DIVISOR)
-TESTNET_POSITIONS_FILE = "crypto9_testnet_positions.json"
-TESTNET_CLOSED_TRADES_FILE = "crypto9_testnet_closed_trades.json"
+# Testnet files go to report_testnet/ to prevent mixing with production
+TESTNET_POSITIONS_FILE = "report_testnet/crypto9_testnet_positions.json"
+TESTNET_CLOSED_TRADES_FILE = "report_testnet/crypto9_testnet_closed_trades.json"
 
 
 def save_testnet_position(position: Dict, use_testnet: bool = False) -> None:
