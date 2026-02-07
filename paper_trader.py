@@ -4539,32 +4539,36 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
 
         open_df = open_positions_to_dataframe(open_positions)
         summary_data = build_summary_payload(trades_df, open_df, final_state, start_ts, end_ts)
-        summary_html_path = args.summary_html or SIMULATION_SUMMARY_HTML
-        generate_summary_html(summary_data, trades_df, open_df, summary_html_path)
+
+        # 1. JSON schreiben (single source of truth)
         summary_json_path = args.summary_json or SIMULATION_SUMMARY_JSON
         write_summary_json(summary_data, summary_json_path)
         print(f"[Simulation] Summary JSON saved to {summary_json_path}")
 
-        # Generate dashboards FROM the JSON file (single source of truth)
+        # 2. BEIDE HTML-Dateien aus JSON generieren
         try:
             dashboard_start = pd.to_datetime(args.dashboard_start).tz_localize(st.BERLIN_TZ)
         except Exception:
             dashboard_start = pd.Timestamp("2025-12-01", tz=st.BERLIN_TZ)
 
-        # Read back from JSON to ensure dashboard uses saved data
-        try:
-            with open(summary_json_path, "r", encoding="utf-8") as f:
-                saved_summary = json.load(f)
-            saved_trades = saved_summary.get("trades", [])
-            saved_open_positions = saved_summary.get("open_positions_data", [])
-            saved_final_capital = saved_summary.get("final_capital", final_state.get("total_capital", START_TOTAL_CAPITAL))
-            saved_state = {"total_capital": saved_final_capital, "positions": saved_open_positions}
-            saved_trades_df = pd.DataFrame(saved_trades) if saved_trades else pd.DataFrame()
-            print(f"[Dashboard] Reading from {summary_json_path}: {len(saved_trades)} trades, {len(saved_open_positions)} open positions")
-            generate_testnet_dashboard(saved_trades_df, saved_open_positions, saved_state, dashboard_start, output_dir=REPORT_DIR)
-        except Exception as e:
-            print(f"[Dashboard] Error reading JSON, using memory data: {e}")
-            generate_testnet_dashboard(trades_df, open_positions, final_state, dashboard_start, output_dir=REPORT_DIR)
+        # Read from JSON (single source of truth)
+        with open(summary_json_path, "r", encoding="utf-8") as f:
+            saved_summary = json.load(f)
+        saved_trades = saved_summary.get("trades", [])
+        saved_open_positions = saved_summary.get("open_positions_data", [])
+        saved_final_capital = saved_summary.get("final_capital", final_state.get("total_capital", START_TOTAL_CAPITAL))
+        saved_trades_df = pd.DataFrame(saved_trades) if saved_trades else pd.DataFrame()
+        saved_open_df = pd.DataFrame(saved_open_positions) if saved_open_positions else pd.DataFrame()
+        saved_state = {"total_capital": saved_final_capital, "positions": saved_open_positions}
+
+        print(f"[HTML] Generating from {summary_json_path}: {len(saved_trades)} trades, {len(saved_open_positions)} open positions")
+
+        # Generate summary HTML from JSON
+        summary_html_path = args.summary_html or SIMULATION_SUMMARY_HTML
+        generate_summary_html(saved_summary, saved_trades_df, saved_open_df, summary_html_path)
+
+        # Generate dashboard from JSON
+        generate_testnet_dashboard(saved_trades_df, saved_open_positions, saved_state, dashboard_start, output_dir=REPORT_DIR)
 
         # Print per-symbol statistics to console
         symbol_stats = summary_data.get("symbol_stats", [])
