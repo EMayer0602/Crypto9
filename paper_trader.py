@@ -3808,7 +3808,7 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
       HISTORICAL_START = pd.Timestamp("2025-01-01", tz=st.BERLIN_TZ)
 
       # Check if existing trades file has data - if yes, append; if no, start fresh from 2025-01-01
-      summary_path = args.summary_json or "report_testnet/trading_summary.json"
+      summary_path = args.summary_json or SIMULATION_SUMMARY_JSON
 
       if not os.path.exists(summary_path):
           # No file exists - FRESH START from 2025-01-01 to now
