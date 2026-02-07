@@ -2600,13 +2600,13 @@ def write_summary_html(summary: Dict[str, Any], path: str) -> None:
         entry_time = (t.get("entry_time", "") or "")[:16]
         entry_price_val = float(t.get("entry_price", 0) or 0)
         exit_time = (t.get("exit_time", "") or "")[:16]
-        exit_price = t.get("exit_price", "")
+        exit_price_val = float(t.get("exit_price", 0) or 0)
         stake_val = float(t.get("stake", 0) or 0)
         amount = stake_val / entry_price_val if entry_price_val > 0 else 0
         pnl = float(t.get("pnl", 0) or 0)
-        pnl_pct = float(t.get("pnl_pct", 0) or 0)
+        pnl_pct = (exit_price_val / entry_price_val - 1) * 100 if entry_price_val > 0 else 0
         reason = t.get("exit_reason", "") or t.get("reason", "")
-        html_parts.append(f"<tr><td>{symbol}</td><td>{direction}</td><td>{indicator}</td><td>{htf}</td><td>{entry_time}</td><td>{entry_price_val}</td><td>{exit_time}</td><td>{exit_price}</td><td>{fmt(stake_val)}</td><td>{fmt(amount)}</td><td class='{pnl_class(pnl)}'>{fmt(pnl)}</td><td class='{pnl_class(pnl_pct)}'>{fmt_pct(pnl_pct)}</td><td>{reason}</td></tr>")
+        html_parts.append(f"<tr><td>{symbol}</td><td>{direction}</td><td>{indicator}</td><td>{htf}</td><td>{entry_time}</td><td>{entry_price_val}</td><td>{exit_time}</td><td>{exit_price_val}</td><td>{fmt(stake_val)}</td><td>{fmt(amount)}</td><td class='{pnl_class(pnl)}'>{fmt(pnl)}</td><td class='{pnl_class(pnl_pct)}'>{fmt_pct(pnl_pct)}</td><td>{reason}</td></tr>")
 
     html_parts.append("</table>")
     if total_trades > 100:
