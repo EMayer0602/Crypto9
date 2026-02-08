@@ -342,8 +342,9 @@ class LRUCache:
 
 
 # LRU caches with size limits (prevents unbounded memory growth)
-DATA_CACHE = LRUCache(maxsize=200)  # ~200 symbol/timeframe combos
-FUTURES_DATA_CACHE = LRUCache(maxsize=100)  # Futures data cache
+# Sized for multi-year analysis: 50 symbols × 10 timeframes = 500 combos
+DATA_CACHE = LRUCache(maxsize=500)
+FUTURES_DATA_CACHE = LRUCache(maxsize=250)
 
 
 def clear_data_cache():
