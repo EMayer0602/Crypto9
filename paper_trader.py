@@ -2623,15 +2623,46 @@ def write_summary_json(summary: Dict[str, Any], path: str) -> None:
 def write_summary_html(summary: Dict[str, Any], path: str) -> None:
     """Generate trading_summary.html from summary data."""
     trades = summary.get("trades", [])
-    open_positions = summary.get("open_positions_data", [])
+    open_positions_raw = summary.get("open_positions_data", [])
 
-    # Statistics
+    # Statistics from closed trades (already recalculated with compound growth)
     total_trades = len(trades)
-    open_count = len(open_positions)
+    open_count = len(open_positions_raw)
     total_pnl = sum(float(t.get("pnl", 0) or 0) for t in trades)
     winners = sum(1 for t in trades if float(t.get("pnl", 0) or 0) > 0)
     losers = sum(1 for t in trades if float(t.get("pnl", 0) or 0) < 0)
     win_rate = (winners / total_trades * 100) if total_trades > 0 else 0
+
+    # Calculate final capital from closed trades for dynamic stake
+    # Start capital = 16500, compound growth through all trades
+    final_capital = summary.get("final_capital", 16500.0)
+    max_positions = 10
+    dynamic_stake = final_capital / max_positions
+
+    # Recalculate open positions with dynamic stake
+    open_positions = []
+    for p in open_positions_raw:
+        entry_price = float(p.get("entry_price", 0) or 0)
+        last_price = float(p.get("last_price", 0) or 0)
+        direction = str(p.get("direction", "long")).lower()
+        stake = dynamic_stake
+
+        if entry_price > 0 and stake > 0:
+            if direction == "long":
+                pnl_pct = (last_price - entry_price) / entry_price
+            else:
+                pnl_pct = (entry_price - last_price) / entry_price
+            unrealized_pnl = pnl_pct * stake
+        else:
+            pnl_pct = 0
+            unrealized_pnl = 0
+
+        recalc_pos = dict(p)
+        recalc_pos["stake"] = stake
+        recalc_pos["unrealized_pnl"] = unrealized_pnl
+        recalc_pos["unrealized_pct"] = pnl_pct * 100
+        open_positions.append(recalc_pos)
+
     open_pnl = sum(float(p.get("unrealized_pnl", 0) or 0) for p in open_positions)
 
     def fmt(val):

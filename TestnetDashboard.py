@@ -345,28 +345,30 @@ def generate_dashboard(start_date: str = None, output_dir: Path = None, german: 
 
     final_capital = capital
 
-    # === RECALCULATE OPEN POSITIONS WITH ORIGINAL STAKE ===
+    # === RECALCULATE OPEN POSITIONS WITH DYNAMIC STAKE ===
+    # Dynamic stake = final_capital / MAX_POSITIONS (consistent with closed trades compound growth)
+    dynamic_stake = final_capital / MAX_POSITIONS
     recalculated_open = []
 
     for p in open_positions:
         entry_price = p.get("entry_price", 0)
         last_price = p.get("last_price", 0)
         direction = p.get("direction", "").lower()
-        # Use original stake from JSON (not recalculated)
-        original_stake = p.get("stake", 0)
+        # Use dynamic stake based on current capital (not original stake from JSON)
+        stake = dynamic_stake
 
-        if entry_price > 0 and original_stake > 0:
+        if entry_price > 0 and stake > 0:
             if direction == "long":
                 pnl_pct = (last_price - entry_price) / entry_price
             else:  # short
                 pnl_pct = (entry_price - last_price) / entry_price
-            unrealized_pnl = pnl_pct * original_stake
+            unrealized_pnl = pnl_pct * stake
         else:
             pnl_pct = 0
             unrealized_pnl = 0
 
         recalc_pos = dict(p)
-        recalc_pos["stake"] = original_stake
+        recalc_pos["stake"] = stake
         recalc_pos["unrealized_pnl"] = unrealized_pnl
         recalc_pos["unrealized_pct"] = pnl_pct * 100
         recalc_pos["status"] = "Gewinn" if unrealized_pnl > 0 else "Verlust" if unrealized_pnl < 0 else "Flat"
