@@ -3308,7 +3308,8 @@ def _derive_summary_window(trades_df: pd.DataFrame) -> Tuple[pd.Timestamp, pd.Ti
 
 def write_live_reports(final_state: Dict, closed_trades: List[TradeResult]) -> None:
     # Load existing trades from JSON (single source of truth)
-    json_path = os.path.join(get_report_dir(), "trading_summary.json")
+    # Use SIMULATION_SUMMARY_JSON to ensure consistency with write path
+    json_path = SIMULATION_SUMMARY_JSON
     existing_trades, _ = load_from_summary_json(json_path)
 
     # Convert new trades to dict format
@@ -3686,7 +3687,8 @@ def run_simulation(
     sim_state = clone_state(use_saved_state)
 
     # Load open positions from trading_summary.json so simulation can process exits
-    summary_json = os.path.join(get_report_dir(), "trading_summary.json")
+    # Use SIMULATION_SUMMARY_JSON for consistency (set by run_cli based on use_testnet)
+    summary_json = SIMULATION_SUMMARY_JSON
     if os.path.exists(summary_json):
         try:
             with open(summary_json, "r", encoding="utf-8") as f:
