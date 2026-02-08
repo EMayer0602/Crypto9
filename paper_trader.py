@@ -1325,6 +1325,24 @@ def save_state(state: Dict) -> None:
     with open(summary_path, "w", encoding="utf-8") as fh:
         json.dump(data, fh, indent=2, ensure_ascii=False)
 
+    # Post-process to replace scientific notation with decimal format
+    # This ensures LUNC prices like 3.749e-05 become 0.00003749
+    import re
+    with open(summary_path, "r", encoding="utf-8") as fh:
+        content = fh.read()
+
+    def replace_scientific(match):
+        try:
+            value = float(match.group(0))
+            return format(value, '.10f').rstrip('0').rstrip('.')
+        except (ValueError, OverflowError):
+            return match.group(0)
+
+    content = re.sub(r'-?\d+\.?\d*[eE][+-]?\d+', replace_scientific, content)
+
+    with open(summary_path, "w", encoding="utf-8") as fh:
+        fh.write(content)
+
 
 def clone_state(use_saved_state: bool = False) -> Dict:
     base = load_state() if use_saved_state else default_state()
@@ -2570,8 +2588,31 @@ def build_summary_payload(
 
 
 def write_summary_json(summary: Dict[str, Any], path: str) -> None:
+    import re
+    # First write normally
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(summary, fh, ensure_ascii=False, indent=2)
+
+    # Post-process to replace scientific notation with decimal format
+    # This ensures LUNC prices like 3.749e-05 become 0.00003749
+    with open(path, "r", encoding="utf-8") as fh:
+        content = fh.read()
+
+    # Match scientific notation floats (e.g., 3.749e-05, 1.23E+10)
+    def replace_scientific(match):
+        try:
+            value = float(match.group(0))
+            # Format with enough precision, strip trailing zeros
+            formatted = format(value, '.10f').rstrip('0').rstrip('.')
+            return formatted
+        except (ValueError, OverflowError):
+            return match.group(0)
+
+    content = re.sub(r'-?\d+\.?\d*[eE][+-]?\d+', replace_scientific, content)
+
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(content)
+
     print(f"[Simulation] Summary JSON saved to {path}")
 
     # Also generate trading_summary.html

@@ -282,6 +282,7 @@ def parse_trades_from_json(json_path: Path, start_date: str = None) -> tuple[lis
             "entry_time": entry_time,
             "entry_price": float(p.get("entry_price", 0) or 0),
             "last_price": float(p.get("last_price", 0) or 0),
+            "stake": float(p.get("stake", 0) or 0),
             "bars_held": int(float(p.get("bars_held", 0) or 0)),
         })
 
@@ -344,27 +345,28 @@ def generate_dashboard(start_date: str = None, output_dir: Path = None, german: 
 
     final_capital = capital
 
-    # === RECALCULATE OPEN POSITIONS WITH FINAL CAPITAL ===
-    open_stake = final_capital / MAX_POSITIONS
+    # === RECALCULATE OPEN POSITIONS WITH ORIGINAL STAKE ===
     recalculated_open = []
 
     for p in open_positions:
         entry_price = p.get("entry_price", 0)
         last_price = p.get("last_price", 0)
         direction = p.get("direction", "").lower()
+        # Use original stake from JSON (not recalculated)
+        original_stake = p.get("stake", 0)
 
-        if entry_price > 0:
+        if entry_price > 0 and original_stake > 0:
             if direction == "long":
                 pnl_pct = (last_price - entry_price) / entry_price
             else:  # short
                 pnl_pct = (entry_price - last_price) / entry_price
-            unrealized_pnl = pnl_pct * open_stake
+            unrealized_pnl = pnl_pct * original_stake
         else:
             pnl_pct = 0
             unrealized_pnl = 0
 
         recalc_pos = dict(p)
-        recalc_pos["stake"] = open_stake
+        recalc_pos["stake"] = original_stake
         recalc_pos["unrealized_pnl"] = unrealized_pnl
         recalc_pos["unrealized_pct"] = pnl_pct * 100
         recalc_pos["status"] = "Gewinn" if unrealized_pnl > 0 else "Verlust" if unrealized_pnl < 0 else "Flat"
