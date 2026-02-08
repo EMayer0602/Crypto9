@@ -635,12 +635,44 @@ FUTURES_TESTNET_URL = "https://testnet.binancefuture.com"
 class BinanceFuturesOrderExecutor(OrderExecutor):
     """Order executor for Binance Futures Testnet (used for SHORT trades)."""
 
+    # Retry-Konfiguration
+    MAX_RETRIES = 3
+    RETRY_BACKOFF_BASE = 2  # Exponential backoff: 2s, 4s, 8s
+    REQUEST_TIMEOUT = 30
+
     def __init__(self, api_key: str = None, api_secret: str = None):
         self.api_key = api_key or os.getenv("BINANCE_API_KEY_TEST", "")
         self.api_secret = api_secret or os.getenv("BINANCE_API_SECRET_TEST", "")
         self.base_url = FUTURES_TESTNET_URL
         self.session = requests.Session()
         self._precision_cache: Dict[str, int] = {}
+        self._validate_api_keys()
+
+    def _validate_api_keys(self) -> None:
+        """Validate that API keys are configured."""
+        if not self.api_key or not self.api_key.strip():
+            print("[Futures] WARNING: BINANCE_API_KEY_TEST nicht konfiguriert")
+        if not self.api_secret or not self.api_secret.strip():
+            print("[Futures] WARNING: BINANCE_API_SECRET_TEST nicht konfiguriert")
+
+    def close(self) -> None:
+        """Close the session to prevent connection leaks."""
+        if self.session:
+            self.session.close()
+            self.session = None
+
+    def __enter__(self):
+        """Context manager entry."""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit - ensures session is closed."""
+        self.close()
+        return False
+
+    def __del__(self):
+        """Destructor - ensure session is closed."""
+        self.close()
 
     def _sign(self, params: dict) -> str:
         """Create HMAC SHA256 signature."""
@@ -653,7 +685,7 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
         return signature
 
     def _request(self, method: str, endpoint: str, params: dict = None, signed: bool = False) -> Optional[dict]:
-        """Execute API request."""
+        """Execute API request with retry logic and exponential backoff."""
         if params is None:
             params = {}
         headers = {"X-MBX-APIKEY": self.api_key}
@@ -663,22 +695,56 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
             params["timestamp"] = int(time.time() * 1000)
             params["signature"] = self._sign(params)
 
-        try:
-            if method == "GET":
-                response = self.session.get(url, params=params, headers=headers, timeout=30)
-            elif method == "POST":
-                response = self.session.post(url, params=params, headers=headers, timeout=30)
-            else:
+        last_error = None
+        for attempt in range(self.MAX_RETRIES + 1):
+            try:
+                if method == "GET":
+                    response = self.session.get(url, params=params, headers=headers, timeout=self.REQUEST_TIMEOUT)
+                elif method == "POST":
+                    response = self.session.post(url, params=params, headers=headers, timeout=self.REQUEST_TIMEOUT)
+                else:
+                    return None
+
+                # Rate-Limit (429) - wait and retry
+                if response.status_code == 429:
+                    retry_after = int(response.headers.get('Retry-After', self.RETRY_BACKOFF_BASE ** attempt))
+                    print(f"[Futures] Rate-Limit. Warte {retry_after}s (Versuch {attempt + 1}/{self.MAX_RETRIES + 1})")
+                    time.sleep(retry_after)
+                    continue
+
+                # Server Error (5xx) - wait and retry
+                if response.status_code >= 500:
+                    wait_time = self.RETRY_BACKOFF_BASE ** attempt
+                    print(f"[Futures] Server-Fehler {response.status_code}. Warte {wait_time}s (Versuch {attempt + 1}/{self.MAX_RETRIES + 1})")
+                    time.sleep(wait_time)
+                    continue
+
+                if response.status_code == 200:
+                    try:
+                        return response.json()
+                    except ValueError as e:
+                        print(f"[Futures] Ungültige JSON-Response: {e}")
+                        return None
+                else:
+                    print(f"[Futures] API Error: {response.status_code} - {response.text}")
+                    return None
+
+            except requests.exceptions.Timeout as e:
+                last_error = e
+                wait_time = self.RETRY_BACKOFF_BASE ** attempt
+                print(f"[Futures] Timeout. Warte {wait_time}s (Versuch {attempt + 1}/{self.MAX_RETRIES + 1})")
+                time.sleep(wait_time)
+            except requests.exceptions.ConnectionError as e:
+                last_error = e
+                wait_time = self.RETRY_BACKOFF_BASE ** attempt
+                print(f"[Futures] Verbindungsfehler. Warte {wait_time}s (Versuch {attempt + 1}/{self.MAX_RETRIES + 1})")
+                time.sleep(wait_time)
+            except requests.exceptions.RequestException as e:
+                print(f"[Futures] Request Error: {e}")
                 return None
 
-            if response.status_code == 200:
-                return response.json()
-            else:
-                print(f"[Futures] API Error: {response.status_code} - {response.text}")
-                return None
-        except Exception as e:
-            print(f"[Futures] Request Error: {e}")
-            return None
+        print(f"[Futures] Request fehlgeschlagen nach {self.MAX_RETRIES + 1} Versuchen: {last_error}")
+        return None
 
     def _get_precision(self, symbol: str) -> int:
         """Get quantity precision for a symbol."""
@@ -1144,8 +1210,9 @@ def ensure_config(symbols: List[str]) -> pd.DataFrame:
 
 def load_config_lookup(df: pd.DataFrame) -> Dict[str, ConfigEntry]:
     lookup: Dict[str, ConfigEntry] = {}
-    for _, row in df.iterrows():
-        raw_symbol = row.get("Symbol")
+    # Use itertuples() instead of iterrows() for 10-100x faster iteration
+    for row in df.itertuples(index=False):
+        raw_symbol = getattr(row, 'Symbol', None)
         if pd.isna(raw_symbol) or not isinstance(raw_symbol, str):
             continue  # Skip invalid rows
         symbol = raw_symbol.strip()
@@ -1153,10 +1220,10 @@ def load_config_lookup(df: pd.DataFrame) -> Dict[str, ConfigEntry]:
             continue
         lookup[symbol] = ConfigEntry(
             symbol=symbol,
-            enable_long=bool(row.get("EnableLong", True)),
-            enable_short=bool(row.get("EnableShort", True)),
-            long_capital=float(row.get("LongInitialCapital", DEFAULT_DIRECTION_CAPITAL)),
-            short_capital=float(row.get("ShortInitialCapital", DEFAULT_DIRECTION_CAPITAL)),
+            enable_long=bool(getattr(row, 'EnableLong', True)),
+            enable_short=bool(getattr(row, 'EnableShort', True)),
+            long_capital=float(getattr(row, 'LongInitialCapital', DEFAULT_DIRECTION_CAPITAL)),
+            short_capital=float(getattr(row, 'ShortInitialCapital', DEFAULT_DIRECTION_CAPITAL)),
         )
     return lookup
 
@@ -1234,7 +1301,8 @@ def save_state(state: Dict) -> None:
         try:
             with open(summary_path, "r", encoding="utf-8") as fh:
                 data = json.load(fh)
-        except:
+        except (json.JSONDecodeError, IOError, OSError) as e:
+            print(f"[Warning] Could not load {summary_path}: {e}")
             data = {}
     else:
         data = {}
@@ -1665,7 +1733,7 @@ def bars_in_position(entry_iso: str, latest_ts: pd.Timestamp, htf_timeframe: Opt
     if htf_timeframe:
         try:
             bar_minutes = st.timeframe_to_minutes(htf_timeframe)
-        except:
+        except (ValueError, AttributeError, TypeError):
             bar_minutes = BASE_BAR_MINUTES
     else:
         bar_minutes = BASE_BAR_MINUTES
@@ -2423,26 +2491,33 @@ def build_summary_payload(
         # Recalculate stakes with compound growth starting at 1650
         capital = 16500.0
         max_positions = 10
-        new_stakes = []
-        new_pnls = []
 
-        for idx, row in trades_export.iterrows():
+        # Vectorized pnl_pct calculation (much faster than iterrows)
+        entry_prices = trades_export["entry_price"].fillna(0).astype(float)
+        exit_prices = trades_export["exit_price"].fillna(0).astype(float)
+        directions = trades_export["direction"].fillna("long").astype(str).str.lower()
+
+        # Calculate pnl_pct vectorized
+        pnl_pct = np.where(
+            entry_prices > 0,
+            np.where(
+                directions == "long",
+                (exit_prices - entry_prices) / entry_prices,
+                (entry_prices - exit_prices) / entry_prices
+            ),
+            0.0
+        )
+
+        # Cumulative stake/pnl calculation (requires iteration due to compounding)
+        n = len(trades_export)
+        new_stakes = np.zeros(n)
+        new_pnls = np.zeros(n)
+
+        for i in range(n):
             stake = capital / max_positions
-            entry_price = float(row.get("entry_price", 0) or 0)
-            exit_price = float(row.get("exit_price", 0) or 0)
-            direction = str(row.get("direction", "long")).lower()
-
-            if entry_price > 0:
-                if direction == "long":
-                    pnl_pct = (exit_price - entry_price) / entry_price
-                else:
-                    pnl_pct = (entry_price - exit_price) / entry_price
-                pnl = pnl_pct * stake
-            else:
-                pnl = 0
-
-            new_stakes.append(stake)
-            new_pnls.append(pnl)
+            pnl = pnl_pct[i] * stake
+            new_stakes[i] = stake
+            new_pnls[i] = pnl
             capital += pnl
 
         trades_export["stake"] = new_stakes
@@ -2524,7 +2599,7 @@ def write_summary_html(summary: Dict[str, Any], path: str) -> None:
             return "-"
         try:
             return f"{float(val):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-        except:
+        except (ValueError, TypeError):
             return str(val)
 
     def fmt_pct(val):
@@ -2533,19 +2608,19 @@ def write_summary_html(summary: Dict[str, Any], path: str) -> None:
             return "-"
         try:
             return f"{float(val):+.2f}%"
-        except:
+        except (ValueError, TypeError):
             return str(val)
 
     def pnl_class(val):
         try:
             return "pos" if float(val) >= 0 else "neg"
-        except:
+        except (ValueError, TypeError):
             return ""
 
     def status_text(val):
         try:
             return "Gewinn" if float(val) >= 0 else "Verlust"
-        except:
+        except (ValueError, TypeError):
             return ""
 
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -4144,7 +4219,7 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
                                 else:
                                     entry_ts = entry_ts.tz_convert(st.BERLIN_TZ)
                                 bars_held = bars_in_position(entry_time_str, now_ts, htf)
-                            except:
+                            except (ValueError, TypeError, AttributeError, KeyError):
                                 bars_held = 0
                                 entry_ts = now_ts
 

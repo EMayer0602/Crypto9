@@ -297,19 +297,64 @@ BEST_PARAMS_FILE = "best_params.csv"
 
 _exchange = None
 _data_exchange = None
-DATA_CACHE = {}
+
+
+class LRUCache:
+	"""Simple LRU cache with size limit to prevent memory bloat."""
+
+	def __init__(self, maxsize: int = 100):
+		self.maxsize = maxsize
+		self._cache: dict = {}
+		self._order: list = []  # Track access order
+
+	def get(self, key):
+		"""Get item from cache, return None if not found."""
+		if key in self._cache:
+			# Move to end (most recently used)
+			self._order.remove(key)
+			self._order.append(key)
+			return self._cache[key]
+		return None
+
+	def set(self, key, value):
+		"""Set item in cache, evicting oldest if at capacity."""
+		if key in self._cache:
+			# Update existing - move to end
+			self._order.remove(key)
+		elif len(self._cache) >= self.maxsize:
+			# Evict oldest entry
+			oldest = self._order.pop(0)
+			del self._cache[oldest]
+
+		self._cache[key] = value
+		self._order.append(key)
+
+	def __contains__(self, key):
+		return key in self._cache
+
+	def clear(self):
+		"""Clear all entries."""
+		self._cache.clear()
+		self._order.clear()
+
+	def __len__(self):
+		return len(self._cache)
+
+
+# LRU caches with size limits (prevents unbounded memory growth)
+DATA_CACHE = LRUCache(maxsize=200)  # ~200 symbol/timeframe combos
+FUTURES_DATA_CACHE = LRUCache(maxsize=100)  # Futures data cache
 
 
 def clear_data_cache():
 	"""Clear the data cache to force fresh data fetch including updated synthetic bars."""
 	global DATA_CACHE, FUTURES_DATA_CACHE
-	DATA_CACHE = {}
-	FUTURES_DATA_CACHE = {}
+	DATA_CACHE.clear()
+	FUTURES_DATA_CACHE.clear()
 
 
 # Global futures exchange (unauthenticated, for public OHLCV data)
 _futures_exchange = None
-FUTURES_DATA_CACHE = {}
 
 
 def get_futures_exchange():
@@ -319,6 +364,7 @@ def get_futures_exchange():
 		_futures_exchange = ccxt.binance({
 			'options': {'defaultType': 'future'},
 			'enableRateLimit': True,
+			'timeout': 30000,  # 30 seconds timeout
 		})
 	return _futures_exchange
 
@@ -333,8 +379,9 @@ def fetch_futures_data(symbol: str, timeframe: str, limit: int) -> pd.DataFrame:
 	futures_symbol = f"{base}/USDT:USDT"
 
 	cache_key = (futures_symbol, timeframe, limit)
-	if cache_key in FUTURES_DATA_CACHE:
-		return FUTURES_DATA_CACHE[cache_key].copy()
+	cached = FUTURES_DATA_CACHE.get(cache_key)
+	if cached is not None:
+		return cached.copy()
 
 	try:
 		exchange = get_futures_exchange()
@@ -343,7 +390,7 @@ def fetch_futures_data(symbol: str, timeframe: str, limit: int) -> pd.DataFrame:
 		df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms", utc=True)
 		df.set_index("timestamp", inplace=True)
 		df.index = df.index.tz_convert(BERLIN_TZ)
-		FUTURES_DATA_CACHE[cache_key] = df
+		FUTURES_DATA_CACHE.set(cache_key, df)
 		print(f"[Futures] Loaded {len(df)} bars for {futures_symbol} {timeframe}")
 		return df.copy()
 	except Exception as e:
@@ -353,8 +400,7 @@ def fetch_futures_data(symbol: str, timeframe: str, limit: int) -> pd.DataFrame:
 
 def clear_futures_cache():
 	"""Clear futures data cache."""
-	global FUTURES_DATA_CACHE
-	FUTURES_DATA_CACHE = {}
+	FUTURES_DATA_CACHE.clear()
 
 
 # ============================================================================
@@ -458,7 +504,10 @@ def get_data_exchange():
 	if _data_exchange is None:
 		# Always use live exchange for data, never testnet
 		cls = getattr(ccxt, EXCHANGE_ID)
-		args = {"enableRateLimit": True}
+		args = {
+			"enableRateLimit": True,
+			"timeout": 30000,  # 30 seconds timeout
+		}
 		_data_exchange = cls(args)
 		# Disable currency warnings
 		options = dict(getattr(_data_exchange, "options", {}))
@@ -470,23 +519,73 @@ def get_data_exchange():
 	return _data_exchange
 
 
+def _retry_api_call(func, max_retries=3, base_delay=1.0):
+	"""Execute an API call with exponential backoff retry logic.
+
+	Args:
+		func: Callable that performs the API request
+		max_retries: Maximum number of retry attempts
+		base_delay: Base delay in seconds for exponential backoff
+
+	Returns:
+		The result of func() on success
+
+	Raises:
+		The last exception if all retries fail
+	"""
+	last_exception = None
+
+	for attempt in range(max_retries + 1):
+		try:
+			return func()
+		except ccxt.RateLimitExceeded as e:
+			last_exception = e
+			wait_time = base_delay * (2 ** attempt)
+			print(f"[API] Rate-Limit erreicht. Warte {wait_time:.1f}s (Versuch {attempt + 1}/{max_retries + 1})")
+			time.sleep(wait_time)
+		except ccxt.NetworkError as e:
+			last_exception = e
+			wait_time = base_delay * (2 ** attempt)
+			print(f"[API] Netzwerkfehler: {e}. Warte {wait_time:.1f}s (Versuch {attempt + 1}/{max_retries + 1})")
+			time.sleep(wait_time)
+		except ccxt.ExchangeNotAvailable as e:
+			last_exception = e
+			wait_time = base_delay * (2 ** attempt)
+			print(f"[API] Exchange nicht verfügbar. Warte {wait_time:.1f}s (Versuch {attempt + 1}/{max_retries + 1})")
+			time.sleep(wait_time)
+		except ccxt.ExchangeError as e:
+			# Don't retry on exchange errors (invalid symbol, etc.)
+			raise
+
+	raise last_exception
+
+
 def _fetch_direct_ohlcv(symbol, timeframe, limit):
-	"""Fetch OHLCV data directly from exchange API with proper error handling."""
+	"""Fetch OHLCV data directly from exchange API with retry logic."""
+	exchange = get_data_exchange()
+	buffer = max(50, limit // 5)
+	fetch_limit = limit + buffer
+	print(f"[API] Fetching {symbol} {timeframe} (limit={fetch_limit})...")
+
 	try:
-		exchange = get_data_exchange()
-		buffer = max(50, limit // 5)
-		fetch_limit = limit + buffer
-		print(f"[API] Fetching {symbol} {timeframe} (limit={fetch_limit})...")
-		ohlcv = exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=fetch_limit)
+		# Use retry wrapper for rate-limit and network errors
+		ohlcv = _retry_api_call(
+			lambda: exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=fetch_limit)
+		)
+
 		if not ohlcv:
 			print(f"[API] Warning: No data returned for {symbol} {timeframe}")
 			return pd.DataFrame()
+
 		cols = ["timestamp", "open", "high", "low", "close", "volume"]
 		df = pd.DataFrame(ohlcv, columns=cols)
 		df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms", utc=True).dt.tz_convert(BERLIN_TZ)
 		result = df.set_index("timestamp").tail(limit)
 		print(f"[API] Got {len(result)} bars for {symbol} {timeframe}")
 		return result
+	except ccxt.ExchangeError as exc:
+		print(f"[API] Exchange error fetching {symbol} {timeframe}: {exc}")
+		return pd.DataFrame()
 	except Exception as exc:
 		print(f"[API] ERROR fetching {symbol} {timeframe}: {exc}")
 		return pd.DataFrame()
@@ -633,8 +732,9 @@ def _fill_cache_gap(symbol, timeframe, cached_df):
 
 def fetch_data(symbol, timeframe, limit):
 	key = (symbol, timeframe, limit)
-	if key in DATA_CACHE:
-		base_df = DATA_CACHE[key]
+	cached_df = DATA_CACHE.get(key)
+	if cached_df is not None:
+		base_df = cached_df
 	else:
 		# Try loading from persistent cache first
 		persistent_df = load_ohlcv_from_cache(symbol, timeframe)
@@ -689,7 +789,7 @@ def fetch_data(symbol, timeframe, limit):
 					})
 					synth = synth.dropna(subset=["open", "high", "low", "close"])
 					cache_df = synth.tail(limit)
-		DATA_CACHE[key] = cache_df
+		DATA_CACHE.set(key, cache_df)
 		base_df = cache_df
 	df_copy = base_df.copy() if base_df is not None else pd.DataFrame()
 	df_with_live = _maybe_append_synthetic_bar(df_copy, symbol, timeframe)
@@ -750,12 +850,14 @@ def download_historical_ohlcv(symbol, timeframe, start_date, end_date=None):
 	batch_count = 0
 	while current_start < end_ms:
 		try:
-			# Fetch batch
-			ohlcv = exchange.fetch_ohlcv(
-				symbol,
-				timeframe=timeframe,
-				since=current_start,
-				limit=max_bars_per_request
+			# Fetch batch with retry logic for rate-limit and network errors
+			ohlcv = _retry_api_call(
+				lambda start=current_start: exchange.fetch_ohlcv(
+					symbol,
+					timeframe=timeframe,
+					since=start,
+					limit=max_bars_per_request
+				)
 			)
 
 			if not ohlcv:
@@ -773,10 +875,14 @@ def download_historical_ohlcv(symbol, timeframe, start_date, end_date=None):
 			current_date = pd.Timestamp(last_timestamp, unit='ms', tz='UTC').tz_convert(BERLIN_TZ)
 			print(f"[Download] Batch {batch_count}: Got {len(ohlcv)} bars, up to {current_date.strftime('%Y-%m-%d %H:%M')}")
 
-			# Rate limiting - sleep between requests
+			# Rate limiting - CCXT's enableRateLimit handles most cases,
+			# but we add a small delay for batch downloads to be safe
 			if current_start < end_ms:
-				time.sleep(0.5)  # 500ms between requests to avoid rate limits
+				time.sleep(0.3)
 
+		except ccxt.ExchangeError as exc:
+			print(f"[Download] Exchange error: {exc}")
+			break
 		except Exception as exc:
 			print(f"[Download] Error fetching data: {exc}")
 			break
@@ -2847,7 +2953,8 @@ def ensure_cache_populated(symbols, timeframe, min_bars):
 				print(f"[Cache Init] {symbol} {timeframe}: Downloaded {len(df)} bars")
 			else:
 				print(f"[Cache Init] {symbol} {timeframe}: WARNING - No data!")
-			time.sleep(0.5)
+			# Small delay between symbols (CCXT's enableRateLimit handles most rate-limiting)
+			time.sleep(0.3)
 
 		# Also cache Binance-supported HTF data for this symbol
 		for htf in binance_supported_tf:

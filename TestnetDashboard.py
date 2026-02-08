@@ -6,28 +6,115 @@ Single source of truth: trading_summary.json
 
 import json
 import re
+import time
 from datetime import datetime
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+# Lazy-loaded ccxt exchange instance (reused for all requests)
+_exchange = None
 
 
-def fetch_live_price(symbol: str) -> float | None:
-    """Fetch current price from Binance for a symbol."""
-    try:
+def _get_exchange():
+    """Get or create cached CCXT exchange instance with proper configuration."""
+    global _exchange
+    if _exchange is None:
         import ccxt
-        exchange = ccxt.binance()
-        ticker = exchange.fetch_ticker(symbol)
-        return ticker.get('last', None)
-    except Exception as e:
-        print(f"Could not fetch live price for {symbol}: {e}")
-        return None
+        _exchange = ccxt.binance({
+            'enableRateLimit': True,
+            'timeout': 30000,  # 30 seconds timeout
+            'options': {'adjustForTimeDifference': True}
+        })
+    return _exchange
+
+
+def fetch_live_prices_batch(symbols: list) -> dict:
+    """Fetch current prices for multiple symbols in one API call.
+
+    Args:
+        symbols: List of symbols like ['BTC/USDT', 'ETH/USDT']
+
+    Returns:
+        Dict mapping symbol -> price, e.g. {'BTC/USDT': 50000.0}
+    """
+    if not symbols:
+        return {}
+
+    exchange = _get_exchange()
+    prices = {}
+    max_retries = 3
+
+    for attempt in range(max_retries):
+        try:
+            # Use fetch_tickers for batch request (much more efficient)
+            tickers = exchange.fetch_tickers(symbols)
+            for symbol in symbols:
+                if symbol in tickers and tickers[symbol].get('last'):
+                    prices[symbol] = tickers[symbol]['last']
+            return prices
+
+        except Exception as e:
+            error_type = type(e).__name__
+            if 'RateLimitExceeded' in error_type or '429' in str(e):
+                wait_time = 2 ** attempt
+                print(f"Rate-Limit erreicht. Warte {wait_time}s (Versuch {attempt + 1}/{max_retries})")
+                time.sleep(wait_time)
+            elif 'NetworkError' in error_type or 'Timeout' in error_type:
+                wait_time = 2 ** attempt
+                print(f"Netzwerkfehler: {e}. Warte {wait_time}s (Versuch {attempt + 1}/{max_retries})")
+                time.sleep(wait_time)
+            else:
+                print(f"Could not fetch batch prices: {error_type}: {e}")
+                break
+
+    # Fallback: try individual fetches with parallel execution
+    return _fetch_prices_parallel(symbols)
+
+
+def _fetch_prices_parallel(symbols: list) -> dict:
+    """Fallback: Fetch prices in parallel using ThreadPoolExecutor."""
+    prices = {}
+
+    def fetch_single(symbol):
+        exchange = _get_exchange()
+        try:
+            ticker = exchange.fetch_ticker(symbol)
+            return symbol, ticker.get('last')
+        except Exception as e:
+            print(f"Could not fetch {symbol}: {e}")
+            return symbol, None
+
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        futures = {executor.submit(fetch_single, s): s for s in symbols}
+        for future in as_completed(futures, timeout=60):
+            try:
+                symbol, price = future.result()
+                if price is not None:
+                    prices[symbol] = price
+            except Exception as e:
+                print(f"Parallel fetch error: {e}")
+
+    return prices
 
 
 def update_open_positions_with_live_prices(open_positions: list) -> list:
-    """Update open positions with live prices from Binance."""
+    """Update open positions with live prices from Binance (batch fetch)."""
+    if not open_positions:
+        return []
+
+    # Collect all unique symbols
+    symbols = list(set(pos.get('symbol', '') for pos in open_positions if pos.get('symbol')))
+
+    # Batch fetch all prices at once
+    print(f"  Fetching {len(symbols)} symbols in batch...")
+    prices = fetch_live_prices_batch(symbols)
+    print(f"  Got prices for {len(prices)}/{len(symbols)} symbols")
+
     updated = []
     for pos in open_positions:
         symbol = pos.get('symbol', '')
-        live_price = fetch_live_price(symbol)
+        live_price = prices.get(symbol)
+
         if live_price:
             pos = dict(pos)  # Copy to avoid modifying original
             old_price = pos.get('last_price', 0)
@@ -81,7 +168,7 @@ def parse_number(s: str) -> float:
         s = s.replace(",", ".")
     try:
         return float(s)
-    except:
+    except (ValueError, TypeError):
         return 0.0
 
 
@@ -102,10 +189,10 @@ def parse_entry_time(entry_time: str) -> datetime:
     """Parse entry_time string to datetime."""
     try:
         return datetime.fromisoformat(entry_time.replace("Z", "+00:00"))
-    except:
+    except (ValueError, TypeError, AttributeError):
         try:
             return datetime.strptime(entry_time[:19], "%Y-%m-%d %H:%M:%S")
-        except:
+        except (ValueError, TypeError):
             return datetime.min
 
 
@@ -390,7 +477,7 @@ def generate_dashboard(start_date: str = None, output_dir: Path = None, german: 
             try:
                 entry_dt = datetime.fromisoformat(entry_time.replace("Z", "+00:00"))
                 entry_str = entry_dt.strftime("%Y-%m-%d %H:%M")
-            except:
+            except (ValueError, TypeError, AttributeError):
                 entry_str = entry_time[:16] if entry_time else "N/A"
 
             pnl = p.get("unrealized_pnl", 0)
@@ -426,12 +513,12 @@ def generate_dashboard(start_date: str = None, output_dir: Path = None, german: 
             try:
                 entry_dt = datetime.fromisoformat(entry_time.replace("Z", "+00:00"))
                 entry_str = entry_dt.strftime("%Y-%m-%d %H:%M")
-            except:
+            except (ValueError, TypeError, AttributeError):
                 entry_str = entry_time[:16] if entry_time else "N/A"
             try:
                 exit_dt = datetime.fromisoformat(exit_time.replace("Z", "+00:00"))
                 exit_str = exit_dt.strftime("%Y-%m-%d %H:%M")
-            except:
+            except (ValueError, TypeError, AttributeError):
                 exit_str = exit_time[:16] if exit_time else "N/A"
 
             pnl = t.get("pnl", 0)
