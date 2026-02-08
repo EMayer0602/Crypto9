@@ -1,6 +1,7 @@
 import os
 import math
 import json
+import time
 import shutil
 from pathlib import Path
 import ccxt
@@ -339,6 +340,18 @@ class LRUCache:
 
 	def __len__(self):
 		return len(self._cache)
+
+	def keys(self):
+		"""Return all keys in cache."""
+		return self._cache.keys()
+
+	def items(self):
+		"""Return all items in cache."""
+		return self._cache.items()
+
+	def values(self):
+		"""Return all values in cache."""
+		return self._cache.values()
 
 
 # LRU caches with size limits (prevents unbounded memory growth)
