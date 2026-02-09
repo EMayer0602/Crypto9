@@ -7,14 +7,21 @@
         body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
         .container { max-width: 1600px; margin: 0 auto; }
         h1 { color: #333; border-bottom: 2px solid #2196f3; padding-bottom: 10px; }
+        h2 { color: #333; margin-top: 40px; border-bottom: 1px solid #ccc; padding-bottom: 10px; }
+        h3 { color: #555; margin-top: 20px; }
         .note { background: #e3f2fd; padding: 15px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #2196f3; }
         table { border-collapse: collapse; width: 100%; margin: 20px 0; background: white; }
         th, td { border: 1px solid #ddd; padding: 10px; text-align: right; }
-        th { background: #2196f3; color: white; }
+        th { background: #2196f3; color: white; position: sticky; top: 0; }
         td:first-child { text-align: center; font-weight: bold; }
         .pos { color: green; font-weight: bold; }
         .neg { color: red; font-weight: bold; }
         .best { background: #e8f5e9; }
+        .trade-table { font-size: 13px; }
+        .trade-table th { background: #455a64; }
+        .trade-table td { padding: 6px 8px; }
+        .trade-table tr:nth-child(even) { background: #f9f9f9; }
+        .trade-table tr:hover { background: #e3f2fd; }
     </style>
 </head>
 <body>
@@ -24,7 +31,7 @@
     <div class="note">
         <strong>Konzept:</strong> Wenn der Preis nach X Minuten gestiegen ist, wird zum verzögerten Preis eingestiegen.<br>
         <strong>Kein Look-Ahead Bias:</strong> Entry-Preis = Preis bei T+Delay (nicht Signal-Preis)<br>
-        <strong>Original Win Rate:</strong> 56.4%
+        <strong>Original Win Rate:</strong> 53.7%
     </div>
 
     <table>
@@ -39,63 +46,2583 @@
             <th>Total Return</th>
         </tr>
         <tr class="best">
-            <td>5m</td>
-            <td>0</td>
-            <td>0.0%</td>
-            <td>0.0%</td>
-            <td class="neg">-56.4%</td>
+            <td>0m</td>
+            <td>231</td>
+            <td>100.0%</td>
+            <td>53.7%</td>
+            <td class="">+0.0%</td>
             <td>+0.00%</td>
-            <td>0.00%</td>
-            <td class="neg">+0.0%</td>
-        </tr>
-        <tr class="">
-            <td>10m</td>
-            <td>0</td>
-            <td>0.0%</td>
-            <td>0.0%</td>
-            <td class="neg">-56.4%</td>
-            <td>+0.00%</td>
-            <td>0.00%</td>
-            <td class="neg">+0.0%</td>
-        </tr>
-        <tr class="">
-            <td>15m</td>
-            <td>0</td>
-            <td>0.0%</td>
-            <td>0.0%</td>
-            <td class="neg">-56.4%</td>
-            <td>+0.00%</td>
-            <td>0.00%</td>
-            <td class="neg">+0.0%</td>
-        </tr>
-        <tr class="">
-            <td>30m</td>
-            <td>0</td>
-            <td>0.0%</td>
-            <td>0.0%</td>
-            <td class="neg">-56.4%</td>
-            <td>+0.00%</td>
-            <td>0.00%</td>
-            <td class="neg">+0.0%</td>
-        </tr>
-        <tr class="">
-            <td>45m</td>
-            <td>0</td>
-            <td>0.0%</td>
-            <td>0.0%</td>
-            <td class="neg">-56.4%</td>
-            <td>+0.00%</td>
-            <td>0.00%</td>
-            <td class="neg">+0.0%</td>
+            <td>1.19%</td>
+            <td class="pos">+30.7%</td>
         </tr>
     </table>
 
     <div style="background: white; padding: 20px; border-radius: 5px; margin: 20px 0;">
         <div>                        <script type="text/javascript">window.PlotlyConfig = {MathJaxConfig: 'local'};</script>
-        <script charset="utf-8" src="https://cdn.plot.ly/plotly-3.3.1.min.js" integrity="sha256-4rD3fugVb/nVJYUv5Ky3v+fYXoouHaBSP20WIJuEiWg=" crossorigin="anonymous"></script>                <div id="82189a61-309d-46a2-b9b4-cd6f7c67fa97" class="plotly-graph-div" style="height:900px; width:100%;"></div>            <script type="text/javascript">                window.PLOTLYENV=window.PLOTLYENV || {};                                if (document.getElementById("82189a61-309d-46a2-b9b4-cd6f7c67fa97")) {                    Plotly.newPlot(                        "82189a61-309d-46a2-b9b4-cd6f7c67fa97",                        [{"marker":{"color":["#2196f3","#4caf50","#ff9800","#9c27b0","#f44336"]},"showlegend":false,"text":["0.0%","0.0%","0.0%","0.0%","0.0%"],"textposition":"outside","x":["5m","10m","15m","30m","45m"],"y":[0,0,0,0,0],"type":"bar","xaxis":"x2","yaxis":"y2"}],                        {"template":{"data":{"histogram2dcontour":[{"type":"histogram2dcontour","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"choropleth":[{"type":"choropleth","colorbar":{"outlinewidth":0,"ticks":""}}],"histogram2d":[{"type":"histogram2d","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"heatmap":[{"type":"heatmap","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"contourcarpet":[{"type":"contourcarpet","colorbar":{"outlinewidth":0,"ticks":""}}],"contour":[{"type":"contour","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"surface":[{"type":"surface","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"mesh3d":[{"type":"mesh3d","colorbar":{"outlinewidth":0,"ticks":""}}],"scatter":[{"fillpattern":{"fillmode":"overlay","size":10,"solidity":0.2},"type":"scatter"}],"parcoords":[{"type":"parcoords","line":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatterpolargl":[{"type":"scatterpolargl","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"bar":[{"error_x":{"color":"#2a3f5f"},"error_y":{"color":"#2a3f5f"},"marker":{"line":{"color":"#E5ECF6","width":0.5},"pattern":{"fillmode":"overlay","size":10,"solidity":0.2}},"type":"bar"}],"scattergeo":[{"type":"scattergeo","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatterpolar":[{"type":"scatterpolar","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"histogram":[{"marker":{"pattern":{"fillmode":"overlay","size":10,"solidity":0.2}},"type":"histogram"}],"scattergl":[{"type":"scattergl","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatter3d":[{"type":"scatter3d","line":{"colorbar":{"outlinewidth":0,"ticks":""}},"marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scattermap":[{"type":"scattermap","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scattermapbox":[{"type":"scattermapbox","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatterternary":[{"type":"scatterternary","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scattercarpet":[{"type":"scattercarpet","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"carpet":[{"aaxis":{"endlinecolor":"#2a3f5f","gridcolor":"white","linecolor":"white","minorgridcolor":"white","startlinecolor":"#2a3f5f"},"baxis":{"endlinecolor":"#2a3f5f","gridcolor":"white","linecolor":"white","minorgridcolor":"white","startlinecolor":"#2a3f5f"},"type":"carpet"}],"table":[{"cells":{"fill":{"color":"#EBF0F8"},"line":{"color":"white"}},"header":{"fill":{"color":"#C8D4E3"},"line":{"color":"white"}},"type":"table"}],"barpolar":[{"marker":{"line":{"color":"#E5ECF6","width":0.5},"pattern":{"fillmode":"overlay","size":10,"solidity":0.2}},"type":"barpolar"}],"pie":[{"automargin":true,"type":"pie"}]},"layout":{"autotypenumbers":"strict","colorway":["#636efa","#EF553B","#00cc96","#ab63fa","#FFA15A","#19d3f3","#FF6692","#B6E880","#FF97FF","#FECB52"],"font":{"color":"#2a3f5f"},"hovermode":"closest","hoverlabel":{"align":"left"},"paper_bgcolor":"white","plot_bgcolor":"#E5ECF6","polar":{"bgcolor":"#E5ECF6","angularaxis":{"gridcolor":"white","linecolor":"white","ticks":""},"radialaxis":{"gridcolor":"white","linecolor":"white","ticks":""}},"ternary":{"bgcolor":"#E5ECF6","aaxis":{"gridcolor":"white","linecolor":"white","ticks":""},"baxis":{"gridcolor":"white","linecolor":"white","ticks":""},"caxis":{"gridcolor":"white","linecolor":"white","ticks":""}},"coloraxis":{"colorbar":{"outlinewidth":0,"ticks":""}},"colorscale":{"sequential":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]],"sequentialminus":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]],"diverging":[[0,"#8e0152"],[0.1,"#c51b7d"],[0.2,"#de77ae"],[0.3,"#f1b6da"],[0.4,"#fde0ef"],[0.5,"#f7f7f7"],[0.6,"#e6f5d0"],[0.7,"#b8e186"],[0.8,"#7fbc41"],[0.9,"#4d9221"],[1,"#276419"]]},"xaxis":{"gridcolor":"white","linecolor":"white","ticks":"","title":{"standoff":15},"zerolinecolor":"white","automargin":true,"zerolinewidth":2},"yaxis":{"gridcolor":"white","linecolor":"white","ticks":"","title":{"standoff":15},"zerolinecolor":"white","automargin":true,"zerolinewidth":2},"scene":{"xaxis":{"backgroundcolor":"#E5ECF6","gridcolor":"white","linecolor":"white","showbackground":true,"ticks":"","zerolinecolor":"white","gridwidth":2},"yaxis":{"backgroundcolor":"#E5ECF6","gridcolor":"white","linecolor":"white","showbackground":true,"ticks":"","zerolinecolor":"white","gridwidth":2},"zaxis":{"backgroundcolor":"#E5ECF6","gridcolor":"white","linecolor":"white","showbackground":true,"ticks":"","zerolinecolor":"white","gridwidth":2}},"shapedefaults":{"line":{"color":"#2a3f5f"}},"annotationdefaults":{"arrowcolor":"#2a3f5f","arrowhead":0,"arrowwidth":1},"geo":{"bgcolor":"white","landcolor":"#E5ECF6","subunitcolor":"white","showland":true,"showlakes":true,"lakecolor":"white"},"title":{"x":0.05},"mapbox":{"style":"light"}}},"xaxis":{"anchor":"y","domain":[0.0,1.0],"title":{"text":"Zeit"}},"yaxis":{"anchor":"x","domain":[0.384,1.0],"title":{"text":"Equity ($)"}},"xaxis2":{"anchor":"y2","domain":[0.0,1.0]},"yaxis2":{"anchor":"x2","domain":[0.0,0.264],"title":{"text":"Win Rate (%)"}},"annotations":[{"font":{"size":16},"showarrow":false,"text":"Equity Curve - Delay Strategien","x":0.5,"xanchor":"center","xref":"paper","y":1.0,"yanchor":"bottom","yref":"paper"},{"font":{"size":16},"showarrow":false,"text":"Win Rate Vergleich","x":0.5,"xanchor":"center","xref":"paper","y":0.264,"yanchor":"bottom","yref":"paper"},{"showarrow":false,"text":"Original: 56.4%","x":1,"xanchor":"right","xref":"x2 domain","y":56.3531669865643,"yanchor":"bottom","yref":"y2"}],"shapes":[{"line":{"color":"gray","dash":"dash"},"type":"line","x0":0,"x1":1,"xref":"x2 domain","y0":56.3531669865643,"y1":56.3531669865643,"yref":"y2"}],"height":900,"title":{"text":"Momentum Delay Dashboard"},"hovermode":"x unified"},                        {"responsive": true}                    )                };            </script>        </div>
+        <script charset="utf-8" src="https://cdn.plot.ly/plotly-3.3.1.min.js" integrity="sha256-4rD3fugVb/nVJYUv5Ky3v+fYXoouHaBSP20WIJuEiWg=" crossorigin="anonymous"></script>                <div id="6bef198c-06fd-4067-9204-035bfb42fc42" class="plotly-graph-div" style="height:900px; width:100%;"></div>            <script type="text/javascript">                window.PLOTLYENV=window.PLOTLYENV || {};                                if (document.getElementById("6bef198c-06fd-4067-9204-035bfb42fc42")) {                    Plotly.newPlot(                        "6bef198c-06fd-4067-9204-035bfb42fc42",                        [{"line":{"color":"#2196f3","width":1.5},"mode":"lines","name":"0m","x":["2025-12-03T13:00:00","2025-12-03T18:00:00","2025-12-04T14:00:00","2025-12-04T23:00:00","2025-12-04T23:00:00","2025-12-05T02:00:00","2025-12-05T02:00:00","2025-12-05T03:00:00","2025-12-05T04:00:00","2025-12-05T10:00:00","2025-12-05T10:00:00","2025-12-05T11:00:00","2025-12-05T14:00:00","2025-12-05T16:00:00","2025-12-05T16:00:00","2025-12-06T21:00:00","2025-12-06T23:00:00","2025-12-08T01:00:00","2025-12-08T01:00:00","2025-12-08T15:00:00","2025-12-09T02:00:00","2025-12-09T13:00:00","2025-12-09T13:00:00","2025-12-10T01:00:00","2025-12-10T02:00:00","2025-12-10T02:00:00","2025-12-10T02:00:00","2025-12-10T02:00:00","2025-12-10T13:00:00","2025-12-10T14:00:00","2025-12-10T14:00:00","2025-12-10T14:00:00","2025-12-10T21:00:00","2025-12-11T01:00:00","2025-12-11T15:00:00","2025-12-11T15:00:00","2025-12-11T22:00:00","2025-12-12T04:00:00","2025-12-12T05:00:00","2025-12-12T10:00:00","2025-12-12T17:00:00","2025-12-13T10:00:00","2025-12-13T16:00:00","2025-12-13T16:00:00","2025-12-13T16:00:00","2025-12-14T06:00:00","2025-12-14T10:00:00","2025-12-14T14:00:00","2025-12-15T05:00:00","2025-12-15T15:00:00","2025-12-15T16:00:00","2025-12-15T17:00:00","2025-12-17T01:00:00","2025-12-17T01:00:00","2025-12-17T19:00:00","2025-12-18T04:00:00","2025-12-18T15:00:00","2025-12-19T09:00:00","2025-12-20T15:00:00","2025-12-21T03:00:00","2025-12-21T03:00:00","2025-12-21T03:00:00","2025-12-21T03:00:00","2025-12-21T04:00:00","2025-12-21T04:00:00","2025-12-21T04:00:00","2025-12-21T15:00:00","2025-12-21T16:00:00","2025-12-21T20:00:00","2025-12-22T03:00:00","2025-12-22T12:00:00","2025-12-23T04:00:00","2025-12-23T05:00:00","2025-12-23T06:00:00","2025-12-23T07:00:00","2025-12-23T07:00:00","2025-12-23T07:00:00","2025-12-23T07:00:00","2025-12-23T09:00:00","2025-12-24T04:00:00","2025-12-24T07:00:00","2025-12-24T11:00:00","2025-12-25T14:00:00","2025-12-25T16:00:00","2025-12-25T18:00:00","2025-12-26T15:00:00","2025-12-26T23:00:00","2025-12-27T09:00:00","2025-12-27T14:00:00","2025-12-28T02:00:00","2025-12-28T02:00:00","2025-12-28T03:00:00","2025-12-28T03:00:00","2025-12-28T03:00:00","2025-12-28T03:00:00","2025-12-28T03:00:00","2025-12-28T14:00:00","2025-12-28T15:00:00","2025-12-28T18:00:00","2025-12-29T01:00:00","2025-12-29T14:00:00","2025-12-30T03:00:00","2025-12-30T03:00:00","2025-12-30T04:00:00","2025-12-30T05:00:00","2025-12-30T06:00:00","2025-12-30T07:00:00","2025-12-30T07:00:00","2025-12-30T11:00:00","2025-12-30T15:00:00","2025-12-31T03:00:00","2025-12-31T11:00:00","2025-12-31T16:00:00","2025-12-31T17:00:00","2026-01-01T01:00:00","2026-01-01T07:00:00","2026-01-01T07:00:00","2026-01-02T00:00:00","2026-01-02T02:00:00","2026-01-02T02:00:00","2026-01-02T12:00:00","2026-01-02T23:00:00","2026-01-02T23:00:00","2026-01-03T01:00:00","2026-01-03T06:00:00","2026-01-03T08:00:00","2026-01-03T09:00:00","2026-01-03T15:00:00","2026-01-03T16:00:00","2026-01-04T03:00:00","2026-01-04T03:00:00","2026-01-04T07:00:00","2026-01-04T16:00:00","2026-01-05T03:00:00","2026-01-05T10:00:00","2026-01-05T11:00:00","2026-01-05T13:00:00","2026-01-05T13:00:00","2026-01-05T17:00:00","2026-01-05T22:00:00","2026-01-06T01:00:00","2026-01-06T03:00:00","2026-01-06T08:00:00","2026-01-06T09:00:00","2026-01-06T10:00:00","2026-01-07T02:00:00","2026-01-07T06:00:00","2026-01-07T11:00:00","2026-01-07T12:00:00","2026-01-07T15:00:00","2026-01-07T15:00:00","2026-01-07T15:00:00","2026-01-07T18:00:00","2026-01-07T23:00:00","2026-01-08T11:00:00","2026-01-08T12:00:00","2026-01-08T15:00:00","2026-01-08T23:00:00","2026-01-10T14:00:00","2026-01-10T15:00:00","2026-01-12T06:00:00","2026-01-12T14:00:00","2026-01-12T15:00:00","2026-01-13T02:00:00","2026-01-13T09:00:00","2026-01-13T20:00:00","2026-01-14T00:00:00","2026-01-14T05:00:00","2026-01-14T16:00:00","2026-01-15T03:00:00","2026-01-15T04:00:00","2026-01-15T04:00:00","2026-01-15T04:00:00","2026-01-15T04:00:00","2026-01-15T13:00:00","2026-01-15T14:00:00","2026-01-15T16:00:00","2026-01-15T23:00:00","2026-01-16T01:00:00","2026-01-16T02:00:00","2026-01-16T14:00:00","2026-01-16T20:00:00","2026-01-17T00:00:00","2026-01-17T05:00:00","2026-01-17T08:00:00","2026-01-17T10:00:00","2026-01-18T11:00:00","2026-01-18T18:00:00","2026-01-18T18:00:00","2026-01-19T02:00:00","2026-01-20T01:00:00","2026-01-21T04:00:00","2026-01-22T18:00:00","2026-01-23T15:00:00","2026-01-24T01:00:00","2026-01-24T01:00:00","2026-01-24T01:00:00","2026-01-24T03:00:00","2026-01-24T04:00:00","2026-01-24T05:00:00","2026-01-25T14:00:00","2026-01-25T16:00:00","2026-01-25T17:00:00","2026-01-25T17:00:00","2026-01-26T02:00:00","2026-01-26T03:00:00","2026-01-26T03:00:00","2026-01-26T03:00:00","2026-01-26T04:00:00","2026-01-26T15:00:00","2026-01-26T18:00:00","2026-01-27T09:00:00","2026-01-28T11:00:00","2026-01-28T13:00:00","2026-01-28T14:00:00","2026-01-28T14:00:00","2026-01-28T14:00:00","2026-01-28T21:00:00","2026-01-28T22:00:00","2026-01-28T22:00:00","2026-01-29T02:00:00","2026-01-29T06:00:00","2026-01-29T07:00:00","2026-01-29T13:00:00","2026-01-29T16:00:00","2026-01-30T12:00:00","2026-01-30T14:00:00","2026-01-30T18:00:00","2026-01-30T18:00:00","2026-01-30T23:00:00","2026-02-01T15:00:00"],"y":[16680.570975416336,16846.72190318913,16865.59907176062,16888.36963062415,16881.975262925742,16897.079576650314,16935.64542273969,16995.675100392797,16891.398846788794,17093.252822936025,17085.053405225564,17151.468459505697,17075.855055971864,18438.75675409116,18381.135639234624,18125.69870599224,18009.755142712384,17794.40783308531,17699.24249407985,17808.27794210928,18100.571397444968,18090.74371138391,18108.360506478868,18162.229551676362,18223.496442967626,18281.474305837517,18471.671116905374,18557.84727018911,19085.16996724637,19198.898489939333,19196.11361925614,19342.358455017315,19358.705952021217,19323.82882351634,19230.273991465296,19179.194220916404,19299.468720295412,19284.38664633165,19102.28628630284,19072.91869033508,19021.39452246914,18985.416147752756,19061.86996675123,19107.86551648141,19181.05603106987,19095.049136674043,19040.840338557155,19017.56256864706,19027.49859924719,18993.09093450219,18908.617581468097,18749.107687843836,18731.10186070047,18654.163055447407,18635.351254260495,18567.58634060864,18506.37638919282,18665.357472045634,18698.741898451444,18728.93638993867,18824.023402985134,18960.406978006016,19055.440217926054,19128.47851640872,19157.466943552423,19199.82989256765,19291.823094061736,19359.88720489645,19436.3336039168,19359.898584126116,19362.971377811926,19366.857103159353,19298.67416054898,19293.589885861944,19271.070348452857,19269.18767700084,19235.35510486245,19215.2157991698,19178.422910233956,19062.631895346585,19001.827641758624,18847.877649290673,18895.994501872,18924.931706315907,19093.13377327218,19064.208024003074,19038.152158822202,19157.962114382015,19246.678584748992,19267.688852473,19285.726334135812,19362.91272476285,19375.312774254227,19395.91971091742,19410.02013720161,19467.246326154,19477.267978543427,19479.248646984834,19677.401145468633,19757.309373470536,19695.863195993235,19563.916925476988,19536.24041612827,19392.942809164004,19413.748662761143,19421.42910694455,19428.562882328544,19424.490465084586,19426.046914641083,19343.249088568427,19350.48871555982,19370.286040949915,19334.012097053004,19239.279824537865,19252.4513990412,19270.332513458306,19284.8109503928,19312.782473125037,19469.456451421072,19498.04437750295,19546.672511861692,19402.58510338657,19552.697602154683,19807.964007840113,19999.365258941245,19969.146527826357,20067.6051801036,20134.326118042565,20168.826961086666,20370.62796869061,20663.29589817631,20802.00665340063,20859.363639983265,20856.071442439075,20923.662035416324,20996.745977842747,21060.61440667269,21198.956263852382,21270.19820133254,21288.763212231457,21366.023890381908,21772.940107622755,21857.971116542943,21955.703315958785,22271.24901688477,22286.358781818908,22314.98530013519,22343.419361098022,22424.883370610285,22389.19637105975,22488.722813894627,22482.113343559904,22458.086468264977,22310.191752498355,22163.799418164377,21944.120840450618,21748.2163576746,21537.984520811748,21567.64233351253,21666.32822463266,21703.24797160741,21696.894110863414,21675.868635150488,21626.327670517865,21727.96430272112,21720.48737075184,21812.48112190645,21915.318186524404,22009.044502778852,22124.208107735252,22274.162306619928,22384.598656729027,22465.12296349107,23362.011349235032,23560.084124375513,23590.55764275555,23550.063528499835,23404.61426674771,23427.428657958266,23374.34900497422,23250.459757097597,23245.140802586528,23219.043316865722,23014.773218719998,23024.29657315533,22970.2566167603,22981.335451704468,22992.02444493782,22976.94034179834,22931.391502939863,22728.402698487836,22616.3158171191,22664.329588074932,22620.45505623961,22519.716187568098,22451.31828018424,22398.000745806934,22375.500049575763,22477.858406405707,22433.67927587181,22414.60895390964,22363.5676338813,22185.548888349058,22146.690784112812,22094.86182066853,22013.79338068409,21954.371922381102,21896.974871603634,21836.22000347918,21833.03820622638,21782.888487623073,22084.800898627644,22076.05790539778,22159.27987908432,22237.534011301585,22222.55456130786,22302.06071366285,22262.206429341993,22238.04877628845,22254.132225258767,22269.369599631133,22300.190878361063,22261.910784450072,22156.650291333546,21990.286364231382,21922.9098925396,21691.120477124427,21556.958498479915,21321.052160194664,21179.455110492465,21560.02794939595],"type":"scatter","xaxis":"x","yaxis":"y"},{"marker":{"color":["#2196f3"]},"showlegend":false,"text":["53.7%"],"textposition":"outside","x":["0m"],"y":[53.67965367965368],"type":"bar","xaxis":"x2","yaxis":"y2"}],                        {"template":{"data":{"histogram2dcontour":[{"type":"histogram2dcontour","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"choropleth":[{"type":"choropleth","colorbar":{"outlinewidth":0,"ticks":""}}],"histogram2d":[{"type":"histogram2d","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"heatmap":[{"type":"heatmap","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"contourcarpet":[{"type":"contourcarpet","colorbar":{"outlinewidth":0,"ticks":""}}],"contour":[{"type":"contour","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"surface":[{"type":"surface","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"mesh3d":[{"type":"mesh3d","colorbar":{"outlinewidth":0,"ticks":""}}],"scatter":[{"fillpattern":{"fillmode":"overlay","size":10,"solidity":0.2},"type":"scatter"}],"parcoords":[{"type":"parcoords","line":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatterpolargl":[{"type":"scatterpolargl","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"bar":[{"error_x":{"color":"#2a3f5f"},"error_y":{"color":"#2a3f5f"},"marker":{"line":{"color":"#E5ECF6","width":0.5},"pattern":{"fillmode":"overlay","size":10,"solidity":0.2}},"type":"bar"}],"scattergeo":[{"type":"scattergeo","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatterpolar":[{"type":"scatterpolar","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"histogram":[{"marker":{"pattern":{"fillmode":"overlay","size":10,"solidity":0.2}},"type":"histogram"}],"scattergl":[{"type":"scattergl","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatter3d":[{"type":"scatter3d","line":{"colorbar":{"outlinewidth":0,"ticks":""}},"marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scattermap":[{"type":"scattermap","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scattermapbox":[{"type":"scattermapbox","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatterternary":[{"type":"scatterternary","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scattercarpet":[{"type":"scattercarpet","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"carpet":[{"aaxis":{"endlinecolor":"#2a3f5f","gridcolor":"white","linecolor":"white","minorgridcolor":"white","startlinecolor":"#2a3f5f"},"baxis":{"endlinecolor":"#2a3f5f","gridcolor":"white","linecolor":"white","minorgridcolor":"white","startlinecolor":"#2a3f5f"},"type":"carpet"}],"table":[{"cells":{"fill":{"color":"#EBF0F8"},"line":{"color":"white"}},"header":{"fill":{"color":"#C8D4E3"},"line":{"color":"white"}},"type":"table"}],"barpolar":[{"marker":{"line":{"color":"#E5ECF6","width":0.5},"pattern":{"fillmode":"overlay","size":10,"solidity":0.2}},"type":"barpolar"}],"pie":[{"automargin":true,"type":"pie"}]},"layout":{"autotypenumbers":"strict","colorway":["#636efa","#EF553B","#00cc96","#ab63fa","#FFA15A","#19d3f3","#FF6692","#B6E880","#FF97FF","#FECB52"],"font":{"color":"#2a3f5f"},"hovermode":"closest","hoverlabel":{"align":"left"},"paper_bgcolor":"white","plot_bgcolor":"#E5ECF6","polar":{"bgcolor":"#E5ECF6","angularaxis":{"gridcolor":"white","linecolor":"white","ticks":""},"radialaxis":{"gridcolor":"white","linecolor":"white","ticks":""}},"ternary":{"bgcolor":"#E5ECF6","aaxis":{"gridcolor":"white","linecolor":"white","ticks":""},"baxis":{"gridcolor":"white","linecolor":"white","ticks":""},"caxis":{"gridcolor":"white","linecolor":"white","ticks":""}},"coloraxis":{"colorbar":{"outlinewidth":0,"ticks":""}},"colorscale":{"sequential":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]],"sequentialminus":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]],"diverging":[[0,"#8e0152"],[0.1,"#c51b7d"],[0.2,"#de77ae"],[0.3,"#f1b6da"],[0.4,"#fde0ef"],[0.5,"#f7f7f7"],[0.6,"#e6f5d0"],[0.7,"#b8e186"],[0.8,"#7fbc41"],[0.9,"#4d9221"],[1,"#276419"]]},"xaxis":{"gridcolor":"white","linecolor":"white","ticks":"","title":{"standoff":15},"zerolinecolor":"white","automargin":true,"zerolinewidth":2},"yaxis":{"gridcolor":"white","linecolor":"white","ticks":"","title":{"standoff":15},"zerolinecolor":"white","automargin":true,"zerolinewidth":2},"scene":{"xaxis":{"backgroundcolor":"#E5ECF6","gridcolor":"white","linecolor":"white","showbackground":true,"ticks":"","zerolinecolor":"white","gridwidth":2},"yaxis":{"backgroundcolor":"#E5ECF6","gridcolor":"white","linecolor":"white","showbackground":true,"ticks":"","zerolinecolor":"white","gridwidth":2},"zaxis":{"backgroundcolor":"#E5ECF6","gridcolor":"white","linecolor":"white","showbackground":true,"ticks":"","zerolinecolor":"white","gridwidth":2}},"shapedefaults":{"line":{"color":"#2a3f5f"}},"annotationdefaults":{"arrowcolor":"#2a3f5f","arrowhead":0,"arrowwidth":1},"geo":{"bgcolor":"white","landcolor":"#E5ECF6","subunitcolor":"white","showland":true,"showlakes":true,"lakecolor":"white"},"title":{"x":0.05},"mapbox":{"style":"light"}}},"xaxis":{"anchor":"y","domain":[0.0,1.0],"title":{"text":"Zeit"}},"yaxis":{"anchor":"x","domain":[0.384,1.0],"title":{"text":"Equity ($)"}},"xaxis2":{"anchor":"y2","domain":[0.0,1.0]},"yaxis2":{"anchor":"x2","domain":[0.0,0.264],"title":{"text":"Win Rate (%)"}},"annotations":[{"font":{"size":16},"showarrow":false,"text":"Equity Curve - Delay Strategien","x":0.5,"xanchor":"center","xref":"paper","y":1.0,"yanchor":"bottom","yref":"paper"},{"font":{"size":16},"showarrow":false,"text":"Win Rate Vergleich","x":0.5,"xanchor":"center","xref":"paper","y":0.264,"yanchor":"bottom","yref":"paper"},{"showarrow":false,"text":"Original: 53.7%","x":1,"xanchor":"right","xref":"x2 domain","y":53.67965367965368,"yanchor":"bottom","yref":"y2"}],"shapes":[{"line":{"color":"gray","dash":"dash"},"type":"line","x0":0,"x1":1,"xref":"x2 domain","y0":53.67965367965368,"y1":53.67965367965368,"yref":"y2"}],"height":900,"title":{"text":"Momentum Delay Dashboard"},"hovermode":"x unified"},                        {"responsive": true}                    )                };            </script>        </div>
     </div>
 
-    <p style="color: #666; font-size: 12px;">Generated: 2026-02-09 18:49:51</p>
+    <h2>Vollständige Trade-Listen</h2>
+
+    <h3>0m Delay - 231 Trades (Win Rate: 53.7%)</h3>
+    <div style="max-height: 500px; overflow-y: auto; margin-bottom: 30px;">
+    <table class="trade-table">
+        <tr>
+            <th>#</th>
+            <th>Symbol</th>
+            <th>Entry Time</th>
+            <th>Exit Time</th>
+            <th>Signal Price</th>
+            <th>Entry Price</th>
+            <th>Exit Price</th>
+            <th>Price Δ</th>
+            <th>PnL %</th>
+        </tr>
+        <tr>
+            <td>1</td>
+            <td style="text-align:left;">LUNC/USDT</td>
+            <td>2025-12-01 12:00</td>
+            <td>2025-12-03 13:00</td>
+            <td>2.522e-05</td>
+            <td>2.522e-05</td>
+            <td>2.798e-05</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+10.94%</td>
+        </tr>
+        <tr>
+            <td>2</td>
+            <td style="text-align:left;">ZEC/USDC</td>
+            <td>2025-12-02 09:00</td>
+            <td>2025-12-03 18:00</td>
+            <td>326.08</td>
+            <td>326.08</td>
+            <td>358.56</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+9.96%</td>
+        </tr>
+        <tr>
+            <td>3</td>
+            <td style="text-align:left;">ICP/USDC</td>
+            <td>2025-12-02 13:00</td>
+            <td>2025-12-04 14:00</td>
+            <td>3.659</td>
+            <td>3.659</td>
+            <td>3.7</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+1.12%</td>
+        </tr>
+        <tr>
+            <td>4</td>
+            <td style="text-align:left;">SUI/USDC</td>
+            <td>2025-12-02 22:00</td>
+            <td>2025-12-04 23:00</td>
+            <td>1.6443</td>
+            <td>1.6443</td>
+            <td>1.6665</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+1.35%</td>
+        </tr>
+        <tr>
+            <td>5</td>
+            <td style="text-align:left;">SOL/USDC</td>
+            <td>2025-12-02 22:00</td>
+            <td>2025-12-04 23:00</td>
+            <td>139.98</td>
+            <td>139.98</td>
+            <td>139.45</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-0.38%</td>
+        </tr>
+        <tr>
+            <td>6</td>
+            <td style="text-align:left;">ADA/USDC</td>
+            <td>2025-12-03 01:00</td>
+            <td>2025-12-05 02:00</td>
+            <td>0.4359</td>
+            <td>0.4359</td>
+            <td>0.4398</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+0.89%</td>
+        </tr>
+        <tr>
+            <td>7</td>
+            <td style="text-align:left;">BNB/USDC</td>
+            <td>2025-12-03 01:00</td>
+            <td>2025-12-05 02:00</td>
+            <td>883.72</td>
+            <td>883.72</td>
+            <td>903.89</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+2.28%</td>
+        </tr>
+        <tr>
+            <td>8</td>
+            <td style="text-align:left;">TAO/USDC</td>
+            <td>2025-12-03 02:00</td>
+            <td>2025-12-05 03:00</td>
+            <td>279.3</td>
+            <td>279.3</td>
+            <td>289.2</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+3.54%</td>
+        </tr>
+        <tr>
+            <td>9</td>
+            <td style="text-align:left;">TNSR/USDC</td>
+            <td>2025-12-03 03:00</td>
+            <td>2025-12-05 04:00</td>
+            <td>0.1255</td>
+            <td>0.1255</td>
+            <td>0.1178</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-6.14%</td>
+        </tr>
+        <tr>
+            <td>10</td>
+            <td style="text-align:left;">ZEC/USDC</td>
+            <td>2025-12-04 01:00</td>
+            <td>2025-12-05 10:00</td>
+            <td>345.52</td>
+            <td>345.52</td>
+            <td>386.81</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+11.95%</td>
+        </tr>
+        <tr>
+            <td>11</td>
+            <td style="text-align:left;">BTC/USDC</td>
+            <td>2025-12-02 21:00</td>
+            <td>2025-12-05 10:00</td>
+            <td>91603.4</td>
+            <td>91603.4</td>
+            <td>91164</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-0.48%</td>
+        </tr>
+        <tr>
+            <td>12</td>
+            <td style="text-align:left;">ETH/USDC</td>
+            <td>2025-12-02 22:00</td>
+            <td>2025-12-05 11:00</td>
+            <td>3018.79</td>
+            <td>3018.79</td>
+            <td>3136.14</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+3.89%</td>
+        </tr>
+        <tr>
+            <td>13</td>
+            <td style="text-align:left;">XRP/USDC</td>
+            <td>2025-12-03 01:00</td>
+            <td>2025-12-05 14:00</td>
+            <td>2.1617</td>
+            <td>2.1617</td>
+            <td>2.0664</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-4.41%</td>
+        </tr>
+        <tr>
+            <td>14</td>
+            <td style="text-align:left;">LUNC/USDT</td>
+            <td>2025-12-03 15:00</td>
+            <td>2025-12-05 16:00</td>
+            <td>2.804e-05</td>
+            <td>2.804e-05</td>
+            <td>5.042e-05</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+79.81%</td>
+        </tr>
+        <tr>
+            <td>15</td>
+            <td style="text-align:left;">LINK/USDC</td>
+            <td>2025-12-03 15:00</td>
+            <td>2025-12-05 16:00</td>
+            <td>14.4</td>
+            <td>14.4</td>
+            <td>13.95</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-3.13%</td>
+        </tr>
+        <tr>
+            <td>16</td>
+            <td style="text-align:left;">ZEC/USDC</td>
+            <td>2025-12-05 12:00</td>
+            <td>2025-12-06 21:00</td>
+            <td>388.15</td>
+            <td>388.15</td>
+            <td>334.21</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-13.90%</td>
+        </tr>
+        <tr>
+            <td>17</td>
+            <td style="text-align:left;">SUI/USDC</td>
+            <td>2025-12-04 22:00</td>
+            <td>2025-12-06 23:00</td>
+            <td>1.6665</td>
+            <td>1.6665</td>
+            <td>1.5599</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-6.40%</td>
+        </tr>
+        <tr>
+            <td>18</td>
+            <td style="text-align:left;">LUNC/USDT</td>
+            <td>2025-12-06 00:00</td>
+            <td>2025-12-08 01:00</td>
+            <td>5.896e-05</td>
+            <td>5.896e-05</td>
+            <td>5.191e-05</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-11.96%</td>
+        </tr>
+        <tr>
+            <td>19</td>
+            <td style="text-align:left;">TNSR/USDC</td>
+            <td>2025-12-06 00:00</td>
+            <td>2025-12-08 01:00</td>
+            <td>0.1178</td>
+            <td>0.1178</td>
+            <td>0.1115</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-5.35%</td>
+        </tr>
+        <tr>
+            <td>20</td>
+            <td style="text-align:left;">TAO/USDC</td>
+            <td>2025-12-06 14:00</td>
+            <td>2025-12-08 15:00</td>
+            <td>279.2</td>
+            <td>279.2</td>
+            <td>296.4</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+6.16%</td>
+        </tr>
+        <tr>
+            <td>21</td>
+            <td style="text-align:left;">ZEC/USDC</td>
+            <td>2025-12-07 17:00</td>
+            <td>2025-12-09 02:00</td>
+            <td>346.73</td>
+            <td>346.73</td>
+            <td>403.64</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+16.41%</td>
+        </tr>
+        <tr>
+            <td>22</td>
+            <td style="text-align:left;">BNB/USDC</td>
+            <td>2025-12-07 12:00</td>
+            <td>2025-12-09 13:00</td>
+            <td>893.27</td>
+            <td>893.27</td>
+            <td>888.42</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-0.54%</td>
+        </tr>
+        <tr>
+            <td>23</td>
+            <td style="text-align:left;">SUI/USDC</td>
+            <td>2025-12-07 12:00</td>
+            <td>2025-12-09 13:00</td>
+            <td>1.5917</td>
+            <td>1.5917</td>
+            <td>1.6072</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+0.97%</td>
+        </tr>
+        <tr>
+            <td>24</td>
+            <td style="text-align:left;">BTC/USDC</td>
+            <td>2025-12-07 12:00</td>
+            <td>2025-12-10 01:00</td>
+            <td>89496.6</td>
+            <td>89496.6</td>
+            <td>92159</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+2.97%</td>
+        </tr>
+        <tr>
+            <td>25</td>
+            <td style="text-align:left;">SOL/USDC</td>
+            <td>2025-12-08 01:00</td>
+            <td>2025-12-10 02:00</td>
+            <td>133.4</td>
+            <td>133.4</td>
+            <td>137.9</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+3.37%</td>
+        </tr>
+        <tr>
+            <td>26</td>
+            <td style="text-align:left;">LINK/USDC</td>
+            <td>2025-12-08 01:00</td>
+            <td>2025-12-10 02:00</td>
+            <td>13.83</td>
+            <td>13.83</td>
+            <td>14.27</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+3.18%</td>
+        </tr>
+        <tr>
+            <td>27</td>
+            <td style="text-align:left;">ADA/USDC</td>
+            <td>2025-12-08 01:00</td>
+            <td>2025-12-10 02:00</td>
+            <td>0.421</td>
+            <td>0.421</td>
+            <td>0.4648</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+10.40%</td>
+        </tr>
+        <tr>
+            <td>28</td>
+            <td style="text-align:left;">ICP/USDC</td>
+            <td>2025-12-08 01:00</td>
+            <td>2025-12-10 02:00</td>
+            <td>3.451</td>
+            <td>3.451</td>
+            <td>3.612</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+4.67%</td>
+        </tr>
+        <tr>
+            <td>29</td>
+            <td style="text-align:left;">LUNC/USDT</td>
+            <td>2025-12-08 12:00</td>
+            <td>2025-12-10 13:00</td>
+            <td>4.934e-05</td>
+            <td>4.934e-05</td>
+            <td>6.336e-05</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+28.42%</td>
+        </tr>
+        <tr>
+            <td>30</td>
+            <td style="text-align:left;">ZEC/USDC</td>
+            <td>2025-12-09 05:00</td>
+            <td>2025-12-10 14:00</td>
+            <td>408.29</td>
+            <td>408.29</td>
+            <td>432.62</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+5.96%</td>
+        </tr>
+        <tr>
+            <td>31</td>
+            <td style="text-align:left;">XRP/USDC</td>
+            <td>2025-12-08 01:00</td>
+            <td>2025-12-10 14:00</td>
+            <td>2.0682</td>
+            <td>2.0682</td>
+            <td>2.0652</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-0.15%</td>
+        </tr>
+        <tr>
+            <td>32</td>
+            <td style="text-align:left;">ETH/USDC</td>
+            <td>2025-12-08 01:00</td>
+            <td>2025-12-10 14:00</td>
+            <td>3098.92</td>
+            <td>3098.92</td>
+            <td>3335.01</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+7.62%</td>
+        </tr>
+        <tr>
+            <td>33</td>
+            <td style="text-align:left;">TAO/USDC</td>
+            <td>2025-12-08 20:00</td>
+            <td>2025-12-10 21:00</td>
+            <td>295.8</td>
+            <td>295.8</td>
+            <td>298.3</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+0.85%</td>
+        </tr>
+        <tr>
+            <td>34</td>
+            <td style="text-align:left;">ETH/USDC</td>
+            <td>2025-12-10 13:00</td>
+            <td>2025-12-11 01:00</td>
+            <td>3335.01</td>
+            <td>3335.01</td>
+            <td>3274.93</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-1.80%</td>
+        </tr>
+        <tr>
+            <td>35</td>
+            <td style="text-align:left;">SUI/USDC</td>
+            <td>2025-12-09 14:00</td>
+            <td>2025-12-11 15:00</td>
+            <td>1.6049</td>
+            <td>1.6049</td>
+            <td>1.5272</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-4.84%</td>
+        </tr>
+        <tr>
+            <td>36</td>
+            <td style="text-align:left;">BNB/USDC</td>
+            <td>2025-12-09 14:00</td>
+            <td>2025-12-11 15:00</td>
+            <td>885.47</td>
+            <td>885.47</td>
+            <td>861.95</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-2.66%</td>
+        </tr>
+        <tr>
+            <td>37</td>
+            <td style="text-align:left;">ZEC/USDC</td>
+            <td>2025-12-10 13:00</td>
+            <td>2025-12-11 22:00</td>
+            <td>432.62</td>
+            <td>432.62</td>
+            <td>459.75</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+6.27%</td>
+        </tr>
+        <tr>
+            <td>38</td>
+            <td style="text-align:left;">SOL/USDC</td>
+            <td>2025-12-10 03:00</td>
+            <td>2025-12-12 04:00</td>
+            <td>138.2</td>
+            <td>138.2</td>
+            <td>137.12</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-0.78%</td>
+        </tr>
+        <tr>
+            <td>39</td>
+            <td style="text-align:left;">ADA/USDC</td>
+            <td>2025-12-10 04:00</td>
+            <td>2025-12-12 05:00</td>
+            <td>0.4649</td>
+            <td>0.4649</td>
+            <td>0.421</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-9.44%</td>
+        </tr>
+        <tr>
+            <td>40</td>
+            <td style="text-align:left;">LINK/USDC</td>
+            <td>2025-12-10 09:00</td>
+            <td>2025-12-12 10:00</td>
+            <td>14.31</td>
+            <td>14.31</td>
+            <td>14.09</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-1.54%</td>
+        </tr>
+        <tr>
+            <td>41</td>
+            <td style="text-align:left;">BTC/USDC</td>
+            <td>2025-12-10 04:00</td>
+            <td>2025-12-12 17:00</td>
+            <td>92575</td>
+            <td>92575</td>
+            <td>90074.2</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-2.70%</td>
+        </tr>
+        <tr>
+            <td>42</td>
+            <td style="text-align:left;">ZEC/USDC</td>
+            <td>2025-12-12 01:00</td>
+            <td>2025-12-13 10:00</td>
+            <td>459.96</td>
+            <td>459.96</td>
+            <td>451.26</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-1.89%</td>
+        </tr>
+        <tr>
+            <td>43</td>
+            <td style="text-align:left;">SUI/USDC</td>
+            <td>2025-12-11 15:00</td>
+            <td>2025-12-13 16:00</td>
+            <td>1.5421</td>
+            <td>1.5421</td>
+            <td>1.6042</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+4.03%</td>
+        </tr>
+        <tr>
+            <td>44</td>
+            <td style="text-align:left;">TAO/USDC</td>
+            <td>2025-12-11 15:00</td>
+            <td>2025-12-13 16:00</td>
+            <td>290.1</td>
+            <td>290.1</td>
+            <td>297.1</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+2.41%</td>
+        </tr>
+        <tr>
+            <td>45</td>
+            <td style="text-align:left;">BNB/USDC</td>
+            <td>2025-12-11 15:00</td>
+            <td>2025-12-13 16:00</td>
+            <td>865.97</td>
+            <td>865.97</td>
+            <td>899.14</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+3.83%</td>
+        </tr>
+        <tr>
+            <td>46</td>
+            <td style="text-align:left;">SOL/USDC</td>
+            <td>2025-12-12 05:00</td>
+            <td>2025-12-14 06:00</td>
+            <td>138.94</td>
+            <td>138.94</td>
+            <td>132.71</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-4.48%</td>
+        </tr>
+        <tr>
+            <td>47</td>
+            <td style="text-align:left;">LINK/USDC</td>
+            <td>2025-12-12 09:00</td>
+            <td>2025-12-14 10:00</td>
+            <td>14.09</td>
+            <td>14.09</td>
+            <td>13.69</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-2.84%</td>
+        </tr>
+        <tr>
+            <td>48</td>
+            <td style="text-align:left;">XRP/USDC</td>
+            <td>2025-12-12 01:00</td>
+            <td>2025-12-14 14:00</td>
+            <td>2.0286</td>
+            <td>2.0286</td>
+            <td>2.0038</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-1.22%</td>
+        </tr>
+        <tr>
+            <td>49</td>
+            <td style="text-align:left;">TNSR/USDC</td>
+            <td>2025-12-13 04:00</td>
+            <td>2025-12-15 05:00</td>
+            <td>0.0957</td>
+            <td>0.0957</td>
+            <td>0.0962</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+0.52%</td>
+        </tr>
+        <tr>
+            <td>50</td>
+            <td style="text-align:left;">ETH/USDC</td>
+            <td>2025-12-15 01:00</td>
+            <td>2025-12-15 15:00</td>
+            <td>3109</td>
+            <td>3109</td>
+            <td>3052.78</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-1.81%</td>
+        </tr>
+        <tr>
+            <td>51</td>
+            <td style="text-align:left;">BNB/USDC</td>
+            <td>2025-12-13 15:00</td>
+            <td>2025-12-15 16:00</td>
+            <td>899.14</td>
+            <td>899.14</td>
+            <td>859.15</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-4.45%</td>
+        </tr>
+        <tr>
+            <td>52</td>
+            <td style="text-align:left;">SUI/USDC</td>
+            <td>2025-12-13 16:00</td>
+            <td>2025-12-15 17:00</td>
+            <td>1.6098</td>
+            <td>1.6098</td>
+            <td>1.474</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-8.44%</td>
+        </tr>
+        <tr>
+            <td>53</td>
+            <td style="text-align:left;">SOL/USDC</td>
+            <td>2025-12-15 00:00</td>
+            <td>2025-12-17 01:00</td>
+            <td>130.16</td>
+            <td>130.16</td>
+            <td>128.91</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-0.96%</td>
+        </tr>
+        <tr>
+            <td>54</td>
+            <td style="text-align:left;">LINK/USDC</td>
+            <td>2025-12-15 00:00</td>
+            <td>2025-12-17 01:00</td>
+            <td>13.39</td>
+            <td>13.39</td>
+            <td>12.84</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-4.11%</td>
+        </tr>
+        <tr>
+            <td>55</td>
+            <td style="text-align:left;">ZEC/USDC</td>
+            <td>2025-12-16 10:00</td>
+            <td>2025-12-17 19:00</td>
+            <td>391.69</td>
+            <td>391.69</td>
+            <td>387.74</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-1.01%</td>
+        </tr>
+        <tr>
+            <td>56</td>
+            <td style="text-align:left;">TNSR/USDC</td>
+            <td>2025-12-16 03:00</td>
+            <td>2025-12-18 04:00</td>
+            <td>0.0935</td>
+            <td>0.0935</td>
+            <td>0.0901</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-3.64%</td>
+        </tr>
+        <tr>
+            <td>57</td>
+            <td style="text-align:left;">BNB/USDC</td>
+            <td>2025-12-16 14:00</td>
+            <td>2025-12-18 15:00</td>
+            <td>872.11</td>
+            <td>872.11</td>
+            <td>843.36</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-3.30%</td>
+        </tr>
+        <tr>
+            <td>58</td>
+            <td style="text-align:left;">ZEC/USDC</td>
+            <td>2025-12-18 00:00</td>
+            <td>2025-12-19 09:00</td>
+            <td>378.32</td>
+            <td>378.32</td>
+            <td>410.82</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+8.59%</td>
+        </tr>
+        <tr>
+            <td>59</td>
+            <td style="text-align:left;">BTC/USDC</td>
+            <td>2025-12-18 02:00</td>
+            <td>2025-12-20 15:00</td>
+            <td>86672.8</td>
+            <td>86672.8</td>
+            <td>88223</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+1.79%</td>
+        </tr>
+        <tr>
+            <td>60</td>
+            <td style="text-align:left;">ZEC/USDC</td>
+            <td>2025-12-19 18:00</td>
+            <td>2025-12-21 03:00</td>
+            <td>436.59</td>
+            <td>436.59</td>
+            <td>443.64</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+1.61%</td>
+        </tr>
+        <tr>
+            <td>61</td>
+            <td style="text-align:left;">ADA/USDC</td>
+            <td>2025-12-19 02:00</td>
+            <td>2025-12-21 03:00</td>
+            <td>0.3506</td>
+            <td>0.3506</td>
+            <td>0.3684</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+5.08%</td>
+        </tr>
+        <tr>
+            <td>62</td>
+            <td style="text-align:left;">SUI/USDC</td>
+            <td>2025-12-19 02:00</td>
+            <td>2025-12-21 03:00</td>
+            <td>1.3402</td>
+            <td>1.3402</td>
+            <td>1.4373</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+7.25%</td>
+        </tr>
+        <tr>
+            <td>63</td>
+            <td style="text-align:left;">SOL/USDC</td>
+            <td>2025-12-19 02:00</td>
+            <td>2025-12-21 03:00</td>
+            <td>118.91</td>
+            <td>118.91</td>
+            <td>124.87</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+5.01%</td>
+        </tr>
+        <tr>
+            <td>64</td>
+            <td style="text-align:left;">LUNC/USDT</td>
+            <td>2025-12-19 03:00</td>
+            <td>2025-12-21 04:00</td>
+            <td>3.783e-05</td>
+            <td>3.783e-05</td>
+            <td>3.928e-05</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+3.83%</td>
+        </tr>
+        <tr>
+            <td>65</td>
+            <td style="text-align:left;">BNB/USDC</td>
+            <td>2025-12-19 03:00</td>
+            <td>2025-12-21 04:00</td>
+            <td>837.37</td>
+            <td>837.37</td>
+            <td>850.06</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+1.52%</td>
+        </tr>
+        <tr>
+            <td>66</td>
+            <td style="text-align:left;">LINK/USDC</td>
+            <td>2025-12-19 03:00</td>
+            <td>2025-12-21 04:00</td>
+            <td>12.21</td>
+            <td>12.21</td>
+            <td>12.48</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+2.21%</td>
+        </tr>
+        <tr>
+            <td>67</td>
+            <td style="text-align:left;">ETH/USDC</td>
+            <td>2025-12-19 02:00</td>
+            <td>2025-12-21 15:00</td>
+            <td>2834.48</td>
+            <td>2834.48</td>
+            <td>2970.29</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+4.79%</td>
+        </tr>
+        <tr>
+            <td>68</td>
+            <td style="text-align:left;">XRP/USDC</td>
+            <td>2025-12-19 03:00</td>
+            <td>2025-12-21 16:00</td>
+            <td>1.8395</td>
+            <td>1.8395</td>
+            <td>1.9044</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+3.53%</td>
+        </tr>
+        <tr>
+            <td>69</td>
+            <td style="text-align:left;">ICP/USDC</td>
+            <td>2025-12-19 19:00</td>
+            <td>2025-12-21 20:00</td>
+            <td>2.963</td>
+            <td>2.963</td>
+            <td>3.08</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+3.95%</td>
+        </tr>
+        <tr>
+            <td>70</td>
+            <td style="text-align:left;">TNSR/USDC</td>
+            <td>2025-12-20 02:00</td>
+            <td>2025-12-22 03:00</td>
+            <td>0.089</td>
+            <td>0.089</td>
+            <td>0.0855</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-3.93%</td>
+        </tr>
+        <tr>
+            <td>71</td>
+            <td style="text-align:left;">ZEC/USDC</td>
+            <td>2025-12-21 03:00</td>
+            <td>2025-12-22 12:00</td>
+            <td>447.33</td>
+            <td>447.33</td>
+            <td>448.04</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+0.16%</td>
+        </tr>
+        <tr>
+            <td>72</td>
+            <td style="text-align:left;">SUI/USDC</td>
+            <td>2025-12-21 03:00</td>
+            <td>2025-12-23 04:00</td>
+            <td>1.4451</td>
+            <td>1.4451</td>
+            <td>1.448</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+0.20%</td>
+        </tr>
+        <tr>
+            <td>73</td>
+            <td style="text-align:left;">LUNC/USDT</td>
+            <td>2025-12-21 04:00</td>
+            <td>2025-12-23 05:00</td>
+            <td>4.005e-05</td>
+            <td>4.005e-05</td>
+            <td>3.864e-05</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-3.52%</td>
+        </tr>
+        <tr>
+            <td>74</td>
+            <td style="text-align:left;">SOL/USDC</td>
+            <td>2025-12-21 05:00</td>
+            <td>2025-12-23 06:00</td>
+            <td>125.26</td>
+            <td>125.26</td>
+            <td>124.93</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-0.26%</td>
+        </tr>
+        <tr>
+            <td>75</td>
+            <td style="text-align:left;">ETH/USDC</td>
+            <td>2025-12-21 16:00</td>
+            <td>2025-12-23 07:00</td>
+            <td>2985.75</td>
+            <td>2985.75</td>
+            <td>2950.9</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-1.17%</td>
+        </tr>
+        <tr>
+            <td>76</td>
+            <td style="text-align:left;">BNB/USDC</td>
+            <td>2025-12-21 06:00</td>
+            <td>2025-12-23 07:00</td>
+            <td>849.59</td>
+            <td>849.59</td>
+            <td>848.76</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-0.10%</td>
+        </tr>
+        <tr>
+            <td>77</td>
+            <td style="text-align:left;">LINK/USDC</td>
+            <td>2025-12-21 06:00</td>
+            <td>2025-12-23 07:00</td>
+            <td>12.53</td>
+            <td>12.53</td>
+            <td>12.31</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-1.76%</td>
+        </tr>
+        <tr>
+            <td>78</td>
+            <td style="text-align:left;">BTC/USDC</td>
+            <td>2025-12-20 18:00</td>
+            <td>2025-12-23 07:00</td>
+            <td>88287</td>
+            <td>88287</td>
+            <td>87362.7</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-1.05%</td>
+        </tr>
+        <tr>
+            <td>79</td>
+            <td style="text-align:left;">ADA/USDC</td>
+            <td>2025-12-21 08:00</td>
+            <td>2025-12-23 09:00</td>
+            <td>0.3708</td>
+            <td>0.3708</td>
+            <td>0.3637</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-1.91%</td>
+        </tr>
+        <tr>
+            <td>80</td>
+            <td style="text-align:left;">TAO/USDC</td>
+            <td>2025-12-22 03:00</td>
+            <td>2025-12-24 04:00</td>
+            <td>223.6</td>
+            <td>223.6</td>
+            <td>210.1</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-6.04%</td>
+        </tr>
+        <tr>
+            <td>81</td>
+            <td style="text-align:left;">XRP/USDC</td>
+            <td>2025-12-21 18:00</td>
+            <td>2025-12-24 07:00</td>
+            <td>1.9124</td>
+            <td>1.9124</td>
+            <td>1.8514</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-3.19%</td>
+        </tr>
+        <tr>
+            <td>82</td>
+            <td style="text-align:left;">TNSR/USDC</td>
+            <td>2025-12-22 10:00</td>
+            <td>2025-12-24 11:00</td>
+            <td>0.0864</td>
+            <td>0.0864</td>
+            <td>0.0794</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-8.10%</td>
+        </tr>
+        <tr>
+            <td>83</td>
+            <td style="text-align:left;">ICP/USDC</td>
+            <td>2025-12-23 13:00</td>
+            <td>2025-12-25 14:00</td>
+            <td>2.977</td>
+            <td>2.977</td>
+            <td>3.053</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+2.55%</td>
+        </tr>
+        <tr>
+            <td>84</td>
+            <td style="text-align:left;">LUNC/USDT</td>
+            <td>2025-12-23 15:00</td>
+            <td>2025-12-25 16:00</td>
+            <td>3.918e-05</td>
+            <td>3.918e-05</td>
+            <td>3.978e-05</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+1.53%</td>
+        </tr>
+        <tr>
+            <td>85</td>
+            <td style="text-align:left;">ZEC/USDC</td>
+            <td>2025-12-24 09:00</td>
+            <td>2025-12-25 18:00</td>
+            <td>408.76</td>
+            <td>408.76</td>
+            <td>445.09</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+8.89%</td>
+        </tr>
+        <tr>
+            <td>86</td>
+            <td style="text-align:left;">ETH/USDC</td>
+            <td>2025-12-26 02:00</td>
+            <td>2025-12-26 15:00</td>
+            <td>2971.35</td>
+            <td>2971.35</td>
+            <td>2926.33</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-1.51%</td>
+        </tr>
+        <tr>
+            <td>87</td>
+            <td style="text-align:left;">TAO/USDC</td>
+            <td>2025-12-24 22:00</td>
+            <td>2025-12-26 23:00</td>
+            <td>219.5</td>
+            <td>219.5</td>
+            <td>216.5</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-1.37%</td>
+        </tr>
+        <tr>
+            <td>88</td>
+            <td style="text-align:left;">ZEC/USDC</td>
+            <td>2025-12-26 00:00</td>
+            <td>2025-12-27 09:00</td>
+            <td>440.32</td>
+            <td>440.32</td>
+            <td>468.03</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+6.29%</td>
+        </tr>
+        <tr>
+            <td>89</td>
+            <td style="text-align:left;">TNSR/USDC</td>
+            <td>2025-12-25 13:00</td>
+            <td>2025-12-27 14:00</td>
+            <td>0.0799</td>
+            <td>0.0799</td>
+            <td>0.0836</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+4.63%</td>
+        </tr>
+        <tr>
+            <td>90</td>
+            <td style="text-align:left;">ICP/USDC</td>
+            <td>2025-12-26 01:00</td>
+            <td>2025-12-28 02:00</td>
+            <td>3.023</td>
+            <td>3.023</td>
+            <td>3.056</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+1.09%</td>
+        </tr>
+        <tr>
+            <td>91</td>
+            <td style="text-align:left;">BNB/USDC</td>
+            <td>2025-12-26 01:00</td>
+            <td>2025-12-28 02:00</td>
+            <td>832.13</td>
+            <td>832.13</td>
+            <td>839.92</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+0.94%</td>
+        </tr>
+        <tr>
+            <td>92</td>
+            <td style="text-align:left;">ADA/USDC</td>
+            <td>2025-12-26 02:00</td>
+            <td>2025-12-28 03:00</td>
+            <td>0.3548</td>
+            <td>0.3548</td>
+            <td>0.369</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+4.00%</td>
+        </tr>
+        <tr>
+            <td>93</td>
+            <td style="text-align:left;">SOL/USDC</td>
+            <td>2025-12-26 02:00</td>
+            <td>2025-12-28 03:00</td>
+            <td>123.36</td>
+            <td>123.36</td>
+            <td>124.15</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+0.64%</td>
+        </tr>
+        <tr>
+            <td>94</td>
+            <td style="text-align:left;">LUNC/USDT</td>
+            <td>2025-12-26 02:00</td>
+            <td>2025-12-28 03:00</td>
+            <td>4.043e-05</td>
+            <td>4.043e-05</td>
+            <td>4.086e-05</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+1.06%</td>
+        </tr>
+        <tr>
+            <td>95</td>
+            <td style="text-align:left;">LINK/USDC</td>
+            <td>2025-12-26 02:00</td>
+            <td>2025-12-28 03:00</td>
+            <td>12.38</td>
+            <td>12.38</td>
+            <td>12.47</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+0.73%</td>
+        </tr>
+        <tr>
+            <td>96</td>
+            <td style="text-align:left;">SUI/USDC</td>
+            <td>2025-12-26 02:00</td>
+            <td>2025-12-28 03:00</td>
+            <td>1.4076</td>
+            <td>1.4076</td>
+            <td>1.4491</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+2.95%</td>
+        </tr>
+        <tr>
+            <td>97</td>
+            <td style="text-align:left;">BTC/USDC</td>
+            <td>2025-12-26 01:00</td>
+            <td>2025-12-28 14:00</td>
+            <td>87392</td>
+            <td>87392</td>
+            <td>87841.9</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+0.51%</td>
+        </tr>
+        <tr>
+            <td>98</td>
+            <td style="text-align:left;">XRP/USDC</td>
+            <td>2025-12-26 02:00</td>
+            <td>2025-12-28 15:00</td>
+            <td>1.8684</td>
+            <td>1.8684</td>
+            <td>1.8703</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+0.10%</td>
+        </tr>
+        <tr>
+            <td>99</td>
+            <td style="text-align:left;">ZEC/USDC</td>
+            <td>2025-12-27 09:00</td>
+            <td>2025-12-28 18:00</td>
+            <td>485.82</td>
+            <td>485.82</td>
+            <td>535.24</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+10.17%</td>
+        </tr>
+        <tr>
+            <td>100</td>
+            <td style="text-align:left;">TAO/USDC</td>
+            <td>2025-12-27 00:00</td>
+            <td>2025-12-29 01:00</td>
+            <td>216.7</td>
+            <td>216.7</td>
+            <td>225.5</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+4.06%</td>
+        </tr>
+        <tr>
+            <td>101</td>
+            <td style="text-align:left;">TNSR/USDC</td>
+            <td>2025-12-27 13:00</td>
+            <td>2025-12-29 14:00</td>
+            <td>0.0836</td>
+            <td>0.0836</td>
+            <td>0.081</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-3.11%</td>
+        </tr>
+        <tr>
+            <td>102</td>
+            <td style="text-align:left;">ICP/USDC</td>
+            <td>2025-12-28 02:00</td>
+            <td>2025-12-30 03:00</td>
+            <td>3.075</td>
+            <td>3.075</td>
+            <td>2.869</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-6.70%</td>
+        </tr>
+        <tr>
+            <td>103</td>
+            <td style="text-align:left;">SUI/USDC</td>
+            <td>2025-12-28 02:00</td>
+            <td>2025-12-30 03:00</td>
+            <td>1.4491</td>
+            <td>1.4491</td>
+            <td>1.4286</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-1.41%</td>
+        </tr>
+        <tr>
+            <td>104</td>
+            <td style="text-align:left;">LUNC/USDT</td>
+            <td>2025-12-28 03:00</td>
+            <td>2025-12-30 04:00</td>
+            <td>4.09e-05</td>
+            <td>4.09e-05</td>
+            <td>3.79e-05</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-7.33%</td>
+        </tr>
+        <tr>
+            <td>105</td>
+            <td style="text-align:left;">BNB/USDC</td>
+            <td>2025-12-28 04:00</td>
+            <td>2025-12-30 05:00</td>
+            <td>842.61</td>
+            <td>842.61</td>
+            <td>851.65</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+1.07%</td>
+        </tr>
+        <tr>
+            <td>106</td>
+            <td style="text-align:left;">ETH/USDC</td>
+            <td>2025-12-27 17:00</td>
+            <td>2025-12-30 06:00</td>
+            <td>2927.06</td>
+            <td>2927.06</td>
+            <td>2938.64</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+0.40%</td>
+        </tr>
+        <tr>
+            <td>107</td>
+            <td style="text-align:left;">ZEC/USDC</td>
+            <td>2025-12-28 22:00</td>
+            <td>2025-12-30 07:00</td>
+            <td>530.88</td>
+            <td>530.88</td>
+            <td>532.83</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+0.37%</td>
+        </tr>
+        <tr>
+            <td>108</td>
+            <td style="text-align:left;">SOL/USDC</td>
+            <td>2025-12-28 06:00</td>
+            <td>2025-12-30 07:00</td>
+            <td>124.04</td>
+            <td>124.04</td>
+            <td>123.78</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-0.21%</td>
+        </tr>
+        <tr>
+            <td>109</td>
+            <td style="text-align:left;">LINK/USDC</td>
+            <td>2025-12-28 10:00</td>
+            <td>2025-12-30 11:00</td>
+            <td>12.48</td>
+            <td>12.48</td>
+            <td>12.49</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+0.08%</td>
+        </tr>
+        <tr>
+            <td>110</td>
+            <td style="text-align:left;">ADA/USDC</td>
+            <td>2025-12-28 14:00</td>
+            <td>2025-12-30 15:00</td>
+            <td>0.3707</td>
+            <td>0.3707</td>
+            <td>0.3549</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-4.26%</td>
+        </tr>
+        <tr>
+            <td>111</td>
+            <td style="text-align:left;">XRP/USDC</td>
+            <td>2025-12-28 14:00</td>
+            <td>2025-12-31 03:00</td>
+            <td>1.8703</td>
+            <td>1.8703</td>
+            <td>1.8773</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+0.37%</td>
+        </tr>
+        <tr>
+            <td>112</td>
+            <td style="text-align:left;">BTC/USDC</td>
+            <td>2025-12-28 22:00</td>
+            <td>2025-12-31 11:00</td>
+            <td>87862.1</td>
+            <td>87862.1</td>
+            <td>88761</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+1.02%</td>
+        </tr>
+        <tr>
+            <td>113</td>
+            <td style="text-align:left;">TNSR/USDC</td>
+            <td>2025-12-29 15:00</td>
+            <td>2025-12-31 16:00</td>
+            <td>0.0801</td>
+            <td>0.0801</td>
+            <td>0.0786</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-1.87%</td>
+        </tr>
+        <tr>
+            <td>114</td>
+            <td style="text-align:left;">ZEC/USDC</td>
+            <td>2025-12-30 08:00</td>
+            <td>2025-12-31 17:00</td>
+            <td>533.29</td>
+            <td>533.29</td>
+            <td>507.16</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-4.90%</td>
+        </tr>
+        <tr>
+            <td>115</td>
+            <td style="text-align:left;">TAO/USDC</td>
+            <td>2025-12-30 00:00</td>
+            <td>2026-01-01 01:00</td>
+            <td>219.1</td>
+            <td>219.1</td>
+            <td>220.6</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+0.68%</td>
+        </tr>
+        <tr>
+            <td>116</td>
+            <td style="text-align:left;">BNB/USDC</td>
+            <td>2025-12-30 06:00</td>
+            <td>2026-01-01 07:00</td>
+            <td>852.74</td>
+            <td>852.74</td>
+            <td>860.66</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+0.93%</td>
+        </tr>
+        <tr>
+            <td>117</td>
+            <td style="text-align:left;">SOL/USDC</td>
+            <td>2025-12-30 06:00</td>
+            <td>2026-01-01 07:00</td>
+            <td>123.78</td>
+            <td>123.78</td>
+            <td>124.71</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+0.75%</td>
+        </tr>
+        <tr>
+            <td>118</td>
+            <td style="text-align:left;">LINK/USDC</td>
+            <td>2025-12-30 23:00</td>
+            <td>2026-01-02 00:00</td>
+            <td>12.41</td>
+            <td>12.41</td>
+            <td>12.59</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+1.45%</td>
+        </tr>
+        <tr>
+            <td>119</td>
+            <td style="text-align:left;">LUNC/USDT</td>
+            <td>2025-12-31 01:00</td>
+            <td>2026-01-02 02:00</td>
+            <td>3.735e-05</td>
+            <td>3.735e-05</td>
+            <td>4.038e-05</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+8.11%</td>
+        </tr>
+        <tr>
+            <td>120</td>
+            <td style="text-align:left;">SUI/USDC</td>
+            <td>2025-12-31 01:00</td>
+            <td>2026-01-02 02:00</td>
+            <td>1.4438</td>
+            <td>1.4438</td>
+            <td>1.465</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+1.47%</td>
+        </tr>
+        <tr>
+            <td>121</td>
+            <td style="text-align:left;">ETH/USDC</td>
+            <td>2025-12-30 23:00</td>
+            <td>2026-01-02 12:00</td>
+            <td>2971.13</td>
+            <td>2971.13</td>
+            <td>3045.23</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+2.49%</td>
+        </tr>
+        <tr>
+            <td>122</td>
+            <td style="text-align:left;">ZEC/USDC</td>
+            <td>2026-01-01 14:00</td>
+            <td>2026-01-02 23:00</td>
+            <td>527.44</td>
+            <td>527.44</td>
+            <td>488.56</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-7.37%</td>
+        </tr>
+        <tr>
+            <td>123</td>
+            <td style="text-align:left;">XRP/USDC</td>
+            <td>2025-12-31 10:00</td>
+            <td>2026-01-02 23:00</td>
+            <td>1.8703</td>
+            <td>1.8703</td>
+            <td>2.015</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+7.74%</td>
+        </tr>
+        <tr>
+            <td>124</td>
+            <td style="text-align:left;">TAO/USDC</td>
+            <td>2026-01-01 00:00</td>
+            <td>2026-01-03 01:00</td>
+            <td>220.6</td>
+            <td>220.6</td>
+            <td>249.4</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+13.06%</td>
+        </tr>
+        <tr>
+            <td>125</td>
+            <td style="text-align:left;">ICP/USDC</td>
+            <td>2026-01-01 05:00</td>
+            <td>2026-01-03 06:00</td>
+            <td>2.877</td>
+            <td>2.877</td>
+            <td>3.155</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+9.66%</td>
+        </tr>
+        <tr>
+            <td>126</td>
+            <td style="text-align:left;">ETH/USDC</td>
+            <td>2026-01-03 00:00</td>
+            <td>2026-01-03 08:00</td>
+            <td>3130.33</td>
+            <td>3130.33</td>
+            <td>3083.03</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-1.51%</td>
+        </tr>
+        <tr>
+            <td>127</td>
+            <td style="text-align:left;">SOL/USDC</td>
+            <td>2026-01-01 08:00</td>
+            <td>2026-01-03 09:00</td>
+            <td>124.53</td>
+            <td>124.53</td>
+            <td>130.67</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+4.93%</td>
+        </tr>
+        <tr>
+            <td>128</td>
+            <td style="text-align:left;">TNSR/USDC</td>
+            <td>2026-01-01 14:00</td>
+            <td>2026-01-03 15:00</td>
+            <td>0.0782</td>
+            <td>0.0782</td>
+            <td>0.0808</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+3.32%</td>
+        </tr>
+        <tr>
+            <td>129</td>
+            <td style="text-align:left;">BNB/USDC</td>
+            <td>2026-01-01 15:00</td>
+            <td>2026-01-03 16:00</td>
+            <td>858.46</td>
+            <td>858.46</td>
+            <td>873.17</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+1.71%</td>
+        </tr>
+        <tr>
+            <td>130</td>
+            <td style="text-align:left;">ADA/USDC</td>
+            <td>2026-01-02 02:00</td>
+            <td>2026-01-04 03:00</td>
+            <td>0.3578</td>
+            <td>0.3578</td>
+            <td>0.3936</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+10.01%</td>
+        </tr>
+        <tr>
+            <td>131</td>
+            <td style="text-align:left;">SUI/USDC</td>
+            <td>2026-01-02 02:00</td>
+            <td>2026-01-04 03:00</td>
+            <td>1.4735</td>
+            <td>1.4735</td>
+            <td>1.6852</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+14.37%</td>
+        </tr>
+        <tr>
+            <td>132</td>
+            <td style="text-align:left;">LUNC/USDT</td>
+            <td>2026-01-02 06:00</td>
+            <td>2026-01-04 07:00</td>
+            <td>4.037e-05</td>
+            <td>4.037e-05</td>
+            <td>4.308e-05</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+6.71%</td>
+        </tr>
+        <tr>
+            <td>133</td>
+            <td style="text-align:left;">BTC/USDC</td>
+            <td>2026-01-02 03:00</td>
+            <td>2026-01-04 16:00</td>
+            <td>88860</td>
+            <td>88860</td>
+            <td>91310.1</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+2.76%</td>
+        </tr>
+        <tr>
+            <td>134</td>
+            <td style="text-align:left;">ZEC/USDC</td>
+            <td>2026-01-03 18:00</td>
+            <td>2026-01-05 03:00</td>
+            <td>506.88</td>
+            <td>506.88</td>
+            <td>506.08</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-0.16%</td>
+        </tr>
+        <tr>
+            <td>135</td>
+            <td style="text-align:left;">SOL/USDC</td>
+            <td>2026-01-03 09:00</td>
+            <td>2026-01-05 10:00</td>
+            <td>131.14</td>
+            <td>131.14</td>
+            <td>135.39</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+3.24%</td>
+        </tr>
+        <tr>
+            <td>136</td>
+            <td style="text-align:left;">ICP/USDC</td>
+            <td>2026-01-03 10:00</td>
+            <td>2026-01-05 11:00</td>
+            <td>3.092</td>
+            <td>3.092</td>
+            <td>3.2</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+3.49%</td>
+        </tr>
+        <tr>
+            <td>137</td>
+            <td style="text-align:left;">LINK/USDC</td>
+            <td>2026-01-03 12:00</td>
+            <td>2026-01-05 13:00</td>
+            <td>13.15</td>
+            <td>13.15</td>
+            <td>13.55</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+3.04%</td>
+        </tr>
+        <tr>
+            <td>138</td>
+            <td style="text-align:left;">TAO/USDC</td>
+            <td>2026-01-03 12:00</td>
+            <td>2026-01-05 13:00</td>
+            <td>245.1</td>
+            <td>245.1</td>
+            <td>261.2</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+6.57%</td>
+        </tr>
+        <tr>
+            <td>139</td>
+            <td style="text-align:left;">BNB/USDC</td>
+            <td>2026-01-03 16:00</td>
+            <td>2026-01-05 17:00</td>
+            <td>875.43</td>
+            <td>875.43</td>
+            <td>904.85</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+3.36%</td>
+        </tr>
+        <tr>
+            <td>140</td>
+            <td style="text-align:left;">TNSR/USDC</td>
+            <td>2026-01-03 21:00</td>
+            <td>2026-01-05 22:00</td>
+            <td>0.0802</td>
+            <td>0.0802</td>
+            <td>0.0809</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+0.87%</td>
+        </tr>
+        <tr>
+            <td>141</td>
+            <td style="text-align:left;">ETH/USDC</td>
+            <td>2026-01-03 12:00</td>
+            <td>2026-01-06 01:00</td>
+            <td>3104.01</td>
+            <td>3104.01</td>
+            <td>3216.66</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+3.63%</td>
+        </tr>
+        <tr>
+            <td>142</td>
+            <td style="text-align:left;">XRP/USDC</td>
+            <td>2026-01-03 14:00</td>
+            <td>2026-01-06 03:00</td>
+            <td>2.0105</td>
+            <td>2.0105</td>
+            <td>2.3934</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+19.05%</td>
+        </tr>
+        <tr>
+            <td>143</td>
+            <td style="text-align:left;">LUNC/USDT</td>
+            <td>2026-01-04 07:00</td>
+            <td>2026-01-06 08:00</td>
+            <td>4.353e-05</td>
+            <td>4.353e-05</td>
+            <td>4.523e-05</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+3.91%</td>
+        </tr>
+        <tr>
+            <td>144</td>
+            <td style="text-align:left;">ADA/USDC</td>
+            <td>2026-01-04 08:00</td>
+            <td>2026-01-06 09:00</td>
+            <td>0.3981</td>
+            <td>0.3981</td>
+            <td>0.4159</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+4.47%</td>
+        </tr>
+        <tr>
+            <td>145</td>
+            <td style="text-align:left;">SUI/USDC</td>
+            <td>2026-01-04 09:00</td>
+            <td>2026-01-06 10:00</td>
+            <td>1.7068</td>
+            <td>1.7068</td>
+            <td>1.9521</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+14.37%</td>
+        </tr>
+        <tr>
+            <td>146</td>
+            <td style="text-align:left;">ZEC/USDC</td>
+            <td>2026-01-05 17:00</td>
+            <td>2026-01-07 02:00</td>
+            <td>490.83</td>
+            <td>490.83</td>
+            <td>494.16</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+0.68%</td>
+        </tr>
+        <tr>
+            <td>147</td>
+            <td style="text-align:left;">BTC/USDC</td>
+            <td>2026-01-04 17:00</td>
+            <td>2026-01-07 06:00</td>
+            <td>91319</td>
+            <td>91319</td>
+            <td>92492</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+1.28%</td>
+        </tr>
+        <tr>
+            <td>148</td>
+            <td style="text-align:left;">SOL/USDC</td>
+            <td>2026-01-05 10:00</td>
+            <td>2026-01-07 11:00</td>
+            <td>135.77</td>
+            <td>135.77</td>
+            <td>137.5</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+1.27%</td>
+        </tr>
+        <tr>
+            <td>149</td>
+            <td style="text-align:left;">ICP/USDC</td>
+            <td>2026-01-05 11:00</td>
+            <td>2026-01-07 12:00</td>
+            <td>3.209</td>
+            <td>3.209</td>
+            <td>3.326</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+3.65%</td>
+        </tr>
+        <tr>
+            <td>150</td>
+            <td style="text-align:left;">ETH/USDC</td>
+            <td>2026-01-06 03:00</td>
+            <td>2026-01-07 15:00</td>
+            <td>3225.69</td>
+            <td>3225.69</td>
+            <td>3174.36</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-1.59%</td>
+        </tr>
+        <tr>
+            <td>151</td>
+            <td style="text-align:left;">TAO/USDC</td>
+            <td>2026-01-05 14:00</td>
+            <td>2026-01-07 15:00</td>
+            <td>263.2</td>
+            <td>263.2</td>
+            <td>274.9</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+4.45%</td>
+        </tr>
+        <tr>
+            <td>152</td>
+            <td style="text-align:left;">LINK/USDC</td>
+            <td>2026-01-05 14:00</td>
+            <td>2026-01-07 15:00</td>
+            <td>13.61</td>
+            <td>13.61</td>
+            <td>13.57</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-0.29%</td>
+        </tr>
+        <tr>
+            <td>153</td>
+            <td style="text-align:left;">BNB/USDC</td>
+            <td>2026-01-05 17:00</td>
+            <td>2026-01-07 18:00</td>
+            <td>906.7</td>
+            <td>906.7</td>
+            <td>897.01</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-1.07%</td>
+        </tr>
+        <tr>
+            <td>154</td>
+            <td style="text-align:left;">TNSR/USDC</td>
+            <td>2026-01-05 22:00</td>
+            <td>2026-01-07 23:00</td>
+            <td>0.082</td>
+            <td>0.082</td>
+            <td>0.0766</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-6.59%</td>
+        </tr>
+        <tr>
+            <td>155</td>
+            <td style="text-align:left;">ADA/USDC</td>
+            <td>2026-01-06 10:00</td>
+            <td>2026-01-08 11:00</td>
+            <td>0.4191</td>
+            <td>0.4191</td>
+            <td>0.3916</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-6.56%</td>
+        </tr>
+        <tr>
+            <td>156</td>
+            <td style="text-align:left;">SUI/USDC</td>
+            <td>2026-01-06 11:00</td>
+            <td>2026-01-08 12:00</td>
+            <td>1.9795</td>
+            <td>1.9795</td>
+            <td>1.7833</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-9.91%</td>
+        </tr>
+        <tr>
+            <td>157</td>
+            <td style="text-align:left;">LUNC/USDT</td>
+            <td>2026-01-06 14:00</td>
+            <td>2026-01-08 15:00</td>
+            <td>4.671e-05</td>
+            <td>4.671e-05</td>
+            <td>4.254e-05</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-8.93%</td>
+        </tr>
+        <tr>
+            <td>158</td>
+            <td style="text-align:left;">XRP/USDC</td>
+            <td>2026-01-06 10:00</td>
+            <td>2026-01-08 23:00</td>
+            <td>2.3607</td>
+            <td>2.3607</td>
+            <td>2.1325</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-9.67%</td>
+        </tr>
+        <tr>
+            <td>159</td>
+            <td style="text-align:left;">SOL/USDC</td>
+            <td>2026-01-08 13:00</td>
+            <td>2026-01-10 14:00</td>
+            <td>134.35</td>
+            <td>134.35</td>
+            <td>136.2</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+1.38%</td>
+        </tr>
+        <tr>
+            <td>160</td>
+            <td style="text-align:left;">TAO/USDC</td>
+            <td>2026-01-08 14:00</td>
+            <td>2026-01-10 15:00</td>
+            <td>271</td>
+            <td>271</td>
+            <td>283.4</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+4.58%</td>
+        </tr>
+        <tr>
+            <td>161</td>
+            <td style="text-align:left;">LUNC/USDT</td>
+            <td>2026-01-10 05:00</td>
+            <td>2026-01-12 06:00</td>
+            <td>4.284e-05</td>
+            <td>4.284e-05</td>
+            <td>4.357e-05</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+1.70%</td>
+        </tr>
+        <tr>
+            <td>162</td>
+            <td style="text-align:left;">BNB/USDC</td>
+            <td>2026-01-10 13:00</td>
+            <td>2026-01-12 14:00</td>
+            <td>901.76</td>
+            <td>901.76</td>
+            <td>899.12</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-0.29%</td>
+        </tr>
+        <tr>
+            <td>163</td>
+            <td style="text-align:left;">ETH/USDC</td>
+            <td>2026-01-11 23:00</td>
+            <td>2026-01-12 15:00</td>
+            <td>3119.63</td>
+            <td>3119.63</td>
+            <td>3089.4</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-0.97%</td>
+        </tr>
+        <tr>
+            <td>164</td>
+            <td style="text-align:left;">ICP/USDC</td>
+            <td>2026-01-11 01:00</td>
+            <td>2026-01-13 02:00</td>
+            <td>3.194</td>
+            <td>3.194</td>
+            <td>3.121</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-2.29%</td>
+        </tr>
+        <tr>
+            <td>165</td>
+            <td style="text-align:left;">ZEC/USDC</td>
+            <td>2026-01-12 00:00</td>
+            <td>2026-01-13 09:00</td>
+            <td>386.41</td>
+            <td>386.41</td>
+            <td>404.57</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+4.70%</td>
+        </tr>
+        <tr>
+            <td>166</td>
+            <td style="text-align:left;">TAO/USDC</td>
+            <td>2026-01-11 19:00</td>
+            <td>2026-01-13 20:00</td>
+            <td>290.6</td>
+            <td>290.6</td>
+            <td>289.6</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-0.34%</td>
+        </tr>
+        <tr>
+            <td>167</td>
+            <td style="text-align:left;">SOL/USDC</td>
+            <td>2026-01-11 23:00</td>
+            <td>2026-01-14 00:00</td>
+            <td>139.54</td>
+            <td>139.54</td>
+            <td>145.45</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+4.24%</td>
+        </tr>
+        <tr>
+            <td>168</td>
+            <td style="text-align:left;">BTC/USDC</td>
+            <td>2026-01-11 16:00</td>
+            <td>2026-01-14 05:00</td>
+            <td>90931</td>
+            <td>90931</td>
+            <td>95218</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+4.71%</td>
+        </tr>
+        <tr>
+            <td>169</td>
+            <td style="text-align:left;">BNB/USDC</td>
+            <td>2026-01-12 15:00</td>
+            <td>2026-01-14 16:00</td>
+            <td>903.49</td>
+            <td>903.49</td>
+            <td>942.13</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+4.28%</td>
+        </tr>
+        <tr>
+            <td>170</td>
+            <td style="text-align:left;">TNSR/USDC</td>
+            <td>2026-01-13 02:00</td>
+            <td>2026-01-15 03:00</td>
+            <td>0.0688</td>
+            <td>0.0688</td>
+            <td>0.0724</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+5.23%</td>
+        </tr>
+        <tr>
+            <td>171</td>
+            <td style="text-align:left;">ZEC/USDC</td>
+            <td>2026-01-13 19:00</td>
+            <td>2026-01-15 04:00</td>
+            <td>398.8</td>
+            <td>398.8</td>
+            <td>425.83</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+6.78%</td>
+        </tr>
+        <tr>
+            <td>172</td>
+            <td style="text-align:left;">LINK/USDC</td>
+            <td>2026-01-13 03:00</td>
+            <td>2026-01-15 04:00</td>
+            <td>13.11</td>
+            <td>13.11</td>
+            <td>13.76</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+4.96%</td>
+        </tr>
+        <tr>
+            <td>173</td>
+            <td style="text-align:left;">ADA/USDC</td>
+            <td>2026-01-13 03:00</td>
+            <td>2026-01-15 04:00</td>
+            <td>0.3864</td>
+            <td>0.3864</td>
+            <td>0.4003</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+3.60%</td>
+        </tr>
+        <tr>
+            <td>174</td>
+            <td style="text-align:left;">ICP/USDC</td>
+            <td>2026-01-13 03:00</td>
+            <td>2026-01-15 04:00</td>
+            <td>3.141</td>
+            <td>3.141</td>
+            <td>4.395</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+39.92%</td>
+        </tr>
+        <tr>
+            <td>175</td>
+            <td style="text-align:left;">ETH/USDC</td>
+            <td>2026-01-13 00:00</td>
+            <td>2026-01-15 13:00</td>
+            <td>3105.77</td>
+            <td>3105.77</td>
+            <td>3369.09</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+8.48%</td>
+        </tr>
+        <tr>
+            <td>176</td>
+            <td style="text-align:left;">SUI/USDC</td>
+            <td>2026-01-13 13:00</td>
+            <td>2026-01-15 14:00</td>
+            <td>1.8014</td>
+            <td>1.8014</td>
+            <td>1.8247</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+1.29%</td>
+        </tr>
+        <tr>
+            <td>177</td>
+            <td style="text-align:left;">LUNC/USDT</td>
+            <td>2026-01-13 15:00</td>
+            <td>2026-01-15 16:00</td>
+            <td>4.311e-05</td>
+            <td>4.311e-05</td>
+            <td>4.237e-05</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-1.72%</td>
+        </tr>
+        <tr>
+            <td>178</td>
+            <td style="text-align:left;">TAO/USDC</td>
+            <td>2026-01-13 22:00</td>
+            <td>2026-01-15 23:00</td>
+            <td>296.3</td>
+            <td>296.3</td>
+            <td>278</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-6.18%</td>
+        </tr>
+        <tr>
+            <td>179</td>
+            <td style="text-align:left;">XRP/USDC</td>
+            <td>2026-01-13 12:00</td>
+            <td>2026-01-16 01:00</td>
+            <td>2.062</td>
+            <td>2.062</td>
+            <td>2.0821</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+0.97%</td>
+        </tr>
+        <tr>
+            <td>180</td>
+            <td style="text-align:left;">SOL/USDC</td>
+            <td>2026-01-14 01:00</td>
+            <td>2026-01-16 02:00</td>
+            <td>145.65</td>
+            <td>145.65</td>
+            <td>142.35</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-2.27%</td>
+        </tr>
+        <tr>
+            <td>181</td>
+            <td style="text-align:left;">ZEC/USDC</td>
+            <td>2026-01-15 05:00</td>
+            <td>2026-01-16 14:00</td>
+            <td>431.68</td>
+            <td>431.68</td>
+            <td>408.8</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-5.30%</td>
+        </tr>
+        <tr>
+            <td>182</td>
+            <td style="text-align:left;">BTC/USDC</td>
+            <td>2026-01-14 07:00</td>
+            <td>2026-01-16 20:00</td>
+            <td>95197</td>
+            <td>95197</td>
+            <td>94979.2</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-0.23%</td>
+        </tr>
+        <tr>
+            <td>183</td>
+            <td style="text-align:left;">BNB/USDC</td>
+            <td>2026-01-14 23:00</td>
+            <td>2026-01-17 00:00</td>
+            <td>948.6</td>
+            <td>948.6</td>
+            <td>937.95</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-1.12%</td>
+        </tr>
+        <tr>
+            <td>184</td>
+            <td style="text-align:left;">ICP/USDC</td>
+            <td>2026-01-15 04:00</td>
+            <td>2026-01-17 05:00</td>
+            <td>4.524</td>
+            <td>4.524</td>
+            <td>4.126</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-8.80%</td>
+        </tr>
+        <tr>
+            <td>185</td>
+            <td style="text-align:left;">TNSR/USDC</td>
+            <td>2026-01-15 07:00</td>
+            <td>2026-01-17 08:00</td>
+            <td>0.0725</td>
+            <td>0.0725</td>
+            <td>0.0728</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+0.41%</td>
+        </tr>
+        <tr>
+            <td>186</td>
+            <td style="text-align:left;">LINK/USDC</td>
+            <td>2026-01-15 09:00</td>
+            <td>2026-01-17 10:00</td>
+            <td>14.06</td>
+            <td>14.06</td>
+            <td>13.73</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-2.35%</td>
+        </tr>
+        <tr>
+            <td>187</td>
+            <td style="text-align:left;">ETH/USDC</td>
+            <td>2026-01-15 22:00</td>
+            <td>2026-01-18 11:00</td>
+            <td>3309.06</td>
+            <td>3309.06</td>
+            <td>3325.02</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+0.48%</td>
+        </tr>
+        <tr>
+            <td>188</td>
+            <td style="text-align:left;">LUNC/USDT</td>
+            <td>2026-01-16 17:00</td>
+            <td>2026-01-18 18:00</td>
+            <td>4.085e-05</td>
+            <td>4.085e-05</td>
+            <td>4.104e-05</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+0.47%</td>
+        </tr>
+        <tr>
+            <td>189</td>
+            <td style="text-align:left;">SOL/USDC</td>
+            <td>2026-01-16 17:00</td>
+            <td>2026-01-18 18:00</td>
+            <td>143.28</td>
+            <td>143.28</td>
+            <td>142.34</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-0.66%</td>
+        </tr>
+        <tr>
+            <td>190</td>
+            <td style="text-align:left;">BNB/USDC</td>
+            <td>2026-01-17 01:00</td>
+            <td>2026-01-19 02:00</td>
+            <td>938.27</td>
+            <td>938.27</td>
+            <td>919.67</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-1.98%</td>
+        </tr>
+        <tr>
+            <td>191</td>
+            <td style="text-align:left;">TNSR/USDC</td>
+            <td>2026-01-18 00:00</td>
+            <td>2026-01-20 01:00</td>
+            <td>0.0723</td>
+            <td>0.0723</td>
+            <td>0.0659</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-8.85%</td>
+        </tr>
+        <tr>
+            <td>192</td>
+            <td style="text-align:left;">ICP/USDC</td>
+            <td>2026-01-19 03:00</td>
+            <td>2026-01-21 04:00</td>
+            <td>3.873</td>
+            <td>3.873</td>
+            <td>3.682</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-4.93%</td>
+        </tr>
+        <tr>
+            <td>193</td>
+            <td style="text-align:left;">ZEC/USDC</td>
+            <td>2026-01-21 09:00</td>
+            <td>2026-01-22 18:00</td>
+            <td>358.46</td>
+            <td>358.46</td>
+            <td>366.07</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+2.12%</td>
+        </tr>
+        <tr>
+            <td>194</td>
+            <td style="text-align:left;">ADA/USDC</td>
+            <td>2026-01-21 14:00</td>
+            <td>2026-01-23 15:00</td>
+            <td>0.3616</td>
+            <td>0.3616</td>
+            <td>0.3546</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-1.94%</td>
+        </tr>
+        <tr>
+            <td>195</td>
+            <td style="text-align:left;">TAO/USDC</td>
+            <td>2026-01-22 00:00</td>
+            <td>2026-01-24 01:00</td>
+            <td>247</td>
+            <td>247</td>
+            <td>236</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-4.45%</td>
+        </tr>
+        <tr>
+            <td>196</td>
+            <td style="text-align:left;">SUI/USDC</td>
+            <td>2026-01-22 00:00</td>
+            <td>2026-01-24 01:00</td>
+            <td>1.5277</td>
+            <td>1.5277</td>
+            <td>1.4813</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-3.04%</td>
+        </tr>
+        <tr>
+            <td>197</td>
+            <td style="text-align:left;">LUNC/USDT</td>
+            <td>2026-01-22 00:00</td>
+            <td>2026-01-24 01:00</td>
+            <td>3.874e-05</td>
+            <td>3.874e-05</td>
+            <td>3.782e-05</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-2.37%</td>
+        </tr>
+        <tr>
+            <td>198</td>
+            <td style="text-align:left;">XRP/USDC</td>
+            <td>2026-01-21 14:00</td>
+            <td>2026-01-24 03:00</td>
+            <td>1.9411</td>
+            <td>1.9411</td>
+            <td>1.9216</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-1.00%</td>
+        </tr>
+        <tr>
+            <td>199</td>
+            <td style="text-align:left;">ZEC/USDC</td>
+            <td>2026-01-22 19:00</td>
+            <td>2026-01-24 04:00</td>
+            <td>365.28</td>
+            <td>365.28</td>
+            <td>381.99</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+4.57%</td>
+        </tr>
+        <tr>
+            <td>200</td>
+            <td style="text-align:left;">SOL/USDC</td>
+            <td>2026-01-22 04:00</td>
+            <td>2026-01-24 05:00</td>
+            <td>130.25</td>
+            <td>130.25</td>
+            <td>127.69</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-1.97%</td>
+        </tr>
+        <tr>
+            <td>201</td>
+            <td style="text-align:left;">BNB/USDC</td>
+            <td>2026-01-23 13:00</td>
+            <td>2026-01-25 14:00</td>
+            <td>886.98</td>
+            <td>886.98</td>
+            <td>879.44</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-0.85%</td>
+        </tr>
+        <tr>
+            <td>202</td>
+            <td style="text-align:left;">ADA/USDC</td>
+            <td>2026-01-23 15:00</td>
+            <td>2026-01-25 16:00</td>
+            <td>0.3601</td>
+            <td>0.3601</td>
+            <td>0.3519</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-2.28%</td>
+        </tr>
+        <tr>
+            <td>203</td>
+            <td style="text-align:left;">ZEC/USDC</td>
+            <td>2026-01-24 08:00</td>
+            <td>2026-01-25 17:00</td>
+            <td>374.99</td>
+            <td>374.99</td>
+            <td>345.14</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-7.96%</td>
+        </tr>
+        <tr>
+            <td>204</td>
+            <td style="text-align:left;">ETH/USDC</td>
+            <td>2026-01-24 01:00</td>
+            <td>2026-01-25 17:00</td>
+            <td>2952.86</td>
+            <td>2952.86</td>
+            <td>2901.14</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-1.75%</td>
+        </tr>
+        <tr>
+            <td>205</td>
+            <td style="text-align:left;">LUNC/USDT</td>
+            <td>2026-01-24 01:00</td>
+            <td>2026-01-26 02:00</td>
+            <td>3.803e-05</td>
+            <td>3.803e-05</td>
+            <td>3.714e-05</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-2.34%</td>
+        </tr>
+        <tr>
+            <td>206</td>
+            <td style="text-align:left;">SUI/USDC</td>
+            <td>2026-01-24 02:00</td>
+            <td>2026-01-26 03:00</td>
+            <td>1.4881</td>
+            <td>1.4881</td>
+            <td>1.4335</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-3.67%</td>
+        </tr>
+        <tr>
+            <td>207</td>
+            <td style="text-align:left;">TAO/USDC</td>
+            <td>2026-01-24 02:00</td>
+            <td>2026-01-26 03:00</td>
+            <td>237.1</td>
+            <td>237.1</td>
+            <td>230.7</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-2.70%</td>
+        </tr>
+        <tr>
+            <td>208</td>
+            <td style="text-align:left;">TNSR/USDC</td>
+            <td>2026-01-24 02:00</td>
+            <td>2026-01-26 03:00</td>
+            <td>0.0612</td>
+            <td>0.0612</td>
+            <td>0.0596</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-2.61%</td>
+        </tr>
+        <tr>
+            <td>209</td>
+            <td style="text-align:left;">BTC/USDC</td>
+            <td>2026-01-23 15:00</td>
+            <td>2026-01-26 04:00</td>
+            <td>89672</td>
+            <td>89672</td>
+            <td>87184</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-2.77%</td>
+        </tr>
+        <tr>
+            <td>210</td>
+            <td style="text-align:left;">XRP/USDC</td>
+            <td>2026-01-24 02:00</td>
+            <td>2026-01-26 15:00</td>
+            <td>1.9216</td>
+            <td>1.9216</td>
+            <td>1.9188</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-0.15%</td>
+        </tr>
+        <tr>
+            <td>211</td>
+            <td style="text-align:left;">LINK/USDC</td>
+            <td>2026-01-24 17:00</td>
+            <td>2026-01-26 18:00</td>
+            <td>12.19</td>
+            <td>12.19</td>
+            <td>11.91</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-2.30%</td>
+        </tr>
+        <tr>
+            <td>212</td>
+            <td style="text-align:left;">ZEC/USDC</td>
+            <td>2026-01-26 00:00</td>
+            <td>2026-01-27 09:00</td>
+            <td>331.6</td>
+            <td>331.6</td>
+            <td>377.56</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+13.86%</td>
+        </tr>
+        <tr>
+            <td>213</td>
+            <td style="text-align:left;">LUNC/USDT</td>
+            <td>2026-01-26 10:00</td>
+            <td>2026-01-28 11:00</td>
+            <td>3.789e-05</td>
+            <td>3.789e-05</td>
+            <td>3.774e-05</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-0.40%</td>
+        </tr>
+        <tr>
+            <td>214</td>
+            <td style="text-align:left;">ADA/USDC</td>
+            <td>2026-01-26 12:00</td>
+            <td>2026-01-28 13:00</td>
+            <td>0.3475</td>
+            <td>0.3475</td>
+            <td>0.3606</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+3.77%</td>
+        </tr>
+        <tr>
+            <td>215</td>
+            <td style="text-align:left;">TAO/USDC</td>
+            <td>2026-01-26 13:00</td>
+            <td>2026-01-28 14:00</td>
+            <td>232.2</td>
+            <td>232.2</td>
+            <td>240.4</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+3.53%</td>
+        </tr>
+        <tr>
+            <td>216</td>
+            <td style="text-align:left;">SUI/USDC</td>
+            <td>2026-01-26 13:00</td>
+            <td>2026-01-28 14:00</td>
+            <td>1.44</td>
+            <td>1.44</td>
+            <td>1.4303</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-0.67%</td>
+        </tr>
+        <tr>
+            <td>217</td>
+            <td style="text-align:left;">BNB/USDC</td>
+            <td>2026-01-26 13:00</td>
+            <td>2026-01-28 14:00</td>
+            <td>873.74</td>
+            <td>873.74</td>
+            <td>905</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+3.58%</td>
+        </tr>
+        <tr>
+            <td>218</td>
+            <td style="text-align:left;">ZEC/USDC</td>
+            <td>2026-01-27 12:00</td>
+            <td>2026-01-28 21:00</td>
+            <td>382.2</td>
+            <td>382.2</td>
+            <td>375.37</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-1.79%</td>
+        </tr>
+        <tr>
+            <td>219</td>
+            <td style="text-align:left;">LINK/USDC</td>
+            <td>2026-01-26 21:00</td>
+            <td>2026-01-28 22:00</td>
+            <td>11.98</td>
+            <td>11.98</td>
+            <td>11.85</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-1.09%</td>
+        </tr>
+        <tr>
+            <td>220</td>
+            <td style="text-align:left;">SOL/USDC</td>
+            <td>2026-01-26 21:00</td>
+            <td>2026-01-28 22:00</td>
+            <td>124.44</td>
+            <td>124.44</td>
+            <td>125.34</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+0.72%</td>
+        </tr>
+        <tr>
+            <td>221</td>
+            <td style="text-align:left;">BTC/USDC</td>
+            <td>2026-01-26 13:00</td>
+            <td>2026-01-29 02:00</td>
+            <td>87891.2</td>
+            <td>87891.2</td>
+            <td>88493</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+0.68%</td>
+        </tr>
+        <tr>
+            <td>222</td>
+            <td style="text-align:left;">ETH/USDC</td>
+            <td>2026-01-26 17:00</td>
+            <td>2026-01-29 06:00</td>
+            <td>2907.47</td>
+            <td>2907.47</td>
+            <td>2947.71</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+1.38%</td>
+        </tr>
+        <tr>
+            <td>223</td>
+            <td style="text-align:left;">XRP/USDC</td>
+            <td>2026-01-26 18:00</td>
+            <td>2026-01-29 07:00</td>
+            <td>1.9166</td>
+            <td>1.9166</td>
+            <td>1.8837</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-1.72%</td>
+        </tr>
+        <tr>
+            <td>224</td>
+            <td style="text-align:left;">ICP/USDC</td>
+            <td>2026-01-27 12:00</td>
+            <td>2026-01-29 13:00</td>
+            <td>3.257</td>
+            <td>3.257</td>
+            <td>3.103</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-4.73%</td>
+        </tr>
+        <tr>
+            <td>225</td>
+            <td style="text-align:left;">TNSR/USDC</td>
+            <td>2026-01-27 15:00</td>
+            <td>2026-01-29 16:00</td>
+            <td>0.0586</td>
+            <td>0.0586</td>
+            <td>0.0542</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-7.51%</td>
+        </tr>
+        <tr>
+            <td>226</td>
+            <td style="text-align:left;">LUNC/USDT</td>
+            <td>2026-01-28 11:00</td>
+            <td>2026-01-30 12:00</td>
+            <td>3.786e-05</td>
+            <td>3.786e-05</td>
+            <td>3.67e-05</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-3.06%</td>
+        </tr>
+        <tr>
+            <td>227</td>
+            <td style="text-align:left;">ADA/USDC</td>
+            <td>2026-01-28 13:00</td>
+            <td>2026-01-30 14:00</td>
+            <td>0.3613</td>
+            <td>0.3613</td>
+            <td>0.3231</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-10.57%</td>
+        </tr>
+        <tr>
+            <td>228</td>
+            <td style="text-align:left;">BNB/USDC</td>
+            <td>2026-01-28 17:00</td>
+            <td>2026-01-30 18:00</td>
+            <td>903.46</td>
+            <td>903.46</td>
+            <td>847.58</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-6.19%</td>
+        </tr>
+        <tr>
+            <td>229</td>
+            <td style="text-align:left;">TAO/USDC</td>
+            <td>2026-01-28 17:00</td>
+            <td>2026-01-30 18:00</td>
+            <td>238.5</td>
+            <td>238.5</td>
+            <td>212.4</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-10.94%</td>
+        </tr>
+        <tr>
+            <td>230</td>
+            <td style="text-align:left;">SOL/USDC</td>
+            <td>2026-01-28 22:00</td>
+            <td>2026-01-30 23:00</td>
+            <td>125.58</td>
+            <td>125.58</td>
+            <td>117.24</td>
+            <td class="pos">+0.00%</td>
+            <td class="neg">-6.64%</td>
+        </tr>
+        <tr>
+            <td>231</td>
+            <td style="text-align:left;">LUNC/USDT</td>
+            <td>2026-01-30 15:00</td>
+            <td>2026-02-01 15:00</td>
+            <td>3.673e-05</td>
+            <td>3.673e-05</td>
+            <td>4.333e-05</td>
+            <td class="pos">+0.00%</td>
+            <td class="pos">+17.97%</td>
+        </tr>
+    </table>
+    </div>
+
+    <p style="color: #666; font-size: 12px;">Generated: 2026-02-09 23:39:22</p>
 </div>
 </body>
 </html>
