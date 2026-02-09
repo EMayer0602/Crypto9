@@ -4014,8 +4014,8 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--dashboard-start",
         type=str,
-        default="2026-01-01",
-        help="Start date for testnet dashboard (YYYY-MM-DD, default: 2026-01-01)",
+        default="2024-01-31",
+        help="Start date for dashboard trades filter (YYYY-MM-DD, default: 2024-01-31)",
     )
     return parser.parse_args(argv)
 
