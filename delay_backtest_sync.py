@@ -375,7 +375,14 @@ def main():
     # OHLCV laden
     print(f"\nFetching 5m OHLCV from {args.exchange}...")
     if args.exchange == "hyperliquid":
-        exchange = ccxt.hyperliquid({'enableRateLimit': True})
+        exchange = ccxt.hyperliquid({
+            'enableRateLimit': True,
+            'options': {
+                'fetchMarkets': {
+                    'hip3': False,  # Disable Hip3 DEX markets to avoid "Too many DEXes" error
+                },
+            },
+        })
     else:
         exchange = ccxt.binance({'enableRateLimit': True})
 
