@@ -598,7 +598,23 @@ def generate_momentum_dashboard(trades: list, stats: dict, dt_bars: int,
 """
 
     # Open Positions section (filtered by momentum criterion)
+    # Recalculate open position stakes based on compound growth capital
     if open_positions:
+        current_stake = final_capital / MAX_POSITIONS
+        for pos in open_positions:
+            entry_price = pos.get("entry_price", 0)
+            if entry_price > 0:
+                pos["stake"] = current_stake
+                pos["amount"] = current_stake / entry_price
+                last_price = pos.get("last_price", entry_price)
+                direction = pos.get("direction", "long")
+                if direction == "long":
+                    pos["pnl"] = (last_price - entry_price) * pos["amount"]
+                    pos["pnl_pct"] = (last_price - entry_price) / entry_price * 100
+                else:
+                    pos["pnl"] = (entry_price - last_price) * pos["amount"]
+                    pos["pnl_pct"] = (entry_price - last_price) / entry_price * 100
+
         html += f"""
     <div class="section">
     <h2>Offene Positionen - Momentum Filter ({len(open_positions)})</h2>
@@ -614,6 +630,7 @@ def generate_momentum_dashboard(trades: list, stats: dict, dt_bars: int,
             <th>Amount</th>
             <th>Stake</th>
             <th>Bars</th>
+            <th>PnL@dt</th>
             <th>PnL</th>
             <th>PnL%</th>
             <th>Status</th>
@@ -629,6 +646,7 @@ def generate_momentum_dashboard(trades: list, stats: dict, dt_bars: int,
 
             pnl = pos.get("pnl", 0)
             pnl_pct = pos.get("pnl_pct", 0)
+            pnl_at_dt_pct = pos.get("pnl_at_dt_pct", 0)
             pnl_class = "positive" if pnl >= 0 else "negative"
 
             html += f"""        <tr>
@@ -642,6 +660,7 @@ def generate_momentum_dashboard(trades: list, stats: dict, dt_bars: int,
             <td>{fmt_de(pos.get('amount', 0))}</td>
             <td>{fmt_de(pos.get('stake', 0))}</td>
             <td>{pos.get('bars', 0)}</td>
+            <td class="positive">{pnl_at_dt_pct:+.2f}%</td>
             <td class="{pnl_class}">{fmt_de(pnl)}</td>
             <td class="{pnl_class}">{pnl_pct:+.2f}%</td>
             <td>{pos.get('status', 'OPEN')}</td>
