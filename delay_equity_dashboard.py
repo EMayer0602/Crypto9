@@ -108,6 +108,11 @@ def init_exchange(exchange_id: str = "hyperliquid"):
     if exchange_id == "hyperliquid":
         exchange = ccxt.hyperliquid({
             'enableRateLimit': True,
+            'options': {
+                'fetchMarkets': {
+                    'hip3': False,  # Disable Hip3 DEX markets to avoid "Too many DEXes" error
+                },
+            },
         })
     elif exchange_id == "binance":
         exchange = ccxt.binance({
