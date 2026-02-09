@@ -304,14 +304,21 @@ def generate_dashboard(results: list, original_win_rate: float, output_path: Pat
         body {{ font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }}
         .container {{ max-width: 1600px; margin: 0 auto; }}
         h1 {{ color: #333; border-bottom: 2px solid #2196f3; padding-bottom: 10px; }}
+        h2 {{ color: #333; margin-top: 40px; border-bottom: 1px solid #ccc; padding-bottom: 10px; }}
+        h3 {{ color: #555; margin-top: 20px; }}
         .note {{ background: #e3f2fd; padding: 15px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #2196f3; }}
         table {{ border-collapse: collapse; width: 100%; margin: 20px 0; background: white; }}
         th, td {{ border: 1px solid #ddd; padding: 10px; text-align: right; }}
-        th {{ background: #2196f3; color: white; }}
+        th {{ background: #2196f3; color: white; position: sticky; top: 0; }}
         td:first-child {{ text-align: center; font-weight: bold; }}
         .pos {{ color: green; font-weight: bold; }}
         .neg {{ color: red; font-weight: bold; }}
         .best {{ background: #e8f5e9; }}
+        .trade-table {{ font-size: 13px; }}
+        .trade-table th {{ background: #455a64; }}
+        .trade-table td {{ padding: 6px 8px; }}
+        .trade-table tr:nth-child(even) {{ background: #f9f9f9; }}
+        .trade-table tr:hover {{ background: #e3f2fd; }}
     </style>
 </head>
 <body>
@@ -363,6 +370,53 @@ def generate_dashboard(results: list, original_win_rate: float, output_path: Pat
         {chart_html}
     </div>
 
+    <h2>Vollständige Trade-Listen</h2>
+"""
+
+    # Add trade tables for each delay
+    for r in results:
+        delay = r["delay_min"]
+        trades_list = r.get("trades", [])
+
+        html += f"""
+    <h3>{delay}m Delay - {len(trades_list)} Trades (Win Rate: {r['win_rate']:.1f}%)</h3>
+    <div style="max-height: 500px; overflow-y: auto; margin-bottom: 30px;">
+    <table class="trade-table">
+        <tr>
+            <th>#</th>
+            <th>Symbol</th>
+            <th>Entry Time</th>
+            <th>Exit Time</th>
+            <th>Signal Price</th>
+            <th>Entry Price</th>
+            <th>Exit Price</th>
+            <th>Price Δ</th>
+            <th>PnL %</th>
+        </tr>
+"""
+        for i, t in enumerate(trades_list, 1):
+            pnl_class = "pos" if t["pnl_pct"] > 0 else "neg"
+            entry_time_str = t["entry_time"].strftime("%Y-%m-%d %H:%M") if hasattr(t["entry_time"], "strftime") else str(t["entry_time"])[:16]
+            exit_time_str = t["exit_time"].strftime("%Y-%m-%d %H:%M") if hasattr(t["exit_time"], "strftime") else str(t["exit_time"])[:16]
+
+            html += f"""        <tr>
+            <td>{i}</td>
+            <td style="text-align:left;">{t['symbol']}</td>
+            <td>{entry_time_str}</td>
+            <td>{exit_time_str}</td>
+            <td>{t['signal_price']:.6g}</td>
+            <td>{t['entry_price']:.6g}</td>
+            <td>{t['exit_price']:.6g}</td>
+            <td class="pos">+{t['price_change_pct']:.2f}%</td>
+            <td class="{pnl_class}">{t['pnl_pct']:+.2f}%</td>
+        </tr>
+"""
+
+        html += """    </table>
+    </div>
+"""
+
+    html += f"""
     <p style="color: #666; font-size: 12px;">Generated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}</p>
 </div>
 </body>
