@@ -106,6 +106,130 @@ def load_open_positions(json_path: Path) -> list:
     return data.get("open_positions_data", [])
 
 
+def get_current_price(symbol: str, ohlcv_cache: dict) -> Optional[float]:
+    """Get the most recent price for a symbol from OHLCV cache.
+
+    Args:
+        symbol: Trading pair like "BTC/USDC"
+        ohlcv_cache: Pre-loaded cache for OHLCV data
+
+    Returns:
+        Most recent close price, or None if not available
+    """
+    df = ohlcv_cache.get(symbol)
+    if df is None or df.empty:
+        return None
+
+    try:
+        return float(df.iloc[-1]["close"])
+    except Exception:
+        return None
+
+
+def filter_open_positions_by_momentum(positions: list, dt_bars: int,
+                                       ohlcv_cache: dict = None,
+                                       verbose: bool = True) -> list:
+    """Filter open positions by the same momentum criterion as closed trades.
+
+    A position passes if it was profitable after dt_bars from entry.
+
+    Args:
+        positions: List of open position dictionaries
+        dt_bars: Number of bars to check for early profit
+        ohlcv_cache: Pre-loaded OHLCV data
+        verbose: Print progress
+
+    Returns:
+        List of filtered positions with additional computed fields
+    """
+    if not positions:
+        return []
+
+    # Preload cache if not provided
+    if ohlcv_cache is None:
+        symbols = list(set(p["symbol"] for p in positions))
+        if verbose:
+            print(f"  Preloading OHLCV data for {len(symbols)} open position symbols...")
+        ohlcv_cache = preload_ohlcv_cache(symbols, verbose=verbose)
+
+    filtered = []
+    now = datetime.now()
+
+    for pos in positions:
+        symbol = pos.get("symbol", "")
+        entry_time = pos.get("entry_time", "")
+        entry_price = float(pos.get("entry_price", 0) or 0)
+        direction = str(pos.get("direction", "long")).lower()
+        stake = float(pos.get("stake", 0) or 0)
+
+        # Skip if no OHLCV data
+        if symbol not in ohlcv_cache:
+            continue
+
+        # Get price after dt_bars
+        price_at_dt = get_price_after_dt_bars(symbol, entry_time, dt_bars, ohlcv_cache)
+
+        if price_at_dt is None:
+            # Position may be too new - skip momentum filter but include if recent
+            continue
+
+        # Check if profitable at dt_bars (same criterion as closed trades)
+        if direction == "long":
+            is_profitable_at_dt = price_at_dt > entry_price
+        else:
+            is_profitable_at_dt = price_at_dt < entry_price
+
+        if not is_profitable_at_dt:
+            continue
+
+        # Position passed momentum filter - compute additional fields
+        current_price = get_current_price(symbol, ohlcv_cache)
+        if current_price is None:
+            current_price = price_at_dt  # Fallback
+
+        # Calculate bars since entry
+        try:
+            entry_dt = datetime.fromisoformat(entry_time.replace("Z", "+00:00"))
+            entry_dt = entry_dt.replace(tzinfo=None)
+        except (ValueError, TypeError):
+            try:
+                entry_dt = datetime.strptime(entry_time[:19], "%Y-%m-%d %H:%M:%S")
+            except (ValueError, TypeError):
+                entry_dt = now
+
+        bars = int((now - entry_dt).total_seconds() / 3600)  # 1h bars
+
+        # Calculate amount, PnL
+        if entry_price > 0:
+            amount = stake / entry_price
+            if direction == "long":
+                pnl = (current_price - entry_price) * amount
+                pnl_pct = (current_price - entry_price) / entry_price * 100
+            else:
+                pnl = (entry_price - current_price) * amount
+                pnl_pct = (entry_price - current_price) / entry_price * 100
+        else:
+            amount = 0
+            pnl = 0
+            pnl_pct = 0
+
+        filtered_pos = dict(pos)
+        filtered_pos["last_price"] = current_price
+        filtered_pos["amount"] = amount
+        filtered_pos["bars"] = bars
+        filtered_pos["pnl"] = pnl
+        filtered_pos["pnl_pct"] = pnl_pct
+        filtered_pos["status"] = "OPEN"
+        filtered_pos["price_at_dt"] = price_at_dt
+        filtered_pos["pnl_at_dt_pct"] = (price_at_dt - entry_price) / entry_price * 100 if entry_price > 0 else 0
+        filtered.append(filtered_pos)
+
+    if verbose:
+        print(f"  Open positions: {len(positions)} total, {len(filtered)} passed momentum filter")
+
+    return filtered
+
+
 def get_price_after_dt_bars(symbol: str, entry_time: str, dt_bars: int,
                             ohlcv_cache: dict) -> Optional[float]:
     """Get the price dt_bars after entry time.
@@ -473,11 +597,11 @@ def generate_momentum_dashboard(trades: list, stats: dict, dt_bars: int,
     </div>
 """
 
-    # Open Positions section
+    # Open Positions section (filtered by momentum criterion)
     if open_positions:
         html += f"""
     <div class="section">
-    <h2>Offene Positionen ({len(open_positions)})</h2>
+    <h2>Offene Positionen - Momentum Filter ({len(open_positions)})</h2>
     <table class="open-positions">
         <tr>
             <th>Symbol</th>
@@ -486,7 +610,13 @@ def generate_momentum_dashboard(trades: list, stats: dict, dt_bars: int,
             <th>HTF</th>
             <th>Entry Time</th>
             <th>Entry Price</th>
+            <th>Last Price</th>
+            <th>Amount</th>
             <th>Stake</th>
+            <th>Bars</th>
+            <th>PnL</th>
+            <th>PnL%</th>
+            <th>Status</th>
         </tr>
 """
         for pos in open_positions:
@@ -497,6 +627,10 @@ def generate_momentum_dashboard(trades: list, stats: dict, dt_bars: int,
             except (ValueError, TypeError, AttributeError):
                 entry_str = entry_time[:16] if entry_time else "N/A"
 
+            pnl = pos.get("pnl", 0)
+            pnl_pct = pos.get("pnl_pct", 0)
+            pnl_class = "positive" if pnl >= 0 else "negative"
+
             html += f"""        <tr>
             <td>{pos.get('symbol', 'N/A')}</td>
             <td>{pos.get('direction', 'N/A')}</td>
@@ -504,7 +638,13 @@ def generate_momentum_dashboard(trades: list, stats: dict, dt_bars: int,
             <td>{pos.get('htf', 'N/A')}</td>
             <td>{entry_str}</td>
             <td>{fmt_price(pos.get('entry_price', 0))}</td>
+            <td>{fmt_price(pos.get('last_price', 0))}</td>
+            <td>{fmt_de(pos.get('amount', 0))}</td>
             <td>{fmt_de(pos.get('stake', 0))}</td>
+            <td>{pos.get('bars', 0)}</td>
+            <td class="{pnl_class}">{fmt_de(pnl)}</td>
+            <td class="{pnl_class}">{pnl_pct:+.2f}%</td>
+            <td>{pos.get('status', 'OPEN')}</td>
         </tr>
 """
         html += """    </table>
@@ -685,17 +825,28 @@ def run_dashboard_cycle(dt_bars: int, start_date: str, output_dir: Path,
     if verbose:
         print(f"  Loaded {len(trades)} trades, {len(open_positions)} open positions")
 
+    # Preload OHLCV cache for all symbols (trades + open positions)
+    all_symbols = list(set(t["symbol"] for t in trades))
+    open_symbols = [p.get("symbol") for p in open_positions if p.get("symbol")]
+    all_symbols = list(set(all_symbols + open_symbols))
+    ohlcv_cache = preload_ohlcv_cache(all_symbols, verbose=False)
+
     # Filter trades
-    filtered, stats = filter_trades_by_momentum(trades, dt_bars, verbose=False)
+    filtered, stats = filter_trades_by_momentum(trades, dt_bars, verbose=False, ohlcv_cache=ohlcv_cache)
 
     if not filtered:
         if verbose:
             print("  No trades passed momentum filter.")
         return None
 
+    # Filter open positions by momentum criterion (same as closed trades)
+    filtered_open_positions = filter_open_positions_by_momentum(
+        open_positions, dt_bars, ohlcv_cache=ohlcv_cache, verbose=verbose
+    )
+
     # Generate dashboard
     path = generate_momentum_dashboard(
-        filtered, stats, dt_bars, output_dir, stats, open_positions
+        filtered, stats, dt_bars, output_dir, stats, filtered_open_positions
     )
 
     if verbose:
@@ -787,6 +938,14 @@ def main():
     original_win_rate = original_wins / len(trades) * 100
     print(f"Original win rate: {original_win_rate:.1f}%")
 
+    # Preload OHLCV cache for all symbols (trades + open positions)
+    all_symbols = list(set(t["symbol"] for t in trades))
+    open_symbols = [p.get("symbol") for p in open_positions if p.get("symbol")]
+    all_symbols = list(set(all_symbols + open_symbols))
+    print(f"Preloading OHLCV cache for {len(all_symbols)} symbols...")
+    ohlcv_cache = preload_ohlcv_cache(all_symbols, verbose=False)
+    print(f"Cache ready: {len(ohlcv_cache)} symbols loaded")
+
     if args.optimize:
         # Optimization mode
         opt_results = optimize_dt(trades, range(args.dt_min, args.dt_max + 1))
@@ -796,14 +955,22 @@ def main():
         for key in ["best_by_winrate", "best_by_improvement", "best_by_return"]:
             best = opt_results[key]
             dt = best["dt_bars"]
-            filtered, stats = filter_trades_by_momentum(trades, dt, verbose=False)
-            generate_momentum_dashboard(filtered, stats, dt, output_dir, stats, open_positions)
+            filtered, stats = filter_trades_by_momentum(trades, dt, verbose=False, ohlcv_cache=ohlcv_cache)
+            # Filter open positions by momentum criterion
+            filtered_open_positions = filter_open_positions_by_momentum(
+                open_positions, dt, ohlcv_cache=ohlcv_cache, verbose=False
+            )
+            generate_momentum_dashboard(filtered, stats, dt, output_dir, stats, filtered_open_positions)
     else:
         # Single dT mode
-        filtered, stats = filter_trades_by_momentum(trades, args.dt, verbose=True)
+        filtered, stats = filter_trades_by_momentum(trades, args.dt, verbose=True, ohlcv_cache=ohlcv_cache)
 
         if filtered:
-            path = generate_momentum_dashboard(filtered, stats, args.dt, output_dir, stats, open_positions)
+            # Filter open positions by momentum criterion (same as closed trades)
+            filtered_open_positions = filter_open_positions_by_momentum(
+                open_positions, args.dt, ohlcv_cache=ohlcv_cache, verbose=True
+            )
+            path = generate_momentum_dashboard(filtered, stats, args.dt, output_dir, stats, filtered_open_positions)
             print(f"\nOpen with: xdg-open {path}")
         else:
             print("No trades passed the momentum filter.")
