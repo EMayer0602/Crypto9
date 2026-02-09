@@ -1314,10 +1314,31 @@ def save_state(state: Dict) -> None:
         "symbol_trade_counts": state.get("symbol_trade_counts", {}),
     }
 
-    # Update open_positions_data from positions
+    # Update open_positions_data from positions, preserving enriched fields
     positions = state.get("positions", [])
-    data["open_positions_data"] = positions
-    data["open_positions"] = len(positions)
+    existing_positions = data.get("open_positions_data", [])
+
+    # Build lookup of existing enriched positions by symbol+entry_time
+    existing_lookup = {}
+    for p in existing_positions:
+        key = (p.get("symbol", ""), p.get("entry_time", ""))
+        existing_lookup[key] = p
+
+    # Merge: use new position data but preserve enriched fields from existing
+    merged_positions = []
+    for pos in positions:
+        key = (pos.get("symbol", ""), pos.get("entry_time", ""))
+        if key in existing_lookup:
+            # Merge: start with existing (has enriched fields), update with new basic fields
+            merged = dict(existing_lookup[key])
+            merged.update(pos)  # New basic fields take precedence
+            merged_positions.append(merged)
+        else:
+            # New position, no enriched data yet
+            merged_positions.append(pos)
+
+    data["open_positions_data"] = merged_positions
+    data["open_positions"] = len(merged_positions)
 
     # Ensure directory exists
     os.makedirs(os.path.dirname(summary_path) or ".", exist_ok=True)
@@ -2683,6 +2704,23 @@ def write_summary_html(summary: Dict[str, Any], path: str) -> None:
         except (ValueError, TypeError):
             return str(val)
 
+    def fmt_price(price):
+        """Format price with appropriate decimals - avoids scientific notation."""
+        if price is None or price == "NaN":
+            return "-"
+        try:
+            p = float(price)
+            if p < 0.0001:
+                return f"{p:.8f}"
+            elif p < 1:
+                return f"{p:.6f}"
+            elif p < 100:
+                return f"{p:.4f}"
+            else:
+                return fmt(p)
+        except (ValueError, TypeError):
+            return str(price)
+
     def pnl_class(val):
         try:
             return "pos" if float(val) >= 0 else "neg"
@@ -2732,7 +2770,8 @@ def write_summary_html(summary: Dict[str, Any], path: str) -> None:
         unrealized_pct = float(pos.get("unrealized_pct", 0) or 0)
         unrealized_pnl = float(pos.get("unrealized_pnl", 0) or 0)
         status = status_text(unrealized_pnl)
-        html_parts.append(f"<tr><td>{symbol}</td><td>{direction}</td><td>{indicator}</td><td>{htf}</td><td>{entry_time}</td><td>{entry_price_val}</td><td>{last_price}</td><td>{fmt(stake_val)}</td><td>{fmt(amount)}</td><td>{bars_held}</td><td class='{pnl_class(unrealized_pct)}'>{fmt_pct(unrealized_pct)}</td><td class='{pnl_class(unrealized_pnl)}'>{fmt(unrealized_pnl)}</td><td class='{pnl_class(unrealized_pnl)}'>{status}</td></tr>")
+        last_price_val = float(pos.get("last_price", 0) or 0)
+        html_parts.append(f"<tr><td>{symbol}</td><td>{direction}</td><td>{indicator}</td><td>{htf}</td><td>{entry_time}</td><td>{fmt_price(entry_price_val)}</td><td>{fmt_price(last_price_val) if last_price_val else '-'}</td><td>{fmt(stake_val)}</td><td>{fmt(amount)}</td><td>{bars_held}</td><td class='{pnl_class(unrealized_pct)}'>{fmt_pct(unrealized_pct)}</td><td class='{pnl_class(unrealized_pnl)}'>{fmt(unrealized_pnl)}</td><td class='{pnl_class(unrealized_pnl)}'>{status}</td></tr>")
     html_parts.append("</table>")
 
     # Closed Trades with all columns
@@ -2755,7 +2794,7 @@ def write_summary_html(summary: Dict[str, Any], path: str) -> None:
         pnl = float(t.get("pnl", 0) or 0)
         pnl_pct = (exit_price_val / entry_price_val - 1) * 100 if entry_price_val > 0 else 0
         reason = t.get("exit_reason", "") or t.get("reason", "")
-        html_parts.append(f"<tr><td>{symbol}</td><td>{direction}</td><td>{indicator}</td><td>{htf}</td><td>{entry_time}</td><td>{entry_price_val}</td><td>{exit_time}</td><td>{exit_price_val}</td><td>{fmt(stake_val)}</td><td>{fmt(amount)}</td><td class='{pnl_class(pnl)}'>{fmt(pnl)}</td><td class='{pnl_class(pnl_pct)}'>{fmt_pct(pnl_pct)}</td><td>{reason}</td></tr>")
+        html_parts.append(f"<tr><td>{symbol}</td><td>{direction}</td><td>{indicator}</td><td>{htf}</td><td>{entry_time}</td><td>{fmt_price(entry_price_val)}</td><td>{exit_time}</td><td>{fmt_price(exit_price_val)}</td><td>{fmt(stake_val)}</td><td>{fmt(amount)}</td><td class='{pnl_class(pnl)}'>{fmt(pnl)}</td><td class='{pnl_class(pnl_pct)}'>{fmt_pct(pnl_pct)}</td><td>{reason}</td></tr>")
 
     html_parts.append("</table>")
     if total_trades > 100:
