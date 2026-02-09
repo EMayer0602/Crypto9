@@ -410,6 +410,29 @@ python TestnetDashboard.py --start 2025-12-31 --loop --interval 60 \
   --start-capital 16500 --max-positions 10
 ```
 
+### Momentum Filter Dashboard
+
+Filters trades by early profit criterion to improve win-rate. Concept: If a trade is profitable after dT bars, it has a higher probability of being a winning trade overall.
+
+**Single dT value:**
+```bash
+python momentum_filter_dashboard.py --dt 2 --start 2024-01-31
+```
+
+**Optimize dT parameter:**
+```bash
+python momentum_filter_dashboard.py --optimize --dt-min 1 --dt-max 12
+```
+
+**Results from testing:**
+| dT | Win Rate | Change | Trades |
+|----|----------|--------|--------|
+| Original | 56.4% | - | all |
+| dT=1 | 75.4% | +19.1% | 61 |
+| dT=8 | 64.8% | +8.4% | 1542 (best return) |
+
+Output: `report_html/momentum_filter_dashboard.html`
+
 ---
 
 ## Analysis & Visualization
@@ -543,6 +566,7 @@ python TestnetDashboard.py --loop --interval 60
 | `ClearPositions.py` | Clear paper trading positions |
 | `ClearTestnetPositions.py` | Clear testnet positions |
 | `compare_equity_curves.py` | Compare equity curves across periods |
+| `momentum_filter_dashboard.py` | Filter trades by early profit for higher win-rate |
 | `regenerate_summary.py` | Regenerate summary from trade logs |
 | `merge_history.py` | Merge multiple trade history files |
 | `extract_last24_from_detailed.py` | Extract last 24h from detailed logs |
@@ -620,6 +644,16 @@ python TestnetDashboard.py --loop --interval 60
 | `--replay-trades-csv` | none | Replay from CSV |
 | `--verbose-sim-entries` | false | Print entry messages |
 
+### Momentum Filter Dashboard (momentum_filter_dashboard.py)
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--dt` | 2 | Bars to check for early profit |
+| `--start` | 2024-01-31 | Start date for trade filtering |
+| `--optimize` | false | Find optimal dT value |
+| `--dt-min` | 1 | Min dT for optimization |
+| `--dt-max` | 12 | Max dT for optimization |
+| `--output-dir` | report_html | Output directory |
+
 ---
 
 ## Output Files
@@ -634,6 +668,7 @@ python TestnetDashboard.py --loop --interval 60
 | `report_*/charts/equity_curve.html` | Equity curve with drawdown |
 | `report_*/charts/monthly_returns.html` | Monthly PnL bar chart |
 | `report_*/charts/equity_comparison.html` | Multi-period comparison |
+| `report_html/momentum_filter_dashboard.html` | Momentum-filtered trades dashboard |
 | `simulation_logs/*_trades.csv/json` | Period-specific simulation logs |
 | `ohlcv_cache/*.csv` | Cached OHLCV data |
 
