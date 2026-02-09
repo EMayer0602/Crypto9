@@ -153,9 +153,10 @@ def run_backtest(trades: list, delay_min: int, ohlcv_cache: dict) -> dict:
     Backtest mit verzögertem Entry und synchronem Exit.
 
     Für jeden Trade:
-    1. Prüfe ob Preis bei T+Delay > Entry-Preis (Momentum-Check)
-    2. Wenn ja: Entry zum Preis bei T+Delay
-    3. Exit zur GLEICHEN Zeit wie Original
+    1. Bei delay=0: Original-Trade ohne Filter (Baseline)
+    2. Bei delay>0: Prüfe ob Preis bei T+Delay > Entry-Preis (Momentum-Check)
+    3. Wenn ja: Entry zum Preis bei T+Delay
+    4. Exit zur GLEICHEN Zeit wie Original
     """
     passed_trades = []
 
@@ -166,6 +167,22 @@ def run_backtest(trades: list, delay_min: int, ohlcv_cache: dict) -> dict:
         entry_price = t["entry_price"]
         exit_price = t["exit_price"]
 
+        # Bei delay=0: Original-Trade ohne Filter übernehmen
+        if delay_min == 0:
+            pnl_pct = (exit_price - entry_price) / entry_price * 100 if entry_price > 0 else 0
+            passed_trades.append({
+                "symbol": symbol,
+                "entry_time": entry_time,
+                "exit_time": exit_time,
+                "signal_price": entry_price,
+                "entry_price": entry_price,
+                "exit_price": exit_price,
+                "pnl_pct": pnl_pct,
+                "price_change_pct": 0.0,
+            })
+            continue
+
+        # Bei delay>0: OHLCV-Daten für Momentum-Check benötigt
         df = ohlcv_cache.get(symbol)
         if df is None:
             continue
@@ -428,13 +445,17 @@ def generate_dashboard(results: list, original_win_rate: float, output_path: Pat
 
 def main():
     parser = argparse.ArgumentParser(description="Delay Backtest mit synchronem Exit")
-    parser.add_argument("--start", type=str, default="2024-01-31")
+    parser.add_argument("--start", type=str, default="2025-12-01")
     parser.add_argument("--delays", type=str, default="5,10,15,30,45")
     parser.add_argument("--exchange", type=str, default="hyperliquid")
     parser.add_argument("--output", type=str, default="report_html/delay_sync_dashboard.html")
     args = parser.parse_args()
 
     delays = [int(x.strip()) for x in args.delays.split(",")]
+
+    # Sicherstellen dass 0 (Original) immer am Anfang steht
+    if 0 not in delays:
+        delays = [0] + delays
 
     # Trades laden
     print(f"Loading trades from {SOURCE_JSON}...")
