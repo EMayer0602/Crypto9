@@ -66,15 +66,38 @@ def load_trades(json_path: Path, start_date: str = None) -> list:
     return trades
 
 
-def fetch_5m_ohlcv(exchange, symbol: str, since: datetime) -> pd.DataFrame:
-    """Hole 5m OHLCV-Daten von der API."""
+def fetch_5m_ohlcv(exchange, symbol: str, since: datetime, cache_symbol: str = None) -> pd.DataFrame:
+    """Hole 5m OHLCV-Daten von der API.
+
+    Args:
+        exchange: CCXT exchange instance
+        symbol: Symbol to fetch (may be converted for Binance, e.g., ZEC/USDT)
+        since: Start datetime
+        cache_symbol: Original symbol for cache filename (if different from fetch symbol)
+    """
     OHLCV_5M_CACHE.mkdir(exist_ok=True)
-    cache_file = OHLCV_5M_CACHE / f"{symbol.replace('/', '_')}_5m.csv"
+
+    # Use cache_symbol for cache file if provided (for symbol conversion cases)
+    cache_key = cache_symbol if cache_symbol else symbol
+    cache_file = OHLCV_5M_CACHE / f"{cache_key.replace('/', '_')}_5m.csv"
+
+    # Also check for alternative cache file (e.g., if USDC->USDT conversion)
+    alt_cache_file = None
+    if cache_symbol and cache_symbol != symbol:
+        alt_cache_file = OHLCV_5M_CACHE / f"{symbol.replace('/', '_')}_5m.csv"
 
     # Cache prüfen
     if cache_file.exists():
         df = pd.read_csv(cache_file, index_col=0, parse_dates=True)
         if not df.empty:
+            print(f"    Cached (original): {len(df)} bars")
+            return df
+
+    # Check alternative cache
+    if alt_cache_file and alt_cache_file.exists():
+        df = pd.read_csv(alt_cache_file, index_col=0, parse_dates=True)
+        if not df.empty:
+            print(f"    Cached (converted): {len(df)} bars")
             return df
 
     print(f"  Fetching 5m data: {symbol}...")
@@ -374,6 +397,8 @@ def main():
 
     # OHLCV laden
     print(f"\nFetching 5m OHLCV from {args.exchange}...")
+    use_binance_fallback = False
+
     if args.exchange == "hyperliquid":
         exchange = ccxt.hyperliquid({
             'enableRateLimit': True,
@@ -381,7 +406,9 @@ def main():
                 'fetchMarkets': {
                     'spot': True,
                     'swap': True,
-                    'hip3': False,  # Disable Hip3 DEX markets to avoid "Too many DEXes" error
+                    'hip3': {
+                        'dex': [],  # Empty list = load no DEXes
+                    },
                 },
             },
         })
@@ -392,14 +419,25 @@ def main():
             print(f"Warning: Could not load Hyperliquid markets: {e}")
             print("Falling back to Binance...")
             exchange = ccxt.binance({'enableRateLimit': True})
+            use_binance_fallback = True
     else:
         exchange = ccxt.binance({'enableRateLimit': True})
+        use_binance_fallback = True
 
     ohlcv_cache = {}
     for sym in symbols:
         try:
-            df = fetch_5m_ohlcv(exchange, sym, earliest)
+            # When using Binance fallback, convert USDC pairs to USDT
+            fetch_symbol = sym
+            cache_sym = None
+            if use_binance_fallback and '/USDC' in sym:
+                fetch_symbol = sym.replace('/USDC', '/USDT')
+                cache_sym = sym  # Keep original symbol for cache file
+                print(f"  Converting {sym} -> {fetch_symbol} for Binance")
+
+            df = fetch_5m_ohlcv(exchange, fetch_symbol, earliest, cache_symbol=cache_sym)
             if not df.empty:
+                # Store with original symbol key so trade matching works
                 ohlcv_cache[sym] = df
         except Exception as e:
             print(f"  Error {sym}: {e}")

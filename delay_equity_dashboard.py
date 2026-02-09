@@ -104,7 +104,13 @@ def load_trades_from_json(json_path: Path, start_date: str = None) -> list:
 
 
 def init_exchange(exchange_id: str = "hyperliquid"):
-    """Initialize exchange connection."""
+    """Initialize exchange connection.
+
+    Returns:
+        Tuple of (exchange, use_binance_fallback)
+    """
+    use_binance_fallback = False
+
     if exchange_id == "hyperliquid":
         exchange = ccxt.hyperliquid({
             'enableRateLimit': True,
@@ -112,7 +118,9 @@ def init_exchange(exchange_id: str = "hyperliquid"):
                 'fetchMarkets': {
                     'spot': True,
                     'swap': True,
-                    'hip3': False,  # Disable Hip3 DEX markets to avoid "Too many DEXes" error
+                    'hip3': {
+                        'dex': [],  # Empty list = load no DEXes
+                    },
                 },
             },
         })
@@ -123,39 +131,61 @@ def init_exchange(exchange_id: str = "hyperliquid"):
             print(f"Warning: Could not load Hyperliquid markets: {e}")
             print("Falling back to Binance...")
             exchange = ccxt.binance({'enableRateLimit': True})
+            use_binance_fallback = True
     elif exchange_id == "binance":
         exchange = ccxt.binance({
             'enableRateLimit': True,
         })
+        use_binance_fallback = True
     else:
         raise ValueError(f"Unknown exchange: {exchange_id}")
 
-    return exchange
+    return exchange, use_binance_fallback
 
 
 def fetch_ohlcv_5m(exchange, symbol: str, since: datetime,
-                   limit: int = 1000, use_cache: bool = True) -> pd.DataFrame:
+                   limit: int = 1000, use_cache: bool = True,
+                   cache_symbol: str = None) -> pd.DataFrame:
     """Fetch 5m OHLCV data from exchange.
 
     Args:
         exchange: CCXT exchange instance
-        symbol: Trading pair (e.g., "BTC/USDC")
+        symbol: Trading pair (e.g., "BTC/USDC") - may be converted for Binance
         since: Start datetime
         limit: Max candles per request
         use_cache: Use local cache if available
+        cache_symbol: Original symbol for cache filename (if different from fetch symbol)
 
     Returns:
         DataFrame with OHLCV data
     """
     # Check cache first
     OHLCV_5M_CACHE.mkdir(exist_ok=True)
-    cache_file = OHLCV_5M_CACHE / f"{symbol.replace('/', '_')}_5m.csv"
+
+    # Use cache_symbol for cache file if provided (for symbol conversion cases)
+    cache_key = cache_symbol if cache_symbol else symbol
+    cache_file = OHLCV_5M_CACHE / f"{cache_key.replace('/', '_')}_5m.csv"
+
+    # Also check for alternative cache file (e.g., if USDC->USDT conversion)
+    alt_cache_file = None
+    if cache_symbol and cache_symbol != symbol:
+        alt_cache_file = OHLCV_5M_CACHE / f"{symbol.replace('/', '_')}_5m.csv"
 
     if use_cache and cache_file.exists():
         try:
             df = pd.read_csv(cache_file, index_col=0, parse_dates=True)
             if not df.empty and df.index[-1] >= since:
-                print(f"  Using cached 5m data for {symbol}")
+                print(f"  Using cached 5m data for {cache_key}")
+                return df
+        except Exception as e:
+            print(f"  Cache read error for {cache_key}: {e}")
+
+    # Check alternative cache
+    if use_cache and alt_cache_file and alt_cache_file.exists():
+        try:
+            df = pd.read_csv(alt_cache_file, index_col=0, parse_dates=True)
+            if not df.empty and df.index[-1] >= since:
+                print(f"  Using cached 5m data for {symbol} (converted)")
                 return df
         except Exception as e:
             print(f"  Cache read error for {symbol}: {e}")
@@ -576,14 +606,23 @@ def main():
 
     # Initialize exchange and fetch 5m OHLCV data
     print(f"\nFetching 5m OHLCV data from {args.exchange}...")
-    exchange = init_exchange(args.exchange)
+    exchange, use_binance_fallback = init_exchange(args.exchange)
 
     ohlcv_cache = {}
     for symbol in symbols:
         try:
-            df = fetch_ohlcv_5m(exchange, symbol, earliest_date,
-                               use_cache=not args.no_cache)
+            # When using Binance fallback, convert USDC pairs to USDT
+            fetch_symbol = symbol
+            cache_sym = None
+            if use_binance_fallback and '/USDC' in symbol:
+                fetch_symbol = symbol.replace('/USDC', '/USDT')
+                cache_sym = symbol  # Keep original symbol for cache file
+                print(f"  Converting {symbol} -> {fetch_symbol} for Binance")
+
+            df = fetch_ohlcv_5m(exchange, fetch_symbol, earliest_date,
+                               use_cache=not args.no_cache, cache_symbol=cache_sym)
             if not df.empty:
+                # Store with original symbol key so trade matching works
                 ohlcv_cache[symbol] = df
         except Exception as e:
             print(f"  Error fetching {symbol}: {e}")
