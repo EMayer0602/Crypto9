@@ -180,8 +180,10 @@ def calculate_equity_curve_with_delay(trades: list, delay_minutes: int,
 
         if delay_minutes == 0:
             # Original strategy - no delay
+            # Use entry_time for sorting (to match original dashboard compound growth)
             actual_pnl_pct = trade["pnl_pct"]
             filtered_trades.append({
+                "entry_time": entry_time,
                 "exit_time": exit_time,
                 "pnl_pct": actual_pnl_pct,
             })
@@ -209,16 +211,22 @@ def calculate_equity_curve_with_delay(trades: list, delay_minutes: int,
             actual_pnl_pct = (exit_price - price_at_delay) / price_at_delay * 100 if price_at_delay > 0 else 0
 
             filtered_trades.append({
+                "entry_time": entry_time + timedelta(minutes=delay_minutes),
                 "exit_time": exit_time,
                 "pnl_pct": actual_pnl_pct,
             })
 
-    # Sort by exit time
-    filtered_trades.sort(key=lambda x: x["exit_time"])
+    # Sort by entry_time for delay=0 (to match original dashboard), exit_time for delays
+    if delay_minutes == 0:
+        filtered_trades.sort(key=lambda x: x["entry_time"])
+    else:
+        filtered_trades.sort(key=lambda x: x["exit_time"])
 
     # Calculate compound equity curve
     capital = START_CAPITAL
-    equity_data = [{"time": filtered_trades[0]["exit_time"] - timedelta(hours=1), "equity": capital}] if filtered_trades else []
+    # Use entry_time for delay=0, exit_time for delays (consistency with sorting)
+    time_key = "entry_time" if delay_minutes == 0 else "exit_time"
+    equity_data = [{"time": filtered_trades[0][time_key] - timedelta(hours=1), "equity": capital}] if filtered_trades else []
 
     wins = 0
     for t in filtered_trades:
@@ -229,7 +237,7 @@ def calculate_equity_curve_with_delay(trades: list, delay_minutes: int,
             wins += 1
 
         equity_data.append({
-            "time": t["exit_time"],
+            "time": t["exit_time"],  # Always use exit_time for chart display
             "equity": capital,
         })
 
@@ -257,7 +265,8 @@ def generate_delay_dashboard(trades: list, delays: list, ohlcv_cache: dict,
     print("Calculating equity curves...")
 
     # Calculate equity curves for all delays (including original)
-    all_delays = [0] + delays
+    # Ensure 0 is first and no duplicates
+    all_delays = [0] + [d for d in delays if d != 0]
     curves = {}
     all_stats = []
 
@@ -443,8 +452,8 @@ def generate_delay_dashboard(trades: list, delays: list, ohlcv_cache: dict,
 
 def main():
     parser = argparse.ArgumentParser(description="Delay Dashboard with Equity Curve")
-    parser.add_argument("--start", type=str, default="2024-01-31",
-                        help="Start date YYYY-MM-DD (default: 2024-01-31)")
+    parser.add_argument("--start", type=str, default="2025-12-01",
+                        help="Start date YYYY-MM-DD (default: 2025-12-01 to match original dashboard)")
     parser.add_argument("--delays", type=str, default="5,10,15,30,45",
                         help="Comma-separated delay minutes (default: 5,10,15,30,45)")
     parser.add_argument("--output", type=str, default="report_html/delay_dashboard.html",
