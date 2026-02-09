@@ -16,6 +16,7 @@ which trades we would have taken based on the early momentum criterion.
 
 import argparse
 import json
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
@@ -92,6 +93,17 @@ def load_trades_from_json(json_path: Path, start_date: str = None) -> list:
         })
 
     return filtered_trades
+
+
+def load_open_positions(json_path: Path) -> list:
+    """Load open positions from trading_summary.json."""
+    if not json_path.exists():
+        return []
+
+    with open(json_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    return data.get("open_positions_data", [])
 
 
 def get_price_after_dt_bars(symbol: str, entry_time: str, dt_bars: int,
@@ -314,11 +326,16 @@ def fmt_de(value: float) -> str:
 
 
 def generate_momentum_dashboard(trades: list, stats: dict, dt_bars: int,
-                                 output_dir: Path, original_stats: dict = None):
+                                 output_dir: Path, original_stats: dict = None,
+                                 open_positions: list = None):
     """Generate HTML dashboard for momentum-filtered trades."""
 
     # Recalculate with compound growth
     recalculated, final_capital = recalculate_with_compound_growth(trades)
+
+    # Ensure open_positions is a list
+    if open_positions is None:
+        open_positions = []
 
     # Sort by entry time (newest first) for display
     def get_entry_time(t):
@@ -374,6 +391,10 @@ def generate_momentum_dashboard(trades: list, stats: dict, dt_bars: int,
         .comparison-box {{ background: #e8f5e9; border: 2px solid #4caf50; }}
         .improvement {{ color: #4caf50; font-weight: bold; }}
         .timestamp {{ color: #666; font-size: 12px; margin-top: 20px; }}
+        .timestamp-header {{ background: #333; color: #fff; padding: 10px 20px; border-radius: 5px; display: inline-block; margin-bottom: 20px; font-size: 14px; }}
+        .timestamp-header .time {{ font-weight: bold; color: #9c27b0; }}
+        .open-positions {{ background: #fff3e0; border: 2px solid #ff9800; }}
+        .open-positions th {{ background: #ff9800 !important; }}
         .section {{ margin-bottom: 30px; }}
         .concept-note {{ background: #fff3e0; padding: 15px; border-radius: 5px; margin-bottom: 20px; border-left: 4px solid #ff9800; }}
         .filter-header {{ background: #9c27b0 !important; }}
@@ -382,6 +403,11 @@ def generate_momentum_dashboard(trades: list, stats: dict, dt_bars: int,
 <body>
 <div class="container">
     <h1>Momentum Filter Dashboard (dT = {dt_bars} bars)</h1>
+
+    <div class="timestamp-header">
+        Letztes Update: <span class="time">{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}</span>
+        &nbsp;|&nbsp; Auto-Refresh: 60s
+    </div>
 
     <div class="concept-note">
         <strong>Konzept:</strong> Nur Trades aufnehmen, die nach {dt_bars} Bar(s) ({dt_bars}h) im Gewinn sind.<br>
@@ -444,6 +470,44 @@ def generate_momentum_dashboard(trades: list, stats: dict, dt_bars: int,
             <td>-</td>
         </tr>
     </table>
+    </div>
+"""
+
+    # Open Positions section
+    if open_positions:
+        html += f"""
+    <div class="section">
+    <h2>Offene Positionen ({len(open_positions)})</h2>
+    <table class="open-positions">
+        <tr>
+            <th>Symbol</th>
+            <th>Direction</th>
+            <th>Indicator</th>
+            <th>HTF</th>
+            <th>Entry Time</th>
+            <th>Entry Price</th>
+            <th>Stake</th>
+        </tr>
+"""
+        for pos in open_positions:
+            entry_time = pos.get("entry_time", "")
+            try:
+                entry_dt = datetime.fromisoformat(entry_time.replace("Z", "+00:00"))
+                entry_str = entry_dt.strftime("%Y-%m-%d %H:%M")
+            except (ValueError, TypeError, AttributeError):
+                entry_str = entry_time[:16] if entry_time else "N/A"
+
+            html += f"""        <tr>
+            <td>{pos.get('symbol', 'N/A')}</td>
+            <td>{pos.get('direction', 'N/A')}</td>
+            <td>{pos.get('indicator', 'N/A')}</td>
+            <td>{pos.get('htf', 'N/A')}</td>
+            <td>{entry_str}</td>
+            <td>{fmt_price(pos.get('entry_price', 0))}</td>
+            <td>{fmt_de(pos.get('stake', 0))}</td>
+        </tr>
+"""
+        html += """    </table>
     </div>
 """
 
@@ -590,6 +654,95 @@ def optimize_dt(trades: list, dt_range: range, verbose: bool = True) -> dict:
     }
 
 
+def run_dashboard_cycle(dt_bars: int, start_date: str, output_dir: Path,
+                         verbose: bool = True) -> Optional[Path]:
+    """Run a single dashboard generation cycle.
+
+    Args:
+        dt_bars: Number of bars for momentum filter
+        start_date: Start date filter (YYYY-MM-DD)
+        output_dir: Output directory for HTML
+        verbose: Print progress
+
+    Returns:
+        Path to generated dashboard or None
+    """
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    if verbose:
+        print(f"\n[{timestamp}] Running dashboard cycle...")
+
+    # Load trades
+    trades = load_trades_from_json(SOURCE_JSON, start_date=start_date)
+    if not trades:
+        if verbose:
+            print("  No trades found.")
+        return None
+
+    # Load open positions
+    open_positions = load_open_positions(SOURCE_JSON)
+
+    if verbose:
+        print(f"  Loaded {len(trades)} trades, {len(open_positions)} open positions")
+
+    # Filter trades
+    filtered, stats = filter_trades_by_momentum(trades, dt_bars, verbose=False)
+
+    if not filtered:
+        if verbose:
+            print("  No trades passed momentum filter.")
+        return None
+
+    # Generate dashboard
+    path = generate_momentum_dashboard(
+        filtered, stats, dt_bars, output_dir, stats, open_positions
+    )
+
+    if verbose:
+        wins = sum(1 for t in filtered if t.get("pnl_pct", 0) > 0)
+        win_rate = wins / len(filtered) * 100 if filtered else 0
+        print(f"  Filtered: {len(filtered)} trades, Win rate: {win_rate:.1f}%")
+        print(f"  Dashboard: {path}")
+
+    return path
+
+
+def monitor_loop(dt_bars: int, start_date: str, output_dir: Path,
+                  interval_min: float = 5.0) -> None:
+    """Continuous monitor loop that regenerates dashboard periodically.
+
+    Args:
+        dt_bars: Number of bars for momentum filter
+        start_date: Start date filter (YYYY-MM-DD)
+        output_dir: Output directory for HTML
+        interval_min: Minutes between updates (default: 5)
+    """
+    print("="*60)
+    print("MOMENTUM FILTER DASHBOARD - MONITOR MODE")
+    print("="*60)
+    print(f"  dT = {dt_bars} bars")
+    print(f"  Start date: {start_date}")
+    print(f"  Update interval: {interval_min} minutes")
+    print(f"  Output: {output_dir}")
+    print("="*60)
+    print("Press Ctrl+C to stop\n")
+
+    interval_sec = interval_min * 60.0
+
+    try:
+        while True:
+            run_dashboard_cycle(dt_bars, start_date, output_dir, verbose=True)
+
+            # Wait for next cycle
+            next_update = datetime.now() + timedelta(seconds=interval_sec)
+            print(f"  Next update: {next_update.strftime('%H:%M:%S')}")
+
+            time.sleep(interval_sec)
+
+    except KeyboardInterrupt:
+        print("\n\nMonitor stopped by user.")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Momentum Filter Dashboard")
     parser.add_argument("--dt", type=int, default=2,
@@ -604,13 +757,26 @@ def main():
                         help="Maximum dT for optimization (default: 12)")
     parser.add_argument("--output-dir", type=str, default="report_html",
                         help="Output directory (default: report_html)")
+    parser.add_argument("--monitor", action="store_true",
+                        help="Enable continuous monitor mode with periodic updates")
+    parser.add_argument("--interval", type=float, default=5.0,
+                        help="Minutes between dashboard updates in monitor mode (default: 5)")
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)
 
+    # Monitor mode - continuous updates
+    if args.monitor:
+        monitor_loop(args.dt, args.start, output_dir, args.interval)
+        return
+
     print(f"Loading trades from {SOURCE_JSON} (start_date={args.start})...")
     trades = load_trades_from_json(SOURCE_JSON, start_date=args.start)
     print(f"Loaded {len(trades)} trades")
+
+    # Load open positions
+    open_positions = load_open_positions(SOURCE_JSON)
+    print(f"Open positions: {len(open_positions)}")
 
     if not trades:
         print("No trades found. Check the source file.")
@@ -631,13 +797,13 @@ def main():
             best = opt_results[key]
             dt = best["dt_bars"]
             filtered, stats = filter_trades_by_momentum(trades, dt, verbose=False)
-            generate_momentum_dashboard(filtered, stats, dt, output_dir, stats)
+            generate_momentum_dashboard(filtered, stats, dt, output_dir, stats, open_positions)
     else:
         # Single dT mode
         filtered, stats = filter_trades_by_momentum(trades, args.dt, verbose=True)
 
         if filtered:
-            path = generate_momentum_dashboard(filtered, stats, args.dt, output_dir, stats)
+            path = generate_momentum_dashboard(filtered, stats, args.dt, output_dir, stats, open_positions)
             print(f"\nOpen with: xdg-open {path}")
         else:
             print("No trades passed the momentum filter.")
