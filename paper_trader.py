@@ -478,6 +478,13 @@ def set_dashboard_start(start_date) -> None:
     _DASHBOARD_START = start_date
 
 
+def get_dashboard_start_str() -> str | None:
+    """Get dashboard start date as YYYY-MM-DD string for generate_dashboard()."""
+    if _DASHBOARD_START is None:
+        return None
+    return _DASHBOARD_START.strftime("%Y-%m-%d")
+
+
 def load_env_file(path: str = ".env") -> None:
     env_path = Path(path)
     if not env_path.is_file():
@@ -3404,8 +3411,9 @@ def write_live_reports(final_state: Dict, closed_trades: List[TradeResult]) -> N
     try:
         from TestnetDashboard import generate_dashboard
         output_dir = Path(REPORT_DIR)
-        generate_dashboard(output_dir=output_dir, german=False)
-        generate_dashboard(output_dir=output_dir, german=True)
+        ds_start = get_dashboard_start_str()
+        generate_dashboard(start_date=ds_start, output_dir=output_dir, german=False)
+        generate_dashboard(start_date=ds_start, output_dir=output_dir, german=True)
         print(f"[Dashboard] Updated (EN + DE) in {REPORT_DIR}")
     except Exception as e:
         print(f"[Dashboard] Failed to update: {e}")
@@ -4508,8 +4516,9 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
         try:
             from TestnetDashboard import generate_dashboard
             output_dir = Path(REPORT_DIR)
-            generate_dashboard(output_dir=output_dir, german=False)
-            generate_dashboard(output_dir=output_dir, german=True)
+            ds_start = get_dashboard_start_str()
+            generate_dashboard(start_date=ds_start, output_dir=output_dir, german=False)
+            generate_dashboard(start_date=ds_start, output_dir=output_dir, german=True)
             print(f"[Dashboard] Updated (EN + DE) in {REPORT_DIR}")
         except Exception as e:
             print(f"[Dashboard] Failed to update: {e}")
