@@ -1,0 +1,647 @@
+#!/usr/bin/env python3
+"""Momentum Filter Dashboard - Filter trades by early profit criterion.
+
+Concept: If a trade is profitable after dT bars (parameter to optimize),
+it has a higher probability of being a winning trade overall.
+
+This script:
+1. Reads all trades from trading_summary.json
+2. For each trade, checks if it was profitable after dT bars
+3. If yes, includes it in a filtered trade list
+4. Generates a separate dashboard showing filtered trades with statistics
+
+The trades are closed at the same time/price as the original - we just filter
+which trades we would have taken based on the early momentum criterion.
+"""
+
+import argparse
+import json
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Optional
+
+import pandas as pd
+
+# Import OHLCV fetching from existing module
+import Supertrend_5Min as st
+
+# Settings
+REPORT_DIR = Path("report_html")
+OHLCV_CACHE_DIR = "ohlcv_cache"
+SOURCE_JSON = REPORT_DIR / "trading_summary.json"
+OUTPUT_DIR = REPORT_DIR
+START_CAPITAL = 16500.0
+MAX_POSITIONS = 10
+TIMEFRAME = "1h"  # Base timeframe for bars
+
+
+def load_trades_from_json(json_path: Path, start_date: str = None) -> list:
+    """Load closed trades from trading_summary.json."""
+    if not json_path.exists():
+        print(f"Error: {json_path} not found")
+        return []
+
+    with open(json_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    trades = data.get("trades", [])
+
+    # Parse start_date filter
+    start_dt = None
+    if start_date:
+        start_dt = datetime.fromisoformat(start_date + "T00:00:00")
+
+    filtered_trades = []
+    for t in trades:
+        direction = str(t.get("direction", "long")).lower()
+        if direction != "long":  # Only long trades for now
+            continue
+
+        entry_time = t.get("entry_time", "")
+
+        # Apply start_date filter
+        if start_dt and entry_time:
+            try:
+                entry_dt = datetime.fromisoformat(entry_time.replace("Z", "+00:00").replace("+00:00", ""))
+            except ValueError:
+                entry_dt = datetime.strptime(entry_time[:19], "%Y-%m-%d %H:%M:%S")
+            if entry_dt.replace(tzinfo=None) < start_dt:
+                continue
+
+        # Calculate original PnL percentage
+        entry_price = float(t.get("entry_price", 0) or 0)
+        exit_price = float(t.get("exit_price", 0) or 0)
+        if entry_price > 0:
+            pnl_pct = (exit_price - entry_price) / entry_price * 100
+        else:
+            pnl_pct = 0
+
+        filtered_trades.append({
+            "symbol": t.get("symbol", ""),
+            "direction": direction,
+            "entry_time": entry_time,
+            "exit_time": t.get("exit_time", ""),
+            "entry_price": entry_price,
+            "exit_price": exit_price,
+            "original_stake": float(t.get("stake", 0) or 0),
+            "original_pnl": float(t.get("pnl", 0) or 0),
+            "pnl_pct": pnl_pct,
+            "reason": t.get("reason", ""),
+            "indicator": t.get("indicator", ""),
+            "htf": t.get("htf", ""),
+        })
+
+    return filtered_trades
+
+
+def get_price_after_dt_bars(symbol: str, entry_time: str, dt_bars: int,
+                            ohlcv_cache: dict) -> Optional[float]:
+    """Get the price dt_bars after entry time.
+
+    Args:
+        symbol: Trading pair like "BTC/USDC"
+        entry_time: Entry timestamp in ISO format
+        dt_bars: Number of bars to look ahead
+        ohlcv_cache: Pre-loaded cache for OHLCV data
+
+    Returns:
+        Close price after dt_bars, or None if not available
+    """
+    # Get DataFrame from cache
+    df = ohlcv_cache.get(symbol)
+    if df is None or df.empty:
+        return None
+
+    # Parse entry time
+    try:
+        entry_dt = datetime.fromisoformat(entry_time.replace("Z", "+00:00"))
+        entry_dt = entry_dt.replace(tzinfo=None)  # Make naive for comparison
+    except (ValueError, TypeError):
+        try:
+            entry_dt = datetime.strptime(entry_time[:19], "%Y-%m-%d %H:%M:%S")
+        except (ValueError, TypeError):
+            return None
+
+    # Calculate target time (entry + dt_bars hours for 1h timeframe)
+    target_dt = entry_dt + timedelta(hours=dt_bars)
+
+    # Find closest candle to target time
+    try:
+        # Look for exact match or next available candle
+        mask = df.index >= target_dt
+        if mask.any():
+            idx = df.index[mask][0]
+            return float(df.loc[idx, "close"])
+        else:
+            # Target is after last available data
+            return None
+    except Exception:
+        return None
+
+
+def preload_ohlcv_cache(symbols: list, verbose: bool = True) -> dict:
+    """Preload OHLCV data for all symbols from cache.
+
+    Args:
+        symbols: List of trading pairs
+        verbose: Print progress
+
+    Returns:
+        Dict mapping symbol -> DataFrame
+    """
+    ohlcv_cache = {}
+    failed_symbols = set()
+
+    for symbol in symbols:
+        try:
+            df = st.load_ohlcv_from_cache(symbol, TIMEFRAME)
+            if df is not None and not df.empty:
+                # Convert index to DatetimeIndex if needed
+                if not isinstance(df.index, pd.DatetimeIndex):
+                    df.index = pd.to_datetime(df.index)
+                # Make index naive for comparison
+                if df.index.tz is not None:
+                    df.index = df.index.tz_localize(None)
+                ohlcv_cache[symbol] = df
+                if verbose:
+                    print(f"  Loaded {symbol}: {len(df)} bars")
+            else:
+                failed_symbols.add(symbol)
+        except Exception as e:
+            if verbose:
+                print(f"  Warning: Could not load {symbol}: {e}")
+            failed_symbols.add(symbol)
+
+    if verbose and failed_symbols:
+        print(f"  Symbols without cache data: {', '.join(sorted(failed_symbols))}")
+
+    return ohlcv_cache
+
+
+def filter_trades_by_momentum(trades: list, dt_bars: int, verbose: bool = True,
+                               ohlcv_cache: dict = None) -> tuple[list, dict]:
+    """Filter trades based on early momentum criterion.
+
+    A trade passes the filter if it's profitable after dt_bars.
+
+    Args:
+        trades: List of trade dictionaries
+        dt_bars: Number of bars to check for early profit
+        verbose: Print progress
+        ohlcv_cache: Pre-loaded OHLCV data (optional)
+
+    Returns:
+        Tuple of (filtered_trades, statistics)
+    """
+    if verbose:
+        print(f"\n=== Filtering trades with dT = {dt_bars} bars ===")
+
+    # Preload cache if not provided
+    if ohlcv_cache is None:
+        symbols = list(set(t["symbol"] for t in trades))
+        if verbose:
+            print(f"  Preloading OHLCV data for {len(symbols)} symbols...")
+        ohlcv_cache = preload_ohlcv_cache(symbols, verbose=verbose)
+
+    filtered = []
+    stats = {
+        "total_trades": len(trades),
+        "filtered_trades": 0,
+        "skipped_no_data": 0,
+        "skipped_not_profitable_at_dt": 0,
+    }
+
+    for i, trade in enumerate(trades):
+        symbol = trade["symbol"]
+        entry_time = trade["entry_time"]
+        entry_price = trade["entry_price"]
+        direction = trade["direction"]
+
+        if verbose and (i + 1) % 500 == 0:
+            print(f"  Processing trade {i + 1}/{len(trades)}...")
+
+        # Skip if no OHLCV data for this symbol
+        if symbol not in ohlcv_cache:
+            stats["skipped_no_data"] += 1
+            continue
+
+        # Get price after dt_bars
+        price_at_dt = get_price_after_dt_bars(symbol, entry_time, dt_bars, ohlcv_cache)
+
+        if price_at_dt is None:
+            stats["skipped_no_data"] += 1
+            continue
+
+        # Check if profitable at dt_bars
+        if direction == "long":
+            is_profitable_at_dt = price_at_dt > entry_price
+        else:  # short
+            is_profitable_at_dt = price_at_dt < entry_price
+
+        if is_profitable_at_dt:
+            # Add momentum info to trade
+            trade_copy = dict(trade)
+            trade_copy["price_at_dt"] = price_at_dt
+            trade_copy["pnl_at_dt_pct"] = (price_at_dt - entry_price) / entry_price * 100
+            filtered.append(trade_copy)
+            stats["filtered_trades"] += 1
+        else:
+            stats["skipped_not_profitable_at_dt"] += 1
+
+    # Calculate win rates
+    if trades:
+        original_wins = sum(1 for t in trades if t["pnl_pct"] > 0)
+        stats["original_win_rate"] = original_wins / len(trades) * 100
+    else:
+        stats["original_win_rate"] = 0
+
+    if filtered:
+        filtered_wins = sum(1 for t in filtered if t["pnl_pct"] > 0)
+        stats["filtered_win_rate"] = filtered_wins / len(filtered) * 100
+    else:
+        stats["filtered_win_rate"] = 0
+
+    if verbose:
+        print(f"  Total trades: {stats['total_trades']}")
+        print(f"  Passed momentum filter: {stats['filtered_trades']}")
+        print(f"  Skipped (no data): {stats['skipped_no_data']}")
+        print(f"  Skipped (not profitable at dT): {stats['skipped_not_profitable_at_dt']}")
+        print(f"  Original win rate: {stats['original_win_rate']:.1f}%")
+        print(f"  Filtered win rate: {stats['filtered_win_rate']:.1f}%")
+
+    return filtered, stats
+
+
+def recalculate_with_compound_growth(trades: list) -> tuple[list, float]:
+    """Recalculate trades with compound growth starting from START_CAPITAL."""
+    # Sort chronologically
+    def get_entry_time(t):
+        entry_time = t.get("entry_time", "")
+        try:
+            return datetime.fromisoformat(entry_time.replace("Z", "+00:00"))
+        except (ValueError, TypeError):
+            try:
+                return datetime.strptime(entry_time[:19], "%Y-%m-%d %H:%M:%S")
+            except (ValueError, TypeError):
+                return datetime.min
+
+    trades_chrono = sorted(trades, key=get_entry_time, reverse=False)
+
+    capital = START_CAPITAL
+    recalculated = []
+
+    for t in trades_chrono:
+        stake = capital / MAX_POSITIONS
+        pnl_pct = t.get("pnl_pct", 0) / 100  # Convert from percentage
+
+        pnl = pnl_pct * stake
+        capital += pnl
+
+        recalc = dict(t)
+        recalc["stake"] = stake
+        recalc["pnl"] = pnl
+        recalc["equity_after"] = capital
+        recalculated.append(recalc)
+
+    return recalculated, capital
+
+
+def fmt_de(value: float) -> str:
+    """Format number in German style."""
+    if abs(value) >= 1000:
+        return f"{value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    return f"{value:.2f}".replace(".", ",")
+
+
+def generate_momentum_dashboard(trades: list, stats: dict, dt_bars: int,
+                                 output_dir: Path, original_stats: dict = None):
+    """Generate HTML dashboard for momentum-filtered trades."""
+
+    # Recalculate with compound growth
+    recalculated, final_capital = recalculate_with_compound_growth(trades)
+
+    # Sort by entry time (newest first) for display
+    def get_entry_time(t):
+        entry_time = t.get("entry_time", "")
+        try:
+            return datetime.fromisoformat(entry_time.replace("Z", "+00:00"))
+        except (ValueError, TypeError):
+            try:
+                return datetime.strptime(entry_time[:19], "%Y-%m-%d %H:%M:%S")
+            except (ValueError, TypeError):
+                return datetime.min
+
+    recalculated.sort(key=get_entry_time, reverse=True)
+
+    # Calculate statistics
+    total_pnl = sum(t.get("pnl", 0) for t in recalculated)
+    wins = sum(1 for t in recalculated if t.get("pnl", 0) > 0)
+    losses = sum(1 for t in recalculated if t.get("pnl", 0) <= 0)
+    win_rate = wins / len(recalculated) * 100 if recalculated else 0
+
+    # Format prices
+    def fmt_price(price):
+        if price < 0.0001:
+            return f"{price:.8f}"
+        elif price < 1:
+            return f"{price:.6f}"
+        elif price < 100:
+            return f"{price:.4f}"
+        else:
+            return fmt_de(price)
+
+    # Generate HTML
+    html = f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="refresh" content="60">
+    <title>Momentum Filter Dashboard (dT={dt_bars})</title>
+    <style>
+        body {{ font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }}
+        .container {{ max-width: 1600px; margin: 0 auto; }}
+        h1 {{ color: #333; border-bottom: 2px solid #9c27b0; padding-bottom: 10px; }}
+        h2 {{ color: #555; margin-top: 30px; }}
+        table {{ border-collapse: collapse; width: 100%; margin-top: 10px; background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }}
+        th, td {{ border: 1px solid #ddd; padding: 8px; text-align: right; }}
+        th {{ background: #9c27b0; color: white; text-align: center; }}
+        td:first-child {{ text-align: left; }}
+        .positive {{ color: green; font-weight: bold; }}
+        .negative {{ color: red; font-weight: bold; }}
+        .summary-box {{ display: inline-block; background: white; padding: 20px; margin: 10px; border-radius: 5px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); min-width: 150px; text-align: center; }}
+        .summary-box h3 {{ margin: 0 0 10px 0; color: #666; font-size: 14px; }}
+        .summary-box .value {{ font-size: 24px; font-weight: bold; }}
+        .comparison-box {{ background: #e8f5e9; border: 2px solid #4caf50; }}
+        .improvement {{ color: #4caf50; font-weight: bold; }}
+        .timestamp {{ color: #666; font-size: 12px; margin-top: 20px; }}
+        .section {{ margin-bottom: 30px; }}
+        .concept-note {{ background: #fff3e0; padding: 15px; border-radius: 5px; margin-bottom: 20px; border-left: 4px solid #ff9800; }}
+        .filter-header {{ background: #9c27b0 !important; }}
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>Momentum Filter Dashboard (dT = {dt_bars} bars)</h1>
+
+    <div class="concept-note">
+        <strong>Konzept:</strong> Nur Trades aufnehmen, die nach {dt_bars} Bar(s) ({dt_bars}h) im Gewinn sind.<br>
+        <strong>Hypothese:</strong> Trades mit fruhem Momentum haben eine hohere Erfolgsrate.
+    </div>
+
+    <div class="summary-boxes">
+        <div class="summary-box">
+            <h3>Start Capital</h3>
+            <div class="value">{fmt_de(START_CAPITAL)}</div>
+        </div>
+        <div class="summary-box">
+            <h3>Final Capital</h3>
+            <div class="value {'positive' if final_capital >= START_CAPITAL else 'negative'}">{fmt_de(final_capital)}</div>
+        </div>
+        <div class="summary-box">
+            <h3>Filtered Trades</h3>
+            <div class="value">{len(recalculated)}</div>
+        </div>
+        <div class="summary-box">
+            <h3>Total PnL</h3>
+            <div class="value {'positive' if total_pnl >= 0 else 'negative'}">{fmt_de(total_pnl)}</div>
+        </div>
+        <div class="summary-box">
+            <h3>Win Rate</h3>
+            <div class="value {'positive' if win_rate >= 50 else 'negative'}">{win_rate:.1f}%</div>
+        </div>
+        <div class="summary-box">
+            <h3>Wins / Losses</h3>
+            <div class="value">{wins} / {losses}</div>
+        </div>
+    </div>
+"""
+
+    # Comparison section if original stats available
+    if original_stats:
+        orig_win_rate = original_stats.get("original_win_rate", 0)
+        improvement = win_rate - orig_win_rate
+        html += f"""
+    <div class="section">
+    <h2>Vergleich: Original vs. Momentum-Filter</h2>
+    <table>
+        <tr><th>Metrik</th><th>Original</th><th>Momentum-Filter (dT={dt_bars})</th><th>Differenz</th></tr>
+        <tr>
+            <td>Anzahl Trades</td>
+            <td>{stats['total_trades']}</td>
+            <td>{len(recalculated)}</td>
+            <td class="negative">-{stats['total_trades'] - len(recalculated)}</td>
+        </tr>
+        <tr>
+            <td>Win Rate</td>
+            <td>{orig_win_rate:.1f}%</td>
+            <td class="{'positive' if win_rate > orig_win_rate else ''}">{win_rate:.1f}%</td>
+            <td class="{'improvement' if improvement > 0 else 'negative'}">{improvement:+.1f}%</td>
+        </tr>
+        <tr>
+            <td>Filter-Quote</td>
+            <td>100%</td>
+            <td>{len(recalculated) / stats['total_trades'] * 100:.1f}%</td>
+            <td>-</td>
+        </tr>
+    </table>
+    </div>
+"""
+
+    # Trades table
+    html += f"""
+    <div class="section">
+    <h2>Gefilterte Trades ({len(recalculated)})</h2>
+    <table>
+        <tr class="filter-header">
+            <th>Symbol</th>
+            <th>Entry Time</th>
+            <th>Entry Price</th>
+            <th>Price @ dT</th>
+            <th>PnL @ dT</th>
+            <th>Exit Time</th>
+            <th>Exit Price</th>
+            <th>Stake</th>
+            <th>PnL</th>
+            <th>PnL%</th>
+            <th>Reason</th>
+        </tr>
+"""
+
+    for t in recalculated:
+        entry_time = t.get("entry_time", "")
+        exit_time = t.get("exit_time", "")
+        try:
+            entry_dt = datetime.fromisoformat(entry_time.replace("Z", "+00:00"))
+            entry_str = entry_dt.strftime("%Y-%m-%d %H:%M")
+        except (ValueError, TypeError, AttributeError):
+            entry_str = entry_time[:16] if entry_time else "N/A"
+        try:
+            exit_dt = datetime.fromisoformat(exit_time.replace("Z", "+00:00"))
+            exit_str = exit_dt.strftime("%Y-%m-%d %H:%M")
+        except (ValueError, TypeError, AttributeError):
+            exit_str = exit_time[:16] if exit_time else "N/A"
+
+        pnl = t.get("pnl", 0)
+        pnl_pct = t.get("pnl_pct", 0)
+        pnl_class = "positive" if pnl >= 0 else "negative"
+
+        price_at_dt = t.get("price_at_dt", 0)
+        pnl_at_dt_pct = t.get("pnl_at_dt_pct", 0)
+
+        html += f"""        <tr>
+            <td>{t.get('symbol', 'N/A')}</td>
+            <td>{entry_str}</td>
+            <td>{fmt_price(t.get('entry_price', 0))}</td>
+            <td>{fmt_price(price_at_dt)}</td>
+            <td class="positive">{pnl_at_dt_pct:+.2f}%</td>
+            <td>{exit_str}</td>
+            <td>{fmt_price(t.get('exit_price', 0))}</td>
+            <td>{fmt_de(t.get('stake', 0))}</td>
+            <td class="{pnl_class}">{fmt_de(pnl)}</td>
+            <td class="{pnl_class}">{pnl_pct:+.2f}%</td>
+            <td>{t.get('reason', 'N/A')}</td>
+        </tr>
+"""
+
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    html += f"""    </table>
+    </div>
+
+    <p class="timestamp">Generated: {timestamp}</p>
+</div>
+</body>
+</html>"""
+
+    # Write to file
+    output_dir.mkdir(exist_ok=True)
+    output_path = output_dir / f"dashboard_momentum_dt{dt_bars}.html"
+    output_path.write_text(html, encoding="utf-8")
+    print(f"Dashboard saved to: {output_path}")
+    return output_path
+
+
+def optimize_dt(trades: list, dt_range: range, verbose: bool = True) -> dict:
+    """Test multiple dT values and find the optimal one.
+
+    Args:
+        trades: List of trade dictionaries
+        dt_range: Range of dT values to test (e.g., range(1, 13))
+        verbose: Print progress
+
+    Returns:
+        Dict with optimization results
+    """
+    print("\n" + "="*60)
+    print("MOMENTUM FILTER OPTIMIZATION")
+    print("="*60)
+
+    # Preload OHLCV cache once for all dT values
+    symbols = list(set(t["symbol"] for t in trades))
+    print(f"Preloading OHLCV data for {len(symbols)} symbols...")
+    ohlcv_cache = preload_ohlcv_cache(symbols, verbose=True)
+    print(f"Cache ready: {len(ohlcv_cache)} symbols loaded\n")
+
+    results = []
+
+    for dt in dt_range:
+        filtered, stats = filter_trades_by_momentum(trades, dt, verbose=False, ohlcv_cache=ohlcv_cache)
+
+        # Calculate compound growth for filtered trades
+        if filtered:
+            _, final_capital = recalculate_with_compound_growth(filtered)
+            total_return = (final_capital - START_CAPITAL) / START_CAPITAL * 100
+        else:
+            final_capital = START_CAPITAL
+            total_return = 0
+
+        result = {
+            "dt_bars": dt,
+            "filtered_trades": len(filtered),
+            "win_rate": stats["filtered_win_rate"],
+            "original_win_rate": stats["original_win_rate"],
+            "win_rate_improvement": stats["filtered_win_rate"] - stats["original_win_rate"],
+            "filter_rate": len(filtered) / len(trades) * 100 if trades else 0,
+            "final_capital": final_capital,
+            "total_return": total_return,
+        }
+        results.append(result)
+
+        if verbose:
+            print(f"dT={dt:2d}: {len(filtered):4d} trades | Win: {stats['filtered_win_rate']:5.1f}% | "
+                  f"Improvement: {result['win_rate_improvement']:+5.1f}% | "
+                  f"Return: {total_return:+.1f}%")
+
+    # Find best dT by win rate improvement
+    best_by_winrate = max(results, key=lambda x: x["win_rate"])
+    best_by_improvement = max(results, key=lambda x: x["win_rate_improvement"])
+    best_by_return = max(results, key=lambda x: x["total_return"])
+
+    print("\n" + "-"*60)
+    print(f"Best by Win Rate:    dT={best_by_winrate['dt_bars']} ({best_by_winrate['win_rate']:.1f}%)")
+    print(f"Best by Improvement: dT={best_by_improvement['dt_bars']} (+{best_by_improvement['win_rate_improvement']:.1f}%)")
+    print(f"Best by Return:      dT={best_by_return['dt_bars']} ({best_by_return['total_return']:.1f}%)")
+    print("-"*60)
+
+    return {
+        "results": results,
+        "best_by_winrate": best_by_winrate,
+        "best_by_improvement": best_by_improvement,
+        "best_by_return": best_by_return,
+    }
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Momentum Filter Dashboard")
+    parser.add_argument("--dt", type=int, default=2,
+                        help="Number of bars to check for early profit (default: 2)")
+    parser.add_argument("--start", type=str, default="2024-01-31",
+                        help="Start date YYYY-MM-DD (default: 2024-01-31)")
+    parser.add_argument("--optimize", action="store_true",
+                        help="Test multiple dT values and find optimal")
+    parser.add_argument("--dt-min", type=int, default=1,
+                        help="Minimum dT for optimization (default: 1)")
+    parser.add_argument("--dt-max", type=int, default=12,
+                        help="Maximum dT for optimization (default: 12)")
+    parser.add_argument("--output-dir", type=str, default="report_html",
+                        help="Output directory (default: report_html)")
+    args = parser.parse_args()
+
+    output_dir = Path(args.output_dir)
+
+    print(f"Loading trades from {SOURCE_JSON} (start_date={args.start})...")
+    trades = load_trades_from_json(SOURCE_JSON, start_date=args.start)
+    print(f"Loaded {len(trades)} trades")
+
+    if not trades:
+        print("No trades found. Check the source file.")
+        return
+
+    # Calculate original statistics
+    original_wins = sum(1 for t in trades if t["pnl_pct"] > 0)
+    original_win_rate = original_wins / len(trades) * 100
+    print(f"Original win rate: {original_win_rate:.1f}%")
+
+    if args.optimize:
+        # Optimization mode
+        opt_results = optimize_dt(trades, range(args.dt_min, args.dt_max + 1))
+
+        # Generate dashboards for top 3 dT values
+        print("\nGenerating dashboards for best dT values...")
+        for key in ["best_by_winrate", "best_by_improvement", "best_by_return"]:
+            best = opt_results[key]
+            dt = best["dt_bars"]
+            filtered, stats = filter_trades_by_momentum(trades, dt, verbose=False)
+            generate_momentum_dashboard(filtered, stats, dt, output_dir, stats)
+    else:
+        # Single dT mode
+        filtered, stats = filter_trades_by_momentum(trades, args.dt, verbose=True)
+
+        if filtered:
+            path = generate_momentum_dashboard(filtered, stats, args.dt, output_dir, stats)
+            print(f"\nOpen with: xdg-open {path}")
+        else:
+            print("No trades passed the momentum filter.")
+
+
+if __name__ == "__main__":
+    main()
