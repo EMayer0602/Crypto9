@@ -2802,8 +2802,8 @@ def write_summary_html(summary: Dict[str, Any], path: str) -> None:
     html_parts.append(f"<h2>Closed Trades ({total_trades}, PnL: <span class=\"{pnl_class(total_pnl)}\">{fmt(total_pnl)}</span>)</h2>")
     html_parts.append("<table><tr><th>Symbol</th><th>Direction</th><th>Indicator</th><th>HTF</th><th>Entry Time</th><th>Entry Price</th><th>Exit Time</th><th>Exit Price</th><th>Stake</th><th>Amount</th><th>PnL</th><th>%</th><th>Reason</th></tr>")
 
-    # Sort by entry_time descending (newest first) and take last 100
-    sorted_trades = sorted(trades, key=lambda t: t.get("entry_time", "") or "", reverse=True)[:100]
+    # Sort by entry_time descending (newest first)
+    sorted_trades = sorted(trades, key=lambda t: t.get("entry_time", "") or "", reverse=True)
     for t in sorted_trades:
         symbol = t.get("symbol", "")
         direction = t.get("direction", "")
@@ -2821,8 +2821,6 @@ def write_summary_html(summary: Dict[str, Any], path: str) -> None:
         html_parts.append(f"<tr><td>{symbol}</td><td>{direction}</td><td>{indicator}</td><td>{htf}</td><td>{entry_time}</td><td>{fmt_price(entry_price_val)}</td><td>{exit_time}</td><td>{fmt_price(exit_price_val)}</td><td>{fmt(stake_val)}</td><td>{fmt(amount)}</td><td class='{pnl_class(pnl)}'>{fmt(pnl)}</td><td class='{pnl_class(pnl_pct)}'>{fmt_pct(pnl_pct)}</td><td>{reason}</td></tr>")
 
     html_parts.append("</table>")
-    if total_trades > 100:
-        html_parts.append(f"<p>Showing last 100 of {total_trades} trades</p>")
     html_parts.append("</body></html>")
 
     with open(path, "w", encoding="utf-8") as fh:
