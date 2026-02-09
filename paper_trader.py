@@ -3929,7 +3929,7 @@ def main(
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Paper trading runner for overall-best strategies")
     parser.add_argument("--simulate", action="store_true", help="Run a historical simulation instead of a single live tick")
-    parser.add_argument("--start", type=str, default=None, help="Simulation start timestamp (ISO, default: 24h before end)")
+    parser.add_argument("--start", type=str, default="2024-01-31", help="Simulation start timestamp (ISO, default: 2024-01-31)")
     parser.add_argument("--end", type=str, default=None, help="Simulation end timestamp (ISO, default: now)")
     parser.add_argument("--use-saved-state", action="store_true", help="Seed simulations with the saved JSON state instead of a fresh account")
     parser.add_argument("--sim-log", type=str, default=SIMULATION_LOG_FILE, help="CSV path for simulated trades")
@@ -4014,8 +4014,8 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--dashboard-start",
         type=str,
-        default="2024-01-31",
-        help="Start date for dashboard trades filter (YYYY-MM-DD, default: 2024-01-31)",
+        default="2025-12-01",
+        help="Start date for dashboard trades filter (YYYY-MM-DD, default: 2025-12-01)",
     )
     return parser.parse_args(argv)
 
@@ -4030,20 +4030,13 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
     set_testnet_active(use_testnet)
 
     # Set dashboard start date for filtering trades
-    # Use --start if provided, otherwise use --dashboard-start (default: 2024-01-31)
     try:
         from datetime import datetime, timezone
-        DEFAULT_DASHBOARD_START = "2024-01-31"
-        if args.start:
-            # Extract date portion from --start (may include time)
-            dashboard_start_str = args.start[:10]
-        else:
-            dashboard_start_str = args.dashboard_start if args.dashboard_start else DEFAULT_DASHBOARD_START
-        dashboard_start_dt = datetime.strptime(dashboard_start_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        dashboard_start_dt = datetime.strptime(args.dashboard_start, "%Y-%m-%d").replace(tzinfo=timezone.utc)
         set_dashboard_start(dashboard_start_dt)
-        print(f"[Config] Dashboard shows trades from: {dashboard_start_str}")
+        print(f"[Config] Dashboard shows trades from: {args.dashboard_start}")
     except Exception as e:
-        print(f"[Warning] Could not parse dashboard start date: {e}")
+        print(f"[Warning] Could not parse dashboard_start '{args.dashboard_start}': {e}")
         set_dashboard_start(None)
 
     # Handle stake sizing: dynamic by default, fixed if --stake provided
