@@ -4030,13 +4030,20 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
     set_testnet_active(use_testnet)
 
     # Set dashboard start date for filtering trades
+    # Use --start if provided, otherwise use --dashboard-start (default: 2024-01-31)
     try:
         from datetime import datetime, timezone
-        dashboard_start_dt = datetime.strptime(args.dashboard_start, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        DEFAULT_DASHBOARD_START = "2024-01-31"
+        if args.start:
+            # Extract date portion from --start (may include time)
+            dashboard_start_str = args.start[:10]
+        else:
+            dashboard_start_str = args.dashboard_start if args.dashboard_start else DEFAULT_DASHBOARD_START
+        dashboard_start_dt = datetime.strptime(dashboard_start_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
         set_dashboard_start(dashboard_start_dt)
-        print(f"[Config] Dashboard shows trades from: {args.dashboard_start}")
+        print(f"[Config] Dashboard shows trades from: {dashboard_start_str}")
     except Exception as e:
-        print(f"[Warning] Could not parse dashboard_start '{args.dashboard_start}': {e}")
+        print(f"[Warning] Could not parse dashboard start date: {e}")
         set_dashboard_start(None)
 
     # Handle stake sizing: dynamic by default, fixed if --stake provided
