@@ -37,6 +37,29 @@ except ImportError:  # Twilio is optional; SMS alerts require pip install twilio
 
 import Supertrend_5Min as st
 
+# Import API utilities for improved error handling
+try:
+    from api_utils import (
+        get_circuit_breaker,
+        CircuitOpenError,
+        BINANCE_FUTURES_CB,
+        get_error_solution,
+        run_startup_health_check,
+    )
+    API_UTILS_AVAILABLE = True
+except ImportError:
+    API_UTILS_AVAILABLE = False
+    # Fallback: no circuit breaker
+    class CircuitOpenError(Exception):
+        pass
+    def get_circuit_breaker(name):
+        return None
+    def get_error_solution(code, text=""):
+        return f"HTTP {code}", text
+    def run_startup_health_check(skip_api_check=False):
+        return True
+    BINANCE_FUTURES_CB = "binance-futures"
+
 # Import optimal hold times configuration
 try:
     from optimal_hold_times_defaults import get_optimal_hold_bars
@@ -657,6 +680,7 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
         self.base_url = FUTURES_TESTNET_URL
         self.session = requests.Session()
         self._precision_cache: Dict[str, int] = {}
+        self._circuit_breaker = get_circuit_breaker(BINANCE_FUTURES_CB) if API_UTILS_AVAILABLE else None
         self._validate_api_keys()
 
     def _validate_api_keys(self) -> None:
@@ -696,7 +720,17 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
         return signature
 
     def _request(self, method: str, endpoint: str, params: dict = None, signed: bool = False) -> Optional[dict]:
-        """Execute API request with retry logic and exponential backoff."""
+        """Execute API request with retry logic, circuit breaker, and exponential backoff."""
+        # Check circuit breaker first
+        if self._circuit_breaker:
+            try:
+                state = self._circuit_breaker.state
+                if state.value == "open":
+                    print(f"[Futures] Circuit-Breaker OPEN - API voruebergehend nicht verfuegbar")
+                    return None
+            except Exception:
+                pass  # Continue without circuit breaker
+
         if params is None:
             params = {}
         headers = {"X-MBX-APIKEY": self.api_key}
@@ -707,6 +741,8 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
             params["signature"] = self._sign(params)
 
         last_error = None
+        consecutive_failures = 0
+
         for attempt in range(self.MAX_RETRIES + 1):
             try:
                 if method == "GET":
@@ -718,41 +754,66 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
 
                 # Rate-Limit (429) - wait and retry
                 if response.status_code == 429:
+                    consecutive_failures += 1
                     retry_after = int(response.headers.get('Retry-After', self.RETRY_BACKOFF_BASE ** attempt))
-                    print(f"[Futures] Rate-Limit. Warte {retry_after}s (Versuch {attempt + 1}/{self.MAX_RETRIES + 1})")
+                    error_msg, solution = get_error_solution(429)
+                    print(f"[Futures] {error_msg}. {solution}")
+                    print(f"          Warte {retry_after}s (Versuch {attempt + 1}/{self.MAX_RETRIES + 1})")
                     time.sleep(retry_after)
                     continue
 
                 # Server Error (5xx) - wait and retry
                 if response.status_code >= 500:
+                    consecutive_failures += 1
                     wait_time = self.RETRY_BACKOFF_BASE ** attempt
-                    print(f"[Futures] Server-Fehler {response.status_code}. Warte {wait_time}s (Versuch {attempt + 1}/{self.MAX_RETRIES + 1})")
+                    error_msg, solution = get_error_solution(response.status_code)
+                    print(f"[Futures] {error_msg}. {solution}")
+                    print(f"          Warte {wait_time}s (Versuch {attempt + 1}/{self.MAX_RETRIES + 1})")
                     time.sleep(wait_time)
                     continue
 
                 if response.status_code == 200:
+                    # Success - reset circuit breaker
+                    if self._circuit_breaker:
+                        try:
+                            self._circuit_breaker._on_success()
+                        except Exception:
+                            pass
                     try:
                         return response.json()
                     except ValueError as e:
-                        print(f"[Futures] Ungültige JSON-Response: {e}")
+                        print(f"[Futures] Ungueltige JSON-Response: {e}")
                         return None
                 else:
-                    print(f"[Futures] API Error: {response.status_code} - {response.text}")
+                    # Client error - don't retry, provide helpful message
+                    error_msg, solution = get_error_solution(response.status_code, response.text)
+                    print(f"[Futures] {error_msg}")
+                    print(f"          Loesung: {solution}")
                     return None
 
             except requests.exceptions.Timeout as e:
                 last_error = e
+                consecutive_failures += 1
                 wait_time = self.RETRY_BACKOFF_BASE ** attempt
                 print(f"[Futures] Timeout. Warte {wait_time}s (Versuch {attempt + 1}/{self.MAX_RETRIES + 1})")
                 time.sleep(wait_time)
             except requests.exceptions.ConnectionError as e:
                 last_error = e
+                consecutive_failures += 1
                 wait_time = self.RETRY_BACKOFF_BASE ** attempt
                 print(f"[Futures] Verbindungsfehler. Warte {wait_time}s (Versuch {attempt + 1}/{self.MAX_RETRIES + 1})")
                 time.sleep(wait_time)
             except requests.exceptions.RequestException as e:
                 print(f"[Futures] Request Error: {e}")
                 return None
+
+        # All retries exhausted - update circuit breaker
+        if self._circuit_breaker and consecutive_failures > 0:
+            try:
+                for _ in range(consecutive_failures):
+                    self._circuit_breaker._on_failure()
+            except Exception:
+                pass
 
         print(f"[Futures] Request fehlgeschlagen nach {self.MAX_RETRIES + 1} Versuchen: {last_error}")
         return None

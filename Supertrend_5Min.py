@@ -14,6 +14,22 @@ from ta.volatility import AverageTrueRange
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
+# Import API utilities for circuit breaker
+try:
+    from api_utils import (
+        get_circuit_breaker,
+        CircuitOpenError,
+        BINANCE_SPOT_CB,
+    )
+    API_UTILS_AVAILABLE = True
+except ImportError:
+    API_UTILS_AVAILABLE = False
+    class CircuitOpenError(Exception):
+        pass
+    def get_circuit_breaker(name):
+        return None
+    BINANCE_SPOT_CB = "binance-spot"
+
 
 def _load_env_file(path: str = ".env") -> None:
 	env_path = Path(path)
@@ -534,7 +550,7 @@ def get_data_exchange():
 
 
 def _retry_api_call(func, max_retries=3, base_delay=1.0):
-	"""Execute an API call with exponential backoff retry logic.
+	"""Execute an API call with exponential backoff retry logic and circuit breaker.
 
 	Args:
 		func: Callable that performs the API request
@@ -546,30 +562,64 @@ def _retry_api_call(func, max_retries=3, base_delay=1.0):
 
 	Raises:
 		The last exception if all retries fail
+		CircuitOpenError if circuit breaker is open
 	"""
+	# Check circuit breaker first
+	circuit_breaker = get_circuit_breaker(BINANCE_SPOT_CB) if API_UTILS_AVAILABLE else None
+	if circuit_breaker:
+		try:
+			state = circuit_breaker.state
+			if state.value == "open":
+				raise CircuitOpenError(
+					f"Circuit-Breaker OPEN - API voruebergehend nicht verfuegbar"
+				)
+		except CircuitOpenError:
+			raise
+		except Exception:
+			pass  # Continue without circuit breaker
+
 	last_exception = None
+	consecutive_failures = 0
 
 	for attempt in range(max_retries + 1):
 		try:
-			return func()
+			result = func()
+			# Success - update circuit breaker
+			if circuit_breaker:
+				try:
+					circuit_breaker._on_success()
+				except Exception:
+					pass
+			return result
 		except ccxt.RateLimitExceeded as e:
 			last_exception = e
+			consecutive_failures += 1
 			wait_time = base_delay * (2 ** attempt)
 			print(f"[API] Rate-Limit erreicht. Warte {wait_time:.1f}s (Versuch {attempt + 1}/{max_retries + 1})")
 			time.sleep(wait_time)
 		except ccxt.NetworkError as e:
 			last_exception = e
+			consecutive_failures += 1
 			wait_time = base_delay * (2 ** attempt)
 			print(f"[API] Netzwerkfehler: {e}. Warte {wait_time:.1f}s (Versuch {attempt + 1}/{max_retries + 1})")
 			time.sleep(wait_time)
 		except ccxt.ExchangeNotAvailable as e:
 			last_exception = e
+			consecutive_failures += 1
 			wait_time = base_delay * (2 ** attempt)
-			print(f"[API] Exchange nicht verfügbar. Warte {wait_time:.1f}s (Versuch {attempt + 1}/{max_retries + 1})")
+			print(f"[API] Exchange nicht verfuegbar. Warte {wait_time:.1f}s (Versuch {attempt + 1}/{max_retries + 1})")
 			time.sleep(wait_time)
 		except ccxt.ExchangeError as e:
 			# Don't retry on exchange errors (invalid symbol, etc.)
 			raise
+
+	# All retries exhausted - update circuit breaker
+	if circuit_breaker and consecutive_failures > 0:
+		try:
+			for _ in range(consecutive_failures):
+				circuit_breaker._on_failure()
+		except Exception:
+			pass
 
 	raise last_exception
 
