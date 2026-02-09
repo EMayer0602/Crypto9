@@ -42,3 +42,9 @@ python
 
 # Testnet tracking files
 crypto9_testnet_*.json
+
+# Generated report files
+report_html/trading_summary.html
+report_html/dashboard*.html
+report_testnet/trading_summary.html
+report_testnet/dashboard*.html
