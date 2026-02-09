@@ -373,6 +373,8 @@ def save_testnet_position(position: Dict, use_testnet: bool = False) -> None:
             positions[existing_idx] = position
         else:
             positions.append(position)
+        # Sort by entry_time descending (newest first) before writing
+        positions.sort(key=lambda p: p.get("entry_time", "") or "", reverse=True)
         with open(TESTNET_POSITIONS_FILE, "w") as f:
             json.dump(positions, f, indent=2, default=str)
         print(f"[Testnet] Position gespeichert: {position.get('symbol')} {position.get('direction')}")
@@ -431,6 +433,8 @@ def save_testnet_closed_trade(trade: Dict) -> None:
 
         trade["closed_at"] = datetime.now().isoformat()
         trades.append(trade)
+        # Sort by entry_time descending (newest first) before writing
+        trades.sort(key=lambda t: t.get("entry_time", "") or "", reverse=True)
         with open(TESTNET_CLOSED_TRADES_FILE, "w") as f:
             json.dump(trades, f, indent=2, default=str)
     except Exception as e:
@@ -1337,6 +1341,8 @@ def save_state(state: Dict) -> None:
             # New position, no enriched data yet
             merged_positions.append(pos)
 
+    # Sort by entry_time descending (newest first) before saving
+    merged_positions.sort(key=lambda p: p.get("entry_time", "") or "", reverse=True)
     data["open_positions_data"] = merged_positions
     data["open_positions"] = len(merged_positions)
 
@@ -2367,11 +2373,17 @@ def _write_dataframe_outputs(df: pd.DataFrame, csv_path: Optional[str], json_pat
 
 
 def write_closed_trades_report(trades_df: pd.DataFrame, csv_path: str, json_path: str) -> None:
+    # Sort by entry_time descending (newest first) before writing
+    if not trades_df.empty and "entry_time" in trades_df.columns:
+        trades_df = trades_df.sort_values("entry_time", ascending=False)
     _write_dataframe_outputs(trades_df, csv_path, json_path, label="closed trades")
 
 
 def write_open_positions_report(positions: List[Dict], csv_path: str, json_path: Optional[str]) -> None:
     df = open_positions_to_dataframe(positions)
+    # Sort by entry_time descending (newest first) before writing
+    if not df.empty and "entry_time" in df.columns:
+        df = df.sort_values("entry_time", ascending=False)
     _write_dataframe_outputs(df, csv_path, json_path, label="open positions")
 
 
@@ -2578,6 +2590,9 @@ def build_summary_payload(
     open_positions_list = []
     if not open_positions_df.empty:
         positions_export = open_positions_df.copy()
+        # Sort by entry_time descending (newest first)
+        if "entry_time" in positions_export.columns:
+            positions_export = positions_export.sort_values("entry_time", ascending=False)
         for col in positions_export.columns:
             if pd.api.types.is_datetime64_any_dtype(positions_export[col]):
                 positions_export[col] = positions_export[col].apply(
@@ -2756,7 +2771,9 @@ def write_summary_html(summary: Dict[str, Any], path: str) -> None:
     # Open Positions with all columns
     html_parts.append(f"<h2>Open Positions ({open_count}, Equity: <span class=\"{pnl_class(open_pnl)}\">{fmt(open_pnl)}</span>)</h2>")
     html_parts.append("<table><tr><th>Symbol</th><th>Direction</th><th>Indicator</th><th>HTF</th><th>Entry Time</th><th>Entry Price</th><th>Last Price</th><th>Stake</th><th>Amount</th><th>Bars</th><th>PnL %</th><th>PnL</th><th>Status</th></tr>")
-    for pos in open_positions:
+    # Sort by entry_time descending (newest first)
+    sorted_open_positions = sorted(open_positions, key=lambda p: p.get("entry_time", "") or "", reverse=True)
+    for pos in sorted_open_positions:
         symbol = pos.get("symbol", "")
         direction = pos.get("direction", "")
         indicator = pos.get("indicator", "")
@@ -2778,8 +2795,8 @@ def write_summary_html(summary: Dict[str, Any], path: str) -> None:
     html_parts.append(f"<h2>Closed Trades ({total_trades}, PnL: <span class=\"{pnl_class(total_pnl)}\">{fmt(total_pnl)}</span>)</h2>")
     html_parts.append("<table><tr><th>Symbol</th><th>Direction</th><th>Indicator</th><th>HTF</th><th>Entry Time</th><th>Entry Price</th><th>Exit Time</th><th>Exit Price</th><th>Stake</th><th>Amount</th><th>PnL</th><th>%</th><th>Reason</th></tr>")
 
-    # Sort by exit_time descending and take last 100
-    sorted_trades = sorted(trades, key=lambda t: t.get("exit_time", "") or "", reverse=True)[:100]
+    # Sort by entry_time descending (newest first) and take last 100
+    sorted_trades = sorted(trades, key=lambda t: t.get("entry_time", "") or "", reverse=True)[:100]
     for t in sorted_trades:
         symbol = t.get("symbol", "")
         direction = t.get("direction", "")
