@@ -379,10 +379,19 @@ def main():
             'enableRateLimit': True,
             'options': {
                 'fetchMarkets': {
+                    'spot': True,
+                    'swap': True,
                     'hip3': False,  # Disable Hip3 DEX markets to avoid "Too many DEXes" error
                 },
             },
         })
+        # Explicitly load markets to ensure options are applied
+        try:
+            exchange.load_markets()
+        except Exception as e:
+            print(f"Warning: Could not load Hyperliquid markets: {e}")
+            print("Falling back to Binance...")
+            exchange = ccxt.binance({'enableRateLimit': True})
     else:
         exchange = ccxt.binance({'enableRateLimit': True})
 
