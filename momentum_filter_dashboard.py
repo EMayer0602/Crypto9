@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
 """Momentum Filter Dashboard - Filter trades by early profit criterion.
 
-Concept: If a trade is profitable after dT bars (parameter to optimize),
+Concept: If a trade signal shows profit after dT bars (parameter to optimize),
 it has a higher probability of being a winning trade overall.
 
-This script:
-1. Reads all trades from trading_summary.json
-2. For each trade, checks if it was profitable after dT bars
-3. If yes, includes it in a filtered trade list
-4. Generates a separate dashboard showing filtered trades with statistics
+Entry Logic (NO Look-Ahead Bias):
+1. Original signal comes at time T0 with price P0
+2. Wait dT bars (e.g., 8 hours for dT=8)
+3. At T0+dT, check if price P_dT > P0 (for long)
+4. If yes: ENTER at price P_dT (NOT P0!)
+5. Exit at original exit time/price
+6. PnL = (exit_price - P_dT) / P_dT  (NOT based on P0!)
 
-The trades are closed at the same time/price as the original - we just filter
-which trades we would have taken based on the early momentum criterion.
+This ensures realistic backtesting - we can only decide to enter AFTER
+seeing the momentum, so our entry price must be the price at that moment.
 """
 
 import argparse
@@ -183,11 +185,14 @@ def filter_open_positions_by_momentum(positions: list, dt_bars: int,
             continue
 
         # Position passed momentum filter - compute additional fields
+        # CRITICAL FIX: No look-ahead bias!
+        # Our ACTUAL entry is at T+dT, not the original entry time
+
         current_price = get_current_price(symbol, ohlcv_cache)
         if current_price is None:
             current_price = price_at_dt  # Fallback
 
-        # Calculate bars since entry
+        # Calculate ACTUAL entry time (original + dT bars)
         try:
             entry_dt = datetime.fromisoformat(entry_time.replace("Z", "+00:00"))
             entry_dt = entry_dt.replace(tzinfo=None)
@@ -197,23 +202,38 @@ def filter_open_positions_by_momentum(positions: list, dt_bars: int,
             except (ValueError, TypeError):
                 entry_dt = now
 
-        bars = int((now - entry_dt).total_seconds() / 3600)  # 1h bars
+        # ACTUAL entry is at dT bars after original signal
+        actual_entry_dt = entry_dt + timedelta(hours=dt_bars)
+        actual_entry_time = actual_entry_dt.strftime("%Y-%m-%d %H:%M:%S")
 
-        # Calculate amount, PnL
-        if entry_price > 0:
-            amount = stake / entry_price
+        # Bars since ACTUAL entry (not original)
+        bars = int((now - actual_entry_dt).total_seconds() / 3600)  # 1h bars
+        if bars < 0:
+            bars = 0
+
+        # Calculate amount, PnL from ACTUAL entry price (price_at_dt)
+        # This is our real entry price, not the original!
+        actual_entry_price = price_at_dt
+        if actual_entry_price > 0:
+            amount = stake / actual_entry_price
             if direction == "long":
-                pnl = (current_price - entry_price) * amount
-                pnl_pct = (current_price - entry_price) / entry_price * 100
+                pnl = (current_price - actual_entry_price) * amount
+                pnl_pct = (current_price - actual_entry_price) / actual_entry_price * 100
             else:
-                pnl = (entry_price - current_price) * amount
-                pnl_pct = (entry_price - current_price) / entry_price * 100
+                pnl = (actual_entry_price - current_price) * amount
+                pnl_pct = (actual_entry_price - current_price) / actual_entry_price * 100
         else:
             amount = 0
             pnl = 0
             pnl_pct = 0
 
         filtered_pos = dict(pos)
+        # Store original values for reference
+        filtered_pos["original_entry_time"] = entry_time
+        filtered_pos["original_entry_price"] = entry_price
+        # Set ACTUAL entry values (delayed by dT bars)
+        filtered_pos["entry_time"] = actual_entry_time
+        filtered_pos["entry_price"] = actual_entry_price  # This is price_at_dt!
         filtered_pos["last_price"] = current_price
         filtered_pos["amount"] = amount
         filtered_pos["bars"] = bars
@@ -375,10 +395,44 @@ def filter_trades_by_momentum(trades: list, dt_bars: int, verbose: bool = True,
             is_profitable_at_dt = price_at_dt < entry_price
 
         if is_profitable_at_dt:
-            # Add momentum info to trade
+            # CRITICAL FIX: No look-ahead bias!
+            # When momentum filter triggers at T+dT, that's when we actually enter
+            # So entry_price = price_at_dt, not the original entry_price
+
+            # Calculate the ACTUAL entry time (original + dT bars)
+            try:
+                entry_dt = datetime.fromisoformat(entry_time.replace("Z", "+00:00"))
+                entry_dt = entry_dt.replace(tzinfo=None)
+            except (ValueError, TypeError):
+                try:
+                    entry_dt = datetime.strptime(entry_time[:19], "%Y-%m-%d %H:%M:%S")
+                except (ValueError, TypeError):
+                    entry_dt = None
+
+            if entry_dt:
+                actual_entry_dt = entry_dt + timedelta(hours=dt_bars)
+                actual_entry_time = actual_entry_dt.strftime("%Y-%m-%d %H:%M:%S")
+            else:
+                actual_entry_time = entry_time  # Fallback
+
+            # Calculate ACTUAL PnL from the delayed entry price
+            exit_price = trade["exit_price"]
+            if direction == "long":
+                actual_pnl_pct = (exit_price - price_at_dt) / price_at_dt * 100 if price_at_dt > 0 else 0
+            else:  # short
+                actual_pnl_pct = (price_at_dt - exit_price) / price_at_dt * 100 if price_at_dt > 0 else 0
+
             trade_copy = dict(trade)
+            # Store original values for reference
+            trade_copy["original_entry_time"] = entry_time
+            trade_copy["original_entry_price"] = entry_price
+            trade_copy["original_pnl_pct"] = trade["pnl_pct"]
+            # Set ACTUAL entry values (delayed by dT bars)
+            trade_copy["entry_time"] = actual_entry_time
+            trade_copy["entry_price"] = price_at_dt  # This is now our real entry price!
+            trade_copy["pnl_pct"] = actual_pnl_pct  # Recalculated from delayed entry
             trade_copy["price_at_dt"] = price_at_dt
-            trade_copy["pnl_at_dt_pct"] = (price_at_dt - entry_price) / entry_price * 100
+            trade_copy["pnl_at_dt_pct"] = (price_at_dt - entry_price) / entry_price * 100 if entry_price > 0 else 0
             filtered.append(trade_copy)
             stats["filtered_trades"] += 1
         else:
@@ -535,7 +589,8 @@ def generate_momentum_dashboard(trades: list, stats: dict, dt_bars: int,
 
     <div class="concept-note">
         <strong>Konzept:</strong> Nur Trades aufnehmen, die nach {dt_bars} Bar(s) ({dt_bars}h) im Gewinn sind.<br>
-        <strong>Hypothese:</strong> Trades mit fruhem Momentum haben eine hohere Erfolgsrate.
+        <strong>Entry-Logik:</strong> Signal kommt bei T0 → Warten bis T0+{dt_bars}h → Prüfen ob im Plus → Wenn ja: Entry zum Preis bei T0+{dt_bars}h<br>
+        <strong>Kein Look-Ahead Bias:</strong> Entry-Preis = Preis bei dT, nicht Original-Signal-Preis!
     </div>
 
     <div class="summary-boxes">
@@ -618,26 +673,37 @@ def generate_momentum_dashboard(trades: list, stats: dict, dt_bars: int,
         html += f"""
     <div class="section">
     <h2>Offene Positionen - Momentum Filter ({len(open_positions)})</h2>
+    <p style="color: #666; font-size: 12px;">Signal = Original-Zeitpunkt | Entry = Tatsächlicher Einstieg nach {dt_bars}h Momentum-Check</p>
     <table class="open-positions">
         <tr>
             <th>Symbol</th>
             <th>Direction</th>
             <th>Indicator</th>
             <th>HTF</th>
-            <th>Entry Time</th>
+            <th>Signal Time</th>
+            <th>Signal Price</th>
+            <th>Entry Time<br/>(+{dt_bars}h)</th>
             <th>Entry Price</th>
             <th>Last Price</th>
-            <th>Amount</th>
             <th>Stake</th>
             <th>Bars</th>
-            <th>PnL@dt</th>
             <th>PnL</th>
             <th>PnL%</th>
             <th>Status</th>
         </tr>
 """
         for pos in open_positions:
+            # ACTUAL entry time (delayed by dT bars)
             entry_time = pos.get("entry_time", "")
+            # ORIGINAL signal time
+            original_entry_time = pos.get("original_entry_time", entry_time)
+
+            try:
+                orig_entry_dt = datetime.fromisoformat(original_entry_time.replace("Z", "+00:00"))
+                orig_entry_str = orig_entry_dt.strftime("%Y-%m-%d %H:%M")
+            except (ValueError, TypeError, AttributeError):
+                orig_entry_str = original_entry_time[:16] if original_entry_time else "N/A"
+
             try:
                 entry_dt = datetime.fromisoformat(entry_time.replace("Z", "+00:00"))
                 entry_str = entry_dt.strftime("%Y-%m-%d %H:%M")
@@ -646,21 +712,24 @@ def generate_momentum_dashboard(trades: list, stats: dict, dt_bars: int,
 
             pnl = pos.get("pnl", 0)
             pnl_pct = pos.get("pnl_pct", 0)
-            pnl_at_dt_pct = pos.get("pnl_at_dt_pct", 0)
             pnl_class = "positive" if pnl >= 0 else "negative"
+
+            # Original signal price and actual entry price
+            original_entry_price = pos.get("original_entry_price", pos.get("entry_price", 0))
+            actual_entry_price = pos.get("entry_price", 0)  # This is now price_at_dt
 
             html += f"""        <tr>
             <td>{pos.get('symbol', 'N/A')}</td>
             <td>{pos.get('direction', 'N/A')}</td>
             <td>{pos.get('indicator', 'N/A')}</td>
             <td>{pos.get('htf', 'N/A')}</td>
+            <td>{orig_entry_str}</td>
+            <td>{fmt_price(original_entry_price)}</td>
             <td>{entry_str}</td>
-            <td>{fmt_price(pos.get('entry_price', 0))}</td>
+            <td>{fmt_price(actual_entry_price)}</td>
             <td>{fmt_price(pos.get('last_price', 0))}</td>
-            <td>{fmt_de(pos.get('amount', 0))}</td>
             <td>{fmt_de(pos.get('stake', 0))}</td>
             <td>{pos.get('bars', 0)}</td>
-            <td class="positive">{pnl_at_dt_pct:+.2f}%</td>
             <td class="{pnl_class}">{fmt_de(pnl)}</td>
             <td class="{pnl_class}">{pnl_pct:+.2f}%</td>
             <td>{pos.get('status', 'OPEN')}</td>
@@ -674,13 +743,14 @@ def generate_momentum_dashboard(trades: list, stats: dict, dt_bars: int,
     html += f"""
     <div class="section">
     <h2>Gefilterte Trades ({len(recalculated)})</h2>
+    <p style="color: #666; font-size: 12px;">Signal = Original-Zeitpunkt | Entry = Tatsächlicher Einstieg nach {dt_bars}h Momentum-Check</p>
     <table>
         <tr class="filter-header">
             <th>Symbol</th>
-            <th>Entry Time</th>
+            <th>Signal Time</th>
+            <th>Signal Price</th>
+            <th>Entry Time<br/>(+{dt_bars}h)</th>
             <th>Entry Price</th>
-            <th>Price @ dT</th>
-            <th>PnL @ dT</th>
             <th>Exit Time</th>
             <th>Exit Price</th>
             <th>Stake</th>
@@ -691,13 +761,24 @@ def generate_momentum_dashboard(trades: list, stats: dict, dt_bars: int,
 """
 
     for t in recalculated:
+        # ACTUAL entry time (delayed by dT bars)
         entry_time = t.get("entry_time", "")
+        # ORIGINAL signal time
+        original_entry_time = t.get("original_entry_time", entry_time)
         exit_time = t.get("exit_time", "")
+
+        try:
+            orig_entry_dt = datetime.fromisoformat(original_entry_time.replace("Z", "+00:00"))
+            orig_entry_str = orig_entry_dt.strftime("%Y-%m-%d %H:%M")
+        except (ValueError, TypeError, AttributeError):
+            orig_entry_str = original_entry_time[:16] if original_entry_time else "N/A"
+
         try:
             entry_dt = datetime.fromisoformat(entry_time.replace("Z", "+00:00"))
             entry_str = entry_dt.strftime("%Y-%m-%d %H:%M")
         except (ValueError, TypeError, AttributeError):
             entry_str = entry_time[:16] if entry_time else "N/A"
+
         try:
             exit_dt = datetime.fromisoformat(exit_time.replace("Z", "+00:00"))
             exit_str = exit_dt.strftime("%Y-%m-%d %H:%M")
@@ -708,15 +789,16 @@ def generate_momentum_dashboard(trades: list, stats: dict, dt_bars: int,
         pnl_pct = t.get("pnl_pct", 0)
         pnl_class = "positive" if pnl >= 0 else "negative"
 
-        price_at_dt = t.get("price_at_dt", 0)
-        pnl_at_dt_pct = t.get("pnl_at_dt_pct", 0)
+        # Original signal price and actual entry price (= price_at_dt)
+        original_entry_price = t.get("original_entry_price", t.get("entry_price", 0))
+        actual_entry_price = t.get("entry_price", 0)  # This is now price_at_dt
 
         html += f"""        <tr>
             <td>{t.get('symbol', 'N/A')}</td>
+            <td>{orig_entry_str}</td>
+            <td>{fmt_price(original_entry_price)}</td>
             <td>{entry_str}</td>
-            <td>{fmt_price(t.get('entry_price', 0))}</td>
-            <td>{fmt_price(price_at_dt)}</td>
-            <td class="positive">{pnl_at_dt_pct:+.2f}%</td>
+            <td>{fmt_price(actual_entry_price)}</td>
             <td>{exit_str}</td>
             <td>{fmt_price(t.get('exit_price', 0))}</td>
             <td>{fmt_de(t.get('stake', 0))}</td>
