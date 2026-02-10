@@ -44,6 +44,7 @@ REPORT_DIR = Path("report_html")
 BEST_PARAMS_CSV = REPORT_DIR / "best_params_overall.csv"
 OUTPUT_HTML = REPORT_DIR / "sweep_dashboard.html"
 OUTPUT_JSON = REPORT_DIR / "sweep_dashboard.json"
+OUTPUT_PHASE_PARAMS_CSV = REPORT_DIR / "best_params_per_phase.csv"
 
 # Capital settings - same as paper_trader.py
 START_CAPITAL = 16500.0
@@ -130,16 +131,87 @@ def load_best_params() -> Dict[Tuple[str, str, str], OptimalParams]:
     return params_dict
 
 
-def get_current_market_phase(symbol: str, indicator: str = "supertrend") -> str:
-    """Ermittle aktuelle Marktphase für ein Symbol."""
+def get_daily_market_phases(symbol: str, lookback_days: int = 365) -> pd.DataFrame:
+    """
+    Ermittle Marktphasen auf DAILY Basis für ein Symbol.
+
+    Returns:
+        DataFrame mit Datum und Phase für jeden Tag
+    """
+    from Supertrend_5Min import (
+        download_historical_ohlcv,
+        compute_supertrend,
+        calculate_indicator_slope,
+        determine_phase_from_slope,
+        load_ohlcv_from_cache,
+        save_ohlcv_to_cache,
+    )
+
     try:
-        df = prepare_symbol_dataframe(symbol, use_all_cached_data=False, lookback=200)
-        if df.empty:
-            return PHASE_FLAT
-        return determine_indicator_phase(df, indicator, lookback=10)
+        # Versuche aus Cache zu laden
+        df_daily = load_ohlcv_from_cache(symbol, "1d")
+
+        if df_daily is None or df_daily.empty:
+            # Download Daily Daten
+            from datetime import datetime, timedelta
+            start_date = (datetime.now() - timedelta(days=lookback_days * 2)).strftime("%Y-%m-%d")
+            df_daily = download_historical_ohlcv(symbol, "1d", start_date)
+            if df_daily is not None and not df_daily.empty:
+                save_ohlcv_to_cache(symbol, "1d", df_daily)
+
+        if df_daily is None or df_daily.empty:
+            return pd.DataFrame()
+
+        # Supertrend auf Daily berechnen
+        df_daily = compute_supertrend(df_daily, length=10, factor=3.0)
+
+        # Phase für jeden Tag berechnen
+        phases = []
+        for i in range(10, len(df_daily)):
+            date = df_daily.index[i]
+            # Slope über die letzten 5 Tage
+            values = df_daily["supertrend"].iloc[i-5:i+1]
+            if len(values) >= 2:
+                slope = calculate_indicator_slope(values, lookback=5)
+                phase = determine_phase_from_slope(slope)
+            else:
+                phase = PHASE_FLAT
+            phases.append({"date": date.date() if hasattr(date, 'date') else date, "phase": phase})
+
+        return pd.DataFrame(phases)
     except Exception as e:
-        print(f"[WARN] Phase für {symbol} nicht ermittelbar: {e}")
+        print(f"[WARN] Daily Phase für {symbol} nicht ermittelbar: {e}")
+        return pd.DataFrame()
+
+
+def get_phase_for_date(phase_df: pd.DataFrame, entry_date) -> str:
+    """Finde die Marktphase für ein bestimmtes Datum."""
+    if phase_df.empty:
         return PHASE_FLAT
+
+    try:
+        # Konvertiere entry_date zu date
+        if isinstance(entry_date, str):
+            entry_date = pd.to_datetime(entry_date).date()
+        elif hasattr(entry_date, 'date'):
+            entry_date = entry_date.date()
+
+        # Finde die passende Phase
+        matching = phase_df[phase_df["date"] <= entry_date]
+        if not matching.empty:
+            return matching.iloc[-1]["phase"]
+    except Exception:
+        pass
+
+    return PHASE_FLAT
+
+
+def get_current_market_phase(symbol: str, indicator: str = "supertrend") -> str:
+    """Ermittle aktuelle Marktphase für ein Symbol (auf Daily Basis)."""
+    phase_df = get_daily_market_phases(symbol, lookback_days=30)
+    if phase_df.empty:
+        return PHASE_FLAT
+    return phase_df.iloc[-1]["phase"] if not phase_df.empty else PHASE_FLAT
 
 
 def run_backtest_for_params(
@@ -266,6 +338,9 @@ def run_sweep_dashboard():
     print("=" * 60)
     print("SWEEP DASHBOARD - Optimale Trades mit Marktphasen")
     print("=" * 60)
+    print("  Marktphase: DAILY Charts")
+    print("  Trades: Stundenbasis (1h)")
+    print("=" * 60)
 
     # 1. Lade optimale Parameter
     params_dict = load_best_params()
@@ -275,21 +350,40 @@ def run_sweep_dashboard():
 
     # 2. Ermittle aktuelle Marktphasen und führe Backtests aus
     all_trades = []
-    phase_info = {}  # Symbol -> Phase
+    phase_info = {}  # Symbol -> aktuelle Phase
+    daily_phases = {}  # Symbol -> DataFrame mit täglichen Phasen
     indicator_info = {}  # Key -> Params
 
     indicators = ["supertrend", "htf_crossover", "jma", "kama"]
     directions = ["long", "short"]
 
-    print("\n[1/3] Ermittle Marktphasen und führe Backtests aus...")
+    # Lookback für 1 Jahr Stundendaten
+    LOOKBACK_HOURS = 8760  # 365 Tage * 24 Stunden
+
+    print("\n[1/4] Lade Daily-Phasen für alle Symbole...")
+
+    for symbol in SYMBOLS:
+        print(f"  {symbol}: Lade Daily-Daten...")
+        phase_df = get_daily_market_phases(symbol, lookback_days=400)
+        daily_phases[symbol] = phase_df
+        if not phase_df.empty:
+            current_phase = phase_df.iloc[-1]["phase"]
+            phase_info[symbol] = current_phase
+            # Zähle Phasen
+            up_count = (phase_df["phase"] == PHASE_UP).sum()
+            down_count = (phase_df["phase"] == PHASE_DOWN).sum()
+            flat_count = (phase_df["phase"] == PHASE_FLAT).sum()
+            print(f"    {len(phase_df)} Tage: UP={up_count}, DOWN={down_count}, FLAT={flat_count}")
+            print(f"    Aktuelle Phase: {current_phase}")
+        else:
+            phase_info[symbol] = PHASE_FLAT
+            print(f"    Keine Daily-Daten verfügbar")
+
+    print("\n[2/4] Führe Backtests aus (1 Jahr Stundendaten)...")
 
     for symbol in SYMBOLS:
         print(f"\n  Processing {symbol}...")
-
-        # Aktuelle Phase ermitteln (mit Supertrend als Default)
-        current_phase = get_current_market_phase(symbol, "supertrend")
-        phase_info[symbol] = current_phase
-        print(f"    Phase: {current_phase}")
+        phase_df = daily_phases.get(symbol, pd.DataFrame())
 
         for indicator in indicators:
             for direction in directions:
@@ -300,15 +394,19 @@ def run_sweep_dashboard():
                 params = params_dict[key]
                 indicator_info[key] = params
 
-                # Backtest ausführen
-                trades = run_backtest_for_params(symbol, params, lookback=500)
+                # Backtest mit 1 Jahr Daten
+                trades = run_backtest_for_params(symbol, params, lookback=LOOKBACK_HOURS)
 
-                # Trades anreichern mit Metadaten
+                # Trades anreichern mit Metadaten und DAILY Phase
                 for trade in trades:
+                    entry_time = trade.get("entry_time", "")
+                    # Phase basierend auf Entry-Datum (DAILY)
+                    trade_phase = get_phase_for_date(phase_df, entry_time)
+
                     trade["symbol"] = symbol
                     trade["direction"] = direction
                     trade["indicator"] = params.indicator_display
-                    trade["market_phase"] = current_phase
+                    trade["market_phase"] = trade_phase  # Daily Phase zum Entry-Zeitpunkt
                     trade["param_a"] = params.param_a
                     trade["param_b"] = params.param_b
                     trade["atr_stop_mult"] = params.atr_stop_mult
@@ -320,9 +418,13 @@ def run_sweep_dashboard():
 
                 all_trades.extend(trades)
                 if trades:
-                    print(f"    {indicator} {direction}: {len(trades)} Trades")
+                    # Zähle Trades pro Phase
+                    up_trades = sum(1 for t in trades if get_phase_for_date(phase_df, t.get("entry_time", "")) == PHASE_UP)
+                    down_trades = sum(1 for t in trades if get_phase_for_date(phase_df, t.get("entry_time", "")) == PHASE_DOWN)
+                    flat_trades = sum(1 for t in trades if get_phase_for_date(phase_df, t.get("entry_time", "")) == PHASE_FLAT)
+                    print(f"    {indicator} {direction}: {len(trades)} Trades (UP={up_trades}, DOWN={down_trades}, FLAT={flat_trades})")
 
-    print(f"\n[2/3] Berechne dynamischen Stake für {len(all_trades)} Trades...")
+    print(f"\n[3/4] Berechne dynamischen Stake für {len(all_trades)} Trades...")
 
     # 3. Dynamischen Stake berechnen
     enriched_trades, final_capital = calculate_dynamic_stake_trades(all_trades)
@@ -332,16 +434,20 @@ def run_sweep_dashboard():
 
     print(f"    Final Capital: {final_capital:,.2f} USDT")
 
-    # 4. HTML Dashboard generieren
-    print("\n[3/3] Generiere HTML Dashboard...")
+    # 4. HTML Dashboard und CSV generieren
+    print("\n[4/4] Generiere Dashboard und speichere Parameter...")
     generate_html_dashboard(enriched_trades, phase_info, final_capital)
 
     # 5. JSON speichern
     save_json_summary(enriched_trades, phase_info, final_capital)
 
+    # 6. Phase-Parameter CSV speichern
+    save_phase_params_csv(enriched_trades)
+
     print(f"\n{'=' * 60}")
     print(f"Dashboard generiert: {OUTPUT_HTML}")
     print(f"JSON gespeichert: {OUTPUT_JSON}")
+    print(f"Phase-Parameter: {OUTPUT_PHASE_PARAMS_CSV}")
     print(f"{'=' * 60}")
 
 
@@ -368,6 +474,7 @@ def calculate_best_params_per_phase(trades: List[Dict]) -> Dict[str, List[Dict]]
             "param_a": t.get("param_a", 0),
             "param_b": t.get("param_b", 0),
             "atr_stop_mult": t.get("atr_stop_mult"),
+            "min_hold_bars": t.get("min_hold_bars", 0),
         })
 
     # Berechne Statistiken pro Phase
@@ -395,16 +502,93 @@ def calculate_best_params_per_phase(trades: List[Dict]) -> Dict[str, List[Dict]]
                 row[f"{phase.lower()}_win_rate"] = win_rate
                 row[f"{phase.lower()}_params"] = params
                 row[f"{phase.lower()}_htf"] = htf
+                row[f"{phase.lower()}_param_a"] = phase_trades[0]["param_a"]
+                row[f"{phase.lower()}_param_b"] = phase_trades[0]["param_b"]
+                row[f"{phase.lower()}_atr_stop_mult"] = phase_trades[0]["atr_stop_mult"]
+                row[f"{phase.lower()}_min_hold_bars"] = phase_trades[0]["min_hold_bars"]
             else:
                 row[f"{phase.lower()}_trades"] = 0
                 row[f"{phase.lower()}_pnl"] = 0
                 row[f"{phase.lower()}_win_rate"] = 0
                 row[f"{phase.lower()}_params"] = "-"
                 row[f"{phase.lower()}_htf"] = "-"
+                row[f"{phase.lower()}_param_a"] = None
+                row[f"{phase.lower()}_param_b"] = None
+                row[f"{phase.lower()}_atr_stop_mult"] = None
+                row[f"{phase.lower()}_min_hold_bars"] = None
 
         results.append(row)
 
     return results
+
+
+def save_phase_params_csv(trades: List[Dict]) -> None:
+    """Speichere die besten Parameter pro Marktphase als CSV.
+
+    Spalten: Symbol, Direction, Indicator, Phase, ParamA, ParamB, ATRStopMult,
+             MinHoldBars, HTF, Trades, PnL, WinRate
+    """
+    from collections import defaultdict
+
+    phase_performance = defaultdict(lambda: defaultdict(list))
+
+    for t in trades:
+        symbol = t.get("symbol", "")
+        direction = t.get("direction", "")
+        indicator = t.get("indicator", "")
+        phase = t.get("phase", "") or t.get("market_phase", PHASE_FLAT)
+        pnl = float(t.get("pnl", 0) or 0)
+
+        key = (symbol, direction, indicator)
+        phase_performance[key][phase].append({
+            "pnl": pnl,
+            "htf": t.get("htf", ""),
+            "param_a": t.get("param_a", 0),
+            "param_b": t.get("param_b", 0),
+            "atr_stop_mult": t.get("atr_stop_mult"),
+            "min_hold_bars": t.get("min_hold_bars", 0),
+        })
+
+    # Erstelle flache Liste für CSV
+    rows = []
+    for key, phases in phase_performance.items():
+        symbol, direction, indicator = key
+
+        for phase in [PHASE_UP, PHASE_DOWN, PHASE_FLAT]:
+            phase_trades = phases.get(phase, [])
+            if phase_trades:
+                total_pnl = sum(t["pnl"] for t in phase_trades)
+                winners = sum(1 for t in phase_trades if t["pnl"] > 0)
+                win_rate = (winners / len(phase_trades) * 100) if phase_trades else 0
+                # Parameter vom ersten Trade
+                first = phase_trades[0]
+
+                rows.append({
+                    "Symbol": symbol,
+                    "Direction": direction,
+                    "Indicator": indicator,
+                    "Phase": phase,
+                    "ParamA": first["param_a"],
+                    "ParamB": first["param_b"],
+                    "ATRStopMult": first["atr_stop_mult"] if first["atr_stop_mult"] else "None",
+                    "MinHoldBars": first["min_hold_bars"],
+                    "HTF": first["htf"],
+                    "Trades": len(phase_trades),
+                    "PnL": round(total_pnl, 2),
+                    "WinRate": round(win_rate, 2),
+                })
+
+    # Als DataFrame speichern
+    df = pd.DataFrame(rows)
+
+    # Sortieren
+    df = df.sort_values(["Symbol", "Direction", "Indicator", "Phase"]).reset_index(drop=True)
+
+    # CSV speichern (Semikolon-Separator, Dezimal-Komma für Deutschland)
+    OUTPUT_PHASE_PARAMS_CSV.parent.mkdir(parents=True, exist_ok=True)
+    df.to_csv(OUTPUT_PHASE_PARAMS_CSV, sep=";", decimal=",", index=False)
+    print(f"    Phase-Parameter gespeichert: {OUTPUT_PHASE_PARAMS_CSV}")
+    print(f"    {len(rows)} Einträge (Symbol/Direction/Indicator/Phase Kombinationen)")
 
 
 def generate_html_dashboard(
