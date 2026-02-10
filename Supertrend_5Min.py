@@ -185,6 +185,61 @@ PHASE_FLAT = "Flat"  # Sideways phase - indicator slope is flat/neutral
 # Slope threshold for phase determination (percentage change per bar)
 PHASE_SLOPE_THRESHOLD = 0.0001  # 0.01% - below this is considered "Flat"
 
+# Slope lookback period (number of bars for slope calculation)
+PHASE_SLOPE_LOOKBACK = 5  # Default: 5 bars
+
+# ============================================================================
+# PHASE PARAMETER RANGES - VOLLSTÄNDIGE BEREICHE FÜR OPTIMIERUNG
+# Diese Parameter können optimiert werden für jedes Symbol/Indikator
+# ============================================================================
+PHASE_CONFIG = {
+    # Slope Threshold Werte für Optimierung (% pro Bar)
+    # Niedrigere Werte = empfindlicher, höhere Werte = weniger empfindlich
+    "slope_threshold_values": [
+        0.00005,  # 0.005% - sehr empfindlich
+        0.0001,   # 0.01% - empfindlich (Default)
+        0.00015,  # 0.015% - moderat empfindlich
+        0.0002,   # 0.02% - moderat
+        0.0003,   # 0.03% - weniger empfindlich
+        0.0005,   # 0.05% - robust
+        0.001,    # 0.1% - sehr robust
+    ],
+
+    # Slope Lookback Perioden für Optimierung (Anzahl Bars)
+    # Kürzere Perioden = schnellere Reaktion, längere = glattere Phasenerkennung
+    "slope_lookback_values": [
+        3,   # Sehr schnell - reagiert auf kurzfristige Bewegungen
+        5,   # Schnell (Default) - guter Kompromiss
+        7,   # Moderat - glättet Rauschen
+        10,  # Langsam - ignoriert kleinere Bewegungen
+        14,  # Sehr langsam - nur größere Trends
+        20,  # Trend-basiert - sehr geglättet
+        30,  # Ultra-langsam - nur für langfristige Phasen
+    ],
+
+    # Minimale Phase-Dauer (Bars) - verhindert zu häufiges Umschalten
+    "min_phase_duration_values": [
+        1,   # Keine Mindestdauer - sofortige Reaktion
+        2,   # Minimal - fast sofortige Reaktion
+        3,   # Kurz - erlaubt schnelle Wechsel
+        5,   # Moderat (Default) - verhindert Whipsaw
+        10,  # Lang - stabiler
+        20,  # Sehr lang - nur für große Bewegungen
+    ],
+
+    # Phase Bestätigungs-Bars (wie viele Bars müssen in Phase sein)
+    "phase_confirmation_bars_values": [
+        1,   # Sofortige Bestätigung
+        2,   # Schnelle Bestätigung (Default)
+        3,   # Moderate Bestätigung
+        5,   # Strenge Bestätigung
+    ],
+}
+
+# Aktuelle Defaults für Phase-Parameter
+PHASE_MIN_DURATION = 5  # Mindestens 5 Bars in einer Phase bleiben
+PHASE_CONFIRMATION_BARS = 2  # 2 Bars zur Bestätigung eines Phasenwechsels
+
 # Enable phase-based strategy selection
 USE_PHASE_BASED_SELECTION = True
 
@@ -402,54 +457,137 @@ def determine_market_phase_from_df(df: pd.DataFrame, indicator: str = None, look
         return PHASE_FLAT
 
 
+# ============================================================================
+# FILTER CONFIGURATION - VOLLSTÄNDIGE PARAMETERBEREICHE FÜR OPTIMIERUNG
+# ============================================================================
+
+# --- MOMENTUM FILTER ---
 USE_MOMENTUM_FILTER = False
 MOMENTUM_TYPE = "RSI"
 MOMENTUM_WINDOW = 14
 RSI_LONG_THRESHOLD = 55
 RSI_SHORT_THRESHOLD = 45
 
+MOMENTUM_FILTER_CONFIG = {
+    "momentum_window_values": [7, 10, 14, 20, 28],  # RSI/MOM Periode
+    "rsi_long_threshold_values": [50, 52, 55, 58, 60, 65, 70],  # Long Entry Schwelle
+    "rsi_short_threshold_values": [30, 35, 40, 42, 45, 48, 50],  # Short Entry Schwelle
+}
+
+# --- JMA TREND FILTER ---
 USE_JMA_TREND_FILTER = False  # Disabled to match overall_best_detailed.html backtest settings
 JMA_TREND_LENGTH = 20  # Length for JMA
 JMA_TREND_PHASE = 0  # Phase for JMA
 JMA_TREND_THRESH_UP = 0.0001  # Positive threshold for uptrend
 JMA_TREND_THRESH_DOWN = -0.0001  # Negative threshold for downtrend
 
+JMA_TREND_FILTER_CONFIG = {
+    "jma_trend_length_values": [10, 15, 20, 25, 30, 40, 50],
+    "jma_trend_phase_values": [-50, -25, 0, 25, 50],
+    "jma_trend_thresh_values": [0.00005, 0.0001, 0.0002, 0.0003, 0.0005],
+}
+
+# --- BREAKOUT FILTER ---
 USE_BREAKOUT_FILTER = False
 BREAKOUT_ATR_MULT = 1.5
 BREAKOUT_REQUIRE_DIRECTION = True
 
-# Bull/Bear Trap Filters
+BREAKOUT_FILTER_CONFIG = {
+    "breakout_atr_mult_values": [0.5, 1.0, 1.25, 1.5, 2.0, 2.5, 3.0],
+}
+
+# --- Bull/Bear Trap Filters ---
 USE_MA_SLOPE_FILTER = True  # Require MA to be rising/falling (not just price above/below)
 MA_SLOPE_PERIOD = 5  # Number of bars to check for MA slope direction
 MA_SLOPE_MIN_CHANGE = 0.0001  # Minimum percentage change required for valid slope
 
+MA_SLOPE_FILTER_CONFIG = {
+    "ma_slope_period_values": [3, 5, 7, 10, 14, 20],
+    "ma_slope_min_change_values": [0.00005, 0.0001, 0.00015, 0.0002, 0.0003, 0.0005],
+}
+
 USE_CANDLESTICK_PATTERN_FILTER = True  # Filter out reversal candlestick patterns
 PATTERN_FILTER_SENSITIVITY = "medium"  # "low", "medium", "high" - how strict pattern detection is
+
+CANDLESTICK_FILTER_CONFIG = {
+    "pattern_sensitivity_values": ["low", "medium", "high"],
+}
 
 USE_DIVERGENCE_FILTER = True  # Detect price/RSI divergence (bull traps)
 DIVERGENCE_LOOKBACK = 10  # How many bars to look back for divergence
 DIVERGENCE_RSI_PERIOD = 14  # RSI period for divergence detection
 
+DIVERGENCE_FILTER_CONFIG = {
+    "divergence_lookback_values": [5, 7, 10, 14, 20, 30],
+    "divergence_rsi_period_values": [7, 10, 14, 20, 28],
+}
+
+# ============================================================================
+# TRADING PARAMETERS - VOLLSTÄNDIGE BEREICHE
+# ============================================================================
 START_EQUITY = 14000.0
 RISK_FRACTION = 1
 STAKE_DIVISOR = 8  # Kapital / 8 pro Trade
 FEE_RATE = 0.001
 ATR_WINDOW = 14
-ATR_STOP_MULTS = [None, 1.0, 1.5, 2.0]
 
-# Advanced Exit Strategies - Based on Peak Profit Analysis
+# ATR Stop Loss Multiplikatoren - erweiterte Range
+ATR_STOP_MULTS = [None, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0]
+
+TRADING_PARAMS_CONFIG = {
+    "stake_divisor_values": [4, 6, 8, 10, 12, 16],  # Kapital-Teilung
+    "atr_window_values": [7, 10, 14, 20, 28],
+    "atr_stop_mult_values": [None, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0],
+}
+
+# ============================================================================
+# ADVANCED EXIT STRATEGIES - VOLLSTÄNDIGE PARAMETERBEREICHE
+# ============================================================================
+
+# --- TRAILING STOP ---
 USE_TRAILING_STOP = True  # Enable trailing stop after peak
 TRAILING_STOP_PCT = 0.05  # 5% drawdown from peak triggers exit
 TRAILING_STOP_ACTIVATION_PCT = 0.02  # Activate after 2% profit
 
+TRAILING_STOP_CONFIG = {
+    # Trailing Stop Prozentsatz (Drawdown vom Peak)
+    "trailing_stop_pct_values": [0.02, 0.03, 0.04, 0.05, 0.07, 0.10, 0.15],
+    # Aktivierungs-Schwelle (min Profit bevor Trailing aktiviert)
+    "trailing_stop_activation_pct_values": [0.01, 0.015, 0.02, 0.03, 0.05],
+}
+
+# --- PARTIAL EXIT ---
 USE_PARTIAL_EXIT = True  # Take partial profits at targets
+
+# Standard Partial Exit Levels
 PARTIAL_EXIT_LEVELS = [
     {"profit_pct": 0.03, "exit_pct": 0.30},  # At +3%, sell 30%
     {"profit_pct": 0.05, "exit_pct": 0.30},  # At +5%, sell another 30%
 ]
 
+PARTIAL_EXIT_CONFIG = {
+    # Verschiedene Partial Exit Strategien zum Testen
+    "partial_exit_strategies": [
+        # Strategie 1: Konservativ - kleine Gewinne früh mitnehmen
+        [{"profit_pct": 0.02, "exit_pct": 0.25}, {"profit_pct": 0.04, "exit_pct": 0.25}],
+        # Strategie 2: Standard - ausgewogen
+        [{"profit_pct": 0.03, "exit_pct": 0.30}, {"profit_pct": 0.05, "exit_pct": 0.30}],
+        # Strategie 3: Aggressiv - länger halten
+        [{"profit_pct": 0.05, "exit_pct": 0.25}, {"profit_pct": 0.08, "exit_pct": 0.25}],
+        # Strategie 4: Single Exit - nur ein Level
+        [{"profit_pct": 0.05, "exit_pct": 0.50}],
+        # Strategie 5: Three Levels
+        [{"profit_pct": 0.02, "exit_pct": 0.20}, {"profit_pct": 0.04, "exit_pct": 0.20}, {"profit_pct": 0.07, "exit_pct": 0.20}],
+    ],
+}
+
+# --- PROFIT TARGET ---
 USE_PROFIT_TARGET = True  # Full exit at profit target
 PROFIT_TARGET_PCT = 0.10  # 10% profit = full exit
+
+PROFIT_TARGET_CONFIG = {
+    "profit_target_pct_values": [0.05, 0.07, 0.10, 0.12, 0.15, 0.20, 0.25, 0.30],
+}
 
 BASE_OUT_DIR = "report_html"
 BARS_PER_DAY = max(1, int(1440 / timeframe_to_minutes(TIMEFRAME)))
@@ -464,14 +602,20 @@ OVERALL_FLAT_CSV = os.path.join(BASE_OUT_DIR, "overall_best_flat_trades.csv")
 OVERALL_FLAT_JSON = os.path.join(BASE_OUT_DIR, "overall_best_flat_trades.json")
 GLOBAL_BEST_RESULTS = {}
 
+# ============================================================================
+# INDICATOR PRESETS - VOLLSTÄNDIGE PARAMETERBEREICHE FÜR OPTIMIERUNG
+# Jeder Indikator hat erweiterte Wertebereiche für umfassende Parametersuche
+# ============================================================================
 INDICATOR_PRESETS = {
 	"supertrend": {
 		"display_name": "Supertrend",
 		"slug": "supertrend",
 		"param_a_label": "Length",
 		"param_b_label": "Factor",
-		"param_a_values": [7, 10, 14],
-		"param_b_values": [2.0, 3.0, 4.0],
+		# Length: Anzahl der Bars für ATR-Berechnung (5-20)
+		"param_a_values": [5, 7, 10, 12, 14, 16, 20],
+		# Factor: Multiplikator für ATR-Band (1.5-5.0)
+		"param_b_values": [1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0],
 		"default_a": 10,
 		"default_b": 3.0,
 	},
@@ -480,8 +624,10 @@ INDICATOR_PRESETS = {
 		"slug": "htf_crossover",
 		"param_a_label": "Length",
 		"param_b_label": "Factor",
-		"param_a_values": [7, 10, 14],
-		"param_b_values": [2.0, 3.0, 4.0],
+		# Length: Anzahl der Bars für ATR-Berechnung (5-20)
+		"param_a_values": [5, 7, 10, 12, 14, 16, 20],
+		# Factor: Multiplikator für ATR-Band (1.5-5.0)
+		"param_b_values": [1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0],
 		"default_a": 10,
 		"default_b": 3.0,
 	},
@@ -490,8 +636,10 @@ INDICATOR_PRESETS = {
 		"slug": "psar",
 		"param_a_label": "Step",
 		"param_b_label": "MaxStep",
-		"param_a_values": [0.01, 0.02, 0.03],
-		"param_b_values": [0.1, 0.2, 0.3],
+		# Step: Accelerations-Schritt (0.005-0.05)
+		"param_a_values": [0.005, 0.01, 0.015, 0.02, 0.025, 0.03, 0.04, 0.05],
+		# MaxStep: Maximale Acceleration (0.1-0.5)
+		"param_b_values": [0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.5],
 		"default_a": 0.02,
 		"default_b": 0.2,
 	},
@@ -500,8 +648,10 @@ INDICATOR_PRESETS = {
 		"slug": "jma",
 		"param_a_label": "Length",
 		"param_b_label": "Phase",
-		"param_a_values": [20, 30, 50],
-		"param_b_values": [-50, 0, 50],
+		# Length: Glättungsperiode (5-100)
+		"param_a_values": [5, 10, 15, 20, 25, 30, 40, 50, 60, 80, 100],
+		# Phase: Lag-Anpassung (-100 bis +100, typisch -50 bis +50)
+		"param_b_values": [-100, -75, -50, -25, 0, 25, 50, 75, 100],
 		"default_a": 30,
 		"default_b": 0,
 	},
@@ -510,8 +660,10 @@ INDICATOR_PRESETS = {
 		"slug": "kama",
 		"param_a_label": "Length",
 		"param_b_label": "SlowLength",
-		"param_a_values": [10, 20, 30],
-		"param_b_values": [30, 40, 50],
+		# Length: Efficiency Ratio Periode (5-50)
+		"param_a_values": [5, 8, 10, 12, 15, 20, 25, 30, 40, 50],
+		# SlowLength: Langsame Glättung (20-80)
+		"param_b_values": [20, 25, 30, 35, 40, 45, 50, 60, 70, 80],
 		"default_a": 20,
 		"default_b": 40,
 	},
@@ -520,8 +672,10 @@ INDICATOR_PRESETS = {
 		"slug": "mama",
 		"param_a_label": "FastLimit",
 		"param_b_label": "SlowLimit",
-		"param_a_values": [0.5, 0.4, 0.3],
-		"param_b_values": [0.05, 0.03, 0.01],
+		# FastLimit: Schneller Alpha-Grenzwert (0.2-0.8)
+		"param_a_values": [0.8, 0.7, 0.6, 0.5, 0.45, 0.4, 0.35, 0.3, 0.25, 0.2],
+		# SlowLimit: Langsamer Alpha-Grenzwert (0.005-0.15)
+		"param_b_values": [0.15, 0.1, 0.08, 0.06, 0.05, 0.04, 0.03, 0.02, 0.01, 0.005],
 		"default_a": 0.5,
 		"default_b": 0.05,
 	},
