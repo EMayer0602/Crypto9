@@ -62,7 +62,7 @@ def timeframe_to_minutes(tf_str: str) -> int:
 
 EXCHANGE_ID = "binance"
 TIMEFRAME = "1h"
-LOOKBACK = 9750  # Großzügiger Puffer – wird durch BACKTEST_START_DATE begrenzt
+LOOKBACK = 15000  # ~20 months of hourly bars (back to May 2024)
 BACKTEST_START_DATE = "2025-01-01"  # Backtest beginnt ab diesem Datum
 OHLCV_CACHE_DIR = "ohlcv_cache"  # Directory for persistent OHLCV data storage
 # USDx symbols for optimization sweep
@@ -130,10 +130,10 @@ RUN_PARAMETER_SWEEP = False  # ← Deaktiviert, Parameter bereits berechnet
 RUN_SAVED_PARAMS = False
 RUN_OVERALL_BEST = True  # ← AKTIVIERT für Portfolio-Simulation
 ENABLE_LONGS = True
-ENABLE_SHORTS = False  # Disabled – nur Long-Trades erlaubt
+ENABLE_SHORTS = True  # Enabled for both long and short trading
 
 # === PERFORMANCE OPTIMIZATIONS ===
-SKIP_SYNTHETIC_BARS = True  # Skip synthetic bar creation for backtesting (big speedup!)
+SKIP_SYNTHETIC_BARS = False  # Paper Trader braucht synthetic bars für aktuelle Daten
 PARALLEL_DATA_FETCH = True  # Fetch multiple symbols in parallel
 MAX_PARALLEL_WORKERS = 8    # Number of parallel workers for data fetching
 
@@ -186,7 +186,7 @@ DIVERGENCE_RSI_PERIOD = 14  # RSI period for divergence detection
 
 START_EQUITY = 14000.0
 RISK_FRACTION = 1
-STAKE_DIVISOR = 8  # Kapital / 8 pro Trade
+STAKE_DIVISOR = 14
 FEE_RATE = 0.001
 ATR_WINDOW = 14
 ATR_STOP_MULTS = [None, 1.0, 1.5, 2.0]
@@ -1502,8 +1502,8 @@ def prepare_symbol_dataframe(symbol, use_all_cached_data=False):
 	"""
 	limit = None if use_all_cached_data else LOOKBACK
 	df = fetch_data(symbol, TIMEFRAME, limit)
-	# Backtest-Start-Datum anwenden: alles vor BACKTEST_START_DATE abschneiden
-	if BACKTEST_START_DATE:
+	# Backtest-Start-Datum nur anwenden wenn NICHT im Paper-Trading-Modus
+	if BACKTEST_START_DATE and not use_all_cached_data:
 		start_ts = pd.Timestamp(BACKTEST_START_DATE, tz=BERLIN_TZ)
 		before = len(df)
 		df = df[df.index >= start_ts]
