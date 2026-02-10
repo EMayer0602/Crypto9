@@ -129,7 +129,7 @@ RUN_PARAMETER_SWEEP = False  # ← Deaktiviert, Parameter bereits berechnet
 RUN_SAVED_PARAMS = False
 RUN_OVERALL_BEST = True  # ← AKTIVIERT für Portfolio-Simulation
 ENABLE_LONGS = True
-ENABLE_SHORTS = True  # Enabled for both long and short trading
+ENABLE_SHORTS = False  # Disabled – nur Long-Trades erlaubt
 
 # === PERFORMANCE OPTIMIZATIONS ===
 SKIP_SYNTHETIC_BARS = True  # Skip synthetic bar creation for backtesting (big speedup!)
