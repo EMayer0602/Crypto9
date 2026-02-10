@@ -245,13 +245,12 @@ def build_market_phase_chart(symbol, df_daily, df_jma, df_kama, df_supertrend):
     """
     Build a 2-row chart:
       Row 1: 1D Candlesticks + JMA + KAMA + Supertrend lines
-      Row 2: Market phases (Up/Down/Flat) as horizontal colored bars per indicator
-             Uses go.Bar traces (not add_shape) for reliable rendering.
+      Row 2: Market phases (Up/Down/Flat) as go.Heatmap – zuverlässig, keine Diagonalen
     """
     fig = make_subplots(
         rows=2, cols=1,
         shared_xaxes=True,
-        vertical_spacing=0.06,
+        vertical_spacing=0.08,
         row_heights=[0.60, 0.40],
         subplot_titles=(
             f"{symbol} – 1D Candlesticks + JMA / KAMA / Supertrend",
@@ -292,7 +291,7 @@ def build_market_phase_chart(symbol, df_daily, df_jma, df_kama, df_supertrend):
         line=dict(color="#e74c3c", width=2, dash="dot"),
     ), row=1, col=1)
 
-    # ── Row 2: Market Phases als go.Bar (keine add_shape Diagonalen!) ─
+    # ── Row 2: Market Phases als Heatmap ─────────────────────────────
     phase_jma = classify_phase_by_slope(df_jma["jma"], smooth_window=5, threshold_pct=0.001)
     phase_kama = classify_phase_by_slope(df_kama["kama"], smooth_window=5, threshold_pct=0.001)
     phase_st = classify_phase_by_slope(df_supertrend["supertrend"], smooth_window=3, threshold_pct=0.002)
@@ -308,79 +307,55 @@ def build_market_phase_chart(symbol, df_daily, df_jma, df_kama, df_supertrend):
         elif down_count >= 2:
             phase_consensus[idx] = "Down"
 
-    # Farbzuordnung pro Indikator (passend zu den Linien im oberen Chart)
-    color_schemes = {
-        "JMA":        {"Up": "#f39c12", "Down": "#a04000", "Flat": "#5a4e3a"},
-        "KAMA":       {"Up": "#3498db", "Down": "#1a5276", "Flat": "#2c3e50"},
-        "Supertrend": {"Up": "#27ae60", "Down": "#e74c3c", "Flat": "#5d6d7e"},
-        "Consensus":  {"Up": "#00ff88", "Down": "#ff3366", "Flat": "#444444"},
-    }
+    # Phasen → Zahlenwerte: Down=0, Flat=1, Up=2
+    phase_map = {"Down": 0, "Flat": 1, "Up": 2}
 
-    indicators = [
-        ("JMA",        phase_jma,       4),
-        ("KAMA",       phase_kama,      3),
-        ("Supertrend", phase_st,        2),
-        ("Consensus",  phase_consensus, 1),
+    indicators_data = [
+        ("Consensus (2/3)", phase_consensus),
+        ("Supertrend", phase_st),
+        ("KAMA", phase_kama),
+        ("JMA", phase_jma),
     ]
 
-    # 1 Tag in Millisekunden für Bar-Breite
-    one_day_ms = 24 * 60 * 60 * 1000
+    z_matrix = []
+    text_matrix = []
+    y_labels = []
 
-    for ind_name, phases, y_level in indicators:
-        colors = color_schemes[ind_name]
-        bar_colors = [colors.get(p, "#444444") for p in phases.values]
-        hover_texts = [f"{ind_name}: {p}" for p in phases.values]
+    for name, phases in indicators_data:
+        row_z = [phase_map.get(p, 1) for p in phases.values]
+        row_text = [f"{name}: {p}" for p in phases.values]
+        z_matrix.append(row_z)
+        text_matrix.append(row_text)
+        y_labels.append(name)
 
-        fig.add_trace(go.Bar(
-            x=phases.index,
-            y=[0.7] * len(phases),
-            base=[y_level - 0.35] * len(phases),
-            marker_color=bar_colors,
-            marker_line_width=0,
-            width=one_day_ms,
-            showlegend=False,
-            hovertext=hover_texts,
-            hoverinfo="text+x",
-            name=ind_name,
-        ), row=2, col=1)
-
-    # Y-axis Labels
-    fig.update_yaxes(
-        tickvals=[1, 2, 3, 4],
-        ticktext=["Consensus (2/3)", "Supertrend", "KAMA", "JMA"],
-        range=[0.3, 4.7],
-        fixedrange=True,
-        row=2, col=1,
-    )
-
-    # Legende für Phasen-Farben
-    legend_items = [
-        ("Up (Aufwärts)", "#27ae60"),
-        ("Down (Abwärts)", "#e74c3c"),
-        ("Flat (Seitwärts)", "#7f8c8d"),
-        ("Consensus Up", "#00ff88"),
-        ("Consensus Down", "#ff3366"),
-    ]
-    for label, color in legend_items:
-        fig.add_trace(go.Scatter(
-            x=[None], y=[None],
-            mode="markers",
-            marker=dict(size=12, color=color, symbol="square"),
-            name=label, showlegend=True,
-        ), row=2, col=1)
+    fig.add_trace(go.Heatmap(
+        x=df_daily.index,
+        y=y_labels,
+        z=z_matrix,
+        text=text_matrix,
+        hovertemplate="%{text}<extra></extra>",
+        colorscale=[
+            [0.0, "#e74c3c"],   # Down = rot
+            [0.5, "#7f8c8d"],   # Flat = grau
+            [1.0, "#27ae60"],   # Up   = grün
+        ],
+        showscale=False,
+        xgap=1,
+        ygap=4,
+        zmin=0,
+        zmax=2,
+    ), row=2, col=1)
 
     fig.update_layout(
         height=900,
         showlegend=True,
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         xaxis=dict(rangeslider=dict(visible=False)),
-        xaxis2=dict(rangeslider=dict(visible=True, thickness=0.04), type="date"),
-        bargap=0,
-        bargroupgap=0,
+        xaxis2=dict(type="date"),
         template="plotly_dark",
     )
     fig.update_yaxes(title_text="Preis", row=1, col=1)
-    fig.update_yaxes(title_text="Indikator", row=2, col=1)
+    fig.update_yaxes(title_text="Indikator", fixedrange=True, row=2, col=1)
     fig.update_xaxes(title_text="Datum", row=2, col=1)
 
     return fig
