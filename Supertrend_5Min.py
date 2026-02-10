@@ -215,7 +215,7 @@ CLEAR_BASE_OUTPUT_ON_SWEEP = True
 
 # Output file paths
 OVERALL_SUMMARY_HTML = os.path.join(BASE_OUT_DIR, "overall_best_results.html")
-OVERALL_PARAMS_CSV = os.path.join(BASE_OUT_DIR, "best_params_overall.csv")
+OVERALL_PARAMS_CSV = os.path.join(BASE_OUT_DIR, "best_params_overall_bck.csv")
 OVERALL_DETAILED_HTML = os.path.join(BASE_OUT_DIR, "overall_best_detailed.html")
 OVERALL_FLAT_CSV = os.path.join(BASE_OUT_DIR, "overall_best_flat_trades.csv")
 OVERALL_FLAT_JSON = os.path.join(BASE_OUT_DIR, "overall_best_flat_trades.json")

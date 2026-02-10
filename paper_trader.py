@@ -78,7 +78,7 @@ SIMULATION_OPEN_POSITIONS_JSON = "paper_trading_actual_trades.json"
 # Default paths - will be overridden by get_report_dir() for testnet
 REPORT_DIR = "report_html"
 SIMULATION_SUMMARY_HTML = os.path.join("report_html", "trading_summary.html")
-SIMULATION_SUMMARY_JSON = os.path.join("report_html", "trading_summary.json")
+SIMULATION_SUMMARY_JSON = os.path.join("report_html", "trading_summary_bck.json")
 
 
 def get_report_dir(use_testnet: bool = False) -> str:
