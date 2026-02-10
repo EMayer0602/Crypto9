@@ -197,16 +197,35 @@ def generate_sweep_dashboard():
 #  MARKET PHASE REPORT
 # =====================================================================
 
-def classify_market_phase(trend_series):
+def classify_phase_by_slope(indicator_series, smooth_window=5, threshold_pct=0.001):
     """
-    Classify market phases from a trend series.
-    trend == 1  → 'Up'
-    trend == -1 → 'Down'
-    otherwise   → 'Flat'
+    Slope-basierte Marktphasen-Klassifikation.
+
+    Berechnet die prozentuale Steigung der Indikator-Linie und klassifiziert:
+      slope_pct >  threshold → Up  (Aufwärtstrend)
+      slope_pct < -threshold → Down (Abwärtstrend)
+      sonst                  → Flat (Seitwärts / Konsolidierung)
+
+    Args:
+        indicator_series: pd.Series mit Indikator-Werten (z.B. JMA, KAMA, Supertrend)
+        smooth_window: Glättung der Steigung (Rolling Mean), verhindert Rauschen
+        threshold_pct: Schwellwert für Up/Down (0.001 = 0.1% Änderung pro Bar)
     """
-    phases = pd.Series("Flat", index=trend_series.index)
-    phases[trend_series == 1] = "Up"
-    phases[trend_series == -1] = "Down"
+    # Steigung berechnen (erste Ableitung)
+    raw_slope = indicator_series.diff()
+
+    # Prozentuale Steigung relativ zum Preisniveau
+    slope_pct = raw_slope / indicator_series.shift(1)
+
+    # Glätten um Rauschen zu reduzieren
+    if smooth_window > 1:
+        slope_pct = slope_pct.rolling(window=smooth_window, min_periods=1).mean()
+
+    # Klassifikation
+    phases = pd.Series("Flat", index=indicator_series.index)
+    phases[slope_pct > threshold_pct] = "Up"
+    phases[slope_pct < -threshold_pct] = "Down"
+
     return phases
 
 
@@ -272,10 +291,10 @@ def build_market_phase_chart(symbol, df_daily, df_jma, df_kama, df_supertrend):
         line=dict(color="#e74c3c", width=2, dash="dot"),
     ), row=1, col=1)
 
-    # ── Row 2: Market Phases ─────────────────────────────────────────
-    phase_jma = classify_market_phase(df_jma["jma_trend"])
-    phase_kama = classify_market_phase(df_kama["kama_trend"])
-    phase_st = classify_market_phase(df_supertrend["st_trend"])
+    # ── Row 2: Market Phases (slope-basiert für echte Flat-Erkennung) ─
+    phase_jma = classify_phase_by_slope(df_jma["jma"], smooth_window=5, threshold_pct=0.001)
+    phase_kama = classify_phase_by_slope(df_kama["kama"], smooth_window=5, threshold_pct=0.001)
+    phase_st = classify_phase_by_slope(df_supertrend["supertrend"], smooth_window=3, threshold_pct=0.002)
 
     color_map = {"Up": "#27ae60", "Down": "#e74c3c", "Flat": "#7f8c8d"}
     indicators = [
