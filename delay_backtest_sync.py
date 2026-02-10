@@ -10,6 +10,7 @@ Konzept:
 
 Verwendung:
     python delay_backtest_sync.py --delays 5,10,15,30,45
+    python delay_backtest_sync.py --hours 0,1,2,3,4,5,6 --start 2025-12-01
 """
 
 import argparse
@@ -458,12 +459,21 @@ def generate_dashboard(results: list, original_win_rate: float, output_path: Pat
 def main():
     parser = argparse.ArgumentParser(description="Delay Backtest mit synchronem Exit")
     parser.add_argument("--start", type=str, default="2025-12-01")
-    parser.add_argument("--delays", type=str, default="5,10,15,30,45")
+    parser.add_argument("--delays", type=str, default=None, help="Delays in minutes (e.g., 5,10,15,30,45)")
+    parser.add_argument("--hours", type=str, default=None, help="Delays in hours (e.g., 0,1,2,3,4,5,6)")
     parser.add_argument("--exchange", type=str, default="hyperliquid")
     parser.add_argument("--output", type=str, default="report_html/delay_sync_dashboard.html")
     args = parser.parse_args()
 
-    delays = [int(x.strip()) for x in args.delays.split(",")]
+    # Parse delays from --hours or --delays
+    if args.hours is not None:
+        # Convert hours to minutes
+        delays = [int(x.strip()) * 60 for x in args.hours.split(",")]
+    elif args.delays is not None:
+        delays = [int(x.strip()) for x in args.delays.split(",")]
+    else:
+        # Default: use minutes
+        delays = [5, 10, 15, 30, 45]
 
     # Sicherstellen dass 0 (Original) immer am Anfang steht
     if 0 not in delays:
