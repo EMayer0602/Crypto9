@@ -30,7 +30,7 @@ RELEVANT_ASSETS = {"BTC", "ETH", "SOL", "XRP", "LINK", "BNB", "SUI", "ZEC", "LUN
 # Only show trades from this date onwards (set to None to show all)
 TRADES_SINCE_DATE = datetime(2026, 1, 2, tzinfo=timezone.utc)  # Today
 
-OUTPUT_DIR = Path("report_testnet")
+OUTPUT_DIR = Path("report_html")
 
 
 def sign_request(params: dict, secret: str) -> str:
@@ -183,8 +183,18 @@ def match_trades(orders: list, symbol: str) -> list:
     return matched
 
 
-def generate_dashboard():
-    """Generate HTML dashboard."""
+def generate_dashboard(start_date=None, output_dir=None, german=False):
+    """Generate HTML dashboard.
+
+    Args:
+        start_date: Optional YYYY-MM-DD string to filter trades from this date.
+        output_dir: Optional Path/str for output directory (default: report_html).
+        german: If True, generate dashboard_de.html instead of dashboard.html.
+    """
+    global TRADES_SINCE_DATE
+    if start_date is not None:
+        TRADES_SINCE_DATE = datetime.strptime(start_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    out_dir = Path(output_dir) if output_dir else OUTPUT_DIR
     print("Fetching testnet data...")
 
     # Get balances
@@ -373,16 +383,39 @@ def generate_dashboard():
 </html>"""
 
     # Write to file
-    OUTPUT_DIR.mkdir(exist_ok=True)
-    output_path = OUTPUT_DIR / "dashboard.html"
+    out_dir.mkdir(exist_ok=True)
+    filename = "dashboard_de.html" if german else "dashboard.html"
+    output_path = out_dir / filename
     output_path.write_text(html, encoding="utf-8")
     print(f"Dashboard saved to: {output_path}")
     return output_path
 
 
 if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="Generate Testnet Trading Dashboard")
+    parser.add_argument("--loop", action="store_true", help="Run continuously in a loop")
+    parser.add_argument("--interval", type=int, default=60, help="Seconds between updates (default: 60)")
+    parser.add_argument("--start", type=str, default=None, help="Filter trades from this date (YYYY-MM-DD)")
+    args = parser.parse_args()
+
     if not API_KEY or not API_SECRET:
         print("Error: BINANCE_API_KEY_TEST or BINANCE_API_SECRET_TEST not set")
+    elif args.loop:
+        print(f"[Dashboard] Running in loop mode, interval={args.interval}s")
+        while True:
+            try:
+                generate_dashboard(start_date=args.start, german=False)
+                generate_dashboard(start_date=args.start, german=True)
+                print(f"[Dashboard] Next update in {args.interval}s...")
+                time.sleep(args.interval)
+            except KeyboardInterrupt:
+                print("\n[Dashboard] Stopped.")
+                break
+            except Exception as e:
+                print(f"[Dashboard] Error: {e}, retrying in {args.interval}s...")
+                time.sleep(args.interval)
     else:
-        path = generate_dashboard()
+        path = generate_dashboard(start_date=args.start, german=False)
+        generate_dashboard(start_date=args.start, german=True)
         print(f"\nOpen with: start {path}")
