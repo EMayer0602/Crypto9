@@ -217,15 +217,22 @@ def run_backtest(trades: list, delay_min: int, ohlcv_cache: dict) -> dict:
     wins = sum(1 for t in passed_trades if t["pnl_pct"] > 0)
     win_rate = wins / passed * 100 if passed > 0 else 0
 
-    # Equity-Kurve berechnen
+    # Equity-Kurve berechnen und Stake/Amount/Kapital pro Trade speichern
     passed_trades.sort(key=lambda x: x["exit_time"])
     capital = START_CAPITAL
     equity_curve = []
 
     for t in passed_trades:
         stake = capital / MAX_POSITIONS
+        amount = stake / t["entry_price"] if t["entry_price"] > 0 else 0
         pnl = stake * (t["pnl_pct"] / 100)
         capital += pnl
+
+        # Speichere Stake, Amount und Kapital im Trade
+        t["stake"] = stake
+        t["amount"] = amount
+        t["capital_after"] = capital
+
         equity_curve.append({
             "time": t["exit_time"],
             "equity": capital,
@@ -404,28 +411,33 @@ def generate_dashboard(results: list, original_win_rate: float, output_path: Pat
             <th>Symbol</th>
             <th>Entry Time</th>
             <th>Exit Time</th>
-            <th>Signal Price</th>
             <th>Entry Price</th>
             <th>Exit Price</th>
-            <th>Price Δ</th>
+            <th>Stake</th>
+            <th>Amount</th>
             <th>PnL %</th>
+            <th>Kapital</th>
         </tr>
 """
         for i, t in enumerate(trades_list, 1):
             pnl_class = "pos" if t["pnl_pct"] > 0 else "neg"
             entry_time_str = t["entry_time"].strftime("%Y-%m-%d %H:%M") if hasattr(t["entry_time"], "strftime") else str(t["entry_time"])[:16]
             exit_time_str = t["exit_time"].strftime("%Y-%m-%d %H:%M") if hasattr(t["exit_time"], "strftime") else str(t["exit_time"])[:16]
+            stake = t.get("stake", 0)
+            amount = t.get("amount", 0)
+            capital_after = t.get("capital_after", 0)
 
             html += f"""        <tr>
             <td>{i}</td>
             <td style="text-align:left;">{t['symbol']}</td>
             <td>{entry_time_str}</td>
             <td>{exit_time_str}</td>
-            <td>{t['signal_price']:.6g}</td>
             <td>{t['entry_price']:.6g}</td>
             <td>{t['exit_price']:.6g}</td>
-            <td class="pos">+{t['price_change_pct']:.2f}%</td>
+            <td>{stake:,.2f}</td>
+            <td>{amount:,.6g}</td>
             <td class="{pnl_class}">{t['pnl_pct']:+.2f}%</td>
+            <td>{capital_after:,.2f}</td>
         </tr>
 """
 
