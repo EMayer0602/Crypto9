@@ -245,7 +245,8 @@ def build_market_phase_chart(symbol, df_daily, df_jma, df_kama, df_supertrend):
     """
     Build a 2-row chart:
       Row 1: 1D Candlesticks + JMA + KAMA + Supertrend lines
-      Row 2: Market phases (Up/Down/Flat) for each indicator as colored bands
+      Row 2: Market phases (Up/Down/Flat) as horizontal colored bars per indicator
+             Uses go.Bar traces (not add_shape) for reliable rendering.
     """
     fig = make_subplots(
         rows=2, cols=1,
@@ -291,75 +292,68 @@ def build_market_phase_chart(symbol, df_daily, df_jma, df_kama, df_supertrend):
         line=dict(color="#e74c3c", width=2, dash="dot"),
     ), row=1, col=1)
 
-    # ── Row 2: Market Phases (slope-basiert für echte Flat-Erkennung) ─
+    # ── Row 2: Market Phases als go.Bar (keine add_shape Diagonalen!) ─
     phase_jma = classify_phase_by_slope(df_jma["jma"], smooth_window=5, threshold_pct=0.001)
     phase_kama = classify_phase_by_slope(df_kama["kama"], smooth_window=5, threshold_pct=0.001)
     phase_st = classify_phase_by_slope(df_supertrend["supertrend"], smooth_window=3, threshold_pct=0.002)
 
-    # Consensus berechnen: Mehrheitsentscheidung der 3 Indikatoren
+    # Consensus: Mehrheitsentscheidung der 3 Indikatoren
     phase_consensus = pd.Series("Flat", index=df_daily.index)
     for idx in df_daily.index:
-        votes = []
-        for ph in (phase_jma, phase_kama, phase_st):
-            if idx in ph.index:
-                votes.append(ph[idx])
+        votes = [phase_jma.get(idx, "Flat"), phase_kama.get(idx, "Flat"), phase_st.get(idx, "Flat")]
         up_count = votes.count("Up")
         down_count = votes.count("Down")
         if up_count >= 2:
             phase_consensus[idx] = "Up"
         elif down_count >= 2:
             phase_consensus[idx] = "Down"
-        # sonst bleibt "Flat" (kein Konsens)
 
-    # Farbschemata pro Indikator – eigene Farbtöne, die zur Linie im oberen Chart passen
-    # JMA: Orange-Töne (Linie = #f39c12)
-    jma_colors = {"Up": "#f39c12", "Down": "#e67e22", "Flat": "#5a4e3a"}
-    # KAMA: Blau-Töne (Linie = #3498db)
-    kama_colors = {"Up": "#3498db", "Down": "#2471a3", "Flat": "#2c3e50"}
-    # Supertrend: Rot/Grün-Töne (Linie = #e74c3c)
-    st_colors = {"Up": "#27ae60", "Down": "#e74c3c", "Flat": "#5d6d7e"}
-    # Consensus: Kräftige Farben
-    cons_colors = {"Up": "#00ff88", "Down": "#ff3366", "Flat": "#555555"}
+    # Farbzuordnung pro Indikator (passend zu den Linien im oberen Chart)
+    color_schemes = {
+        "JMA":        {"Up": "#f39c12", "Down": "#a04000", "Flat": "#5a4e3a"},
+        "KAMA":       {"Up": "#3498db", "Down": "#1a5276", "Flat": "#2c3e50"},
+        "Supertrend": {"Up": "#27ae60", "Down": "#e74c3c", "Flat": "#5d6d7e"},
+        "Consensus":  {"Up": "#00ff88", "Down": "#ff3366", "Flat": "#444444"},
+    }
 
     indicators = [
-        ("JMA", phase_jma, 4, jma_colors, "#f39c12"),
-        ("KAMA", phase_kama, 3, kama_colors, "#3498db"),
-        ("Supertrend", phase_st, 2, st_colors, "#e74c3c"),
-        ("Consensus", phase_consensus, 1, cons_colors, "#ffffff"),
+        ("JMA",        phase_jma,       4),
+        ("KAMA",       phase_kama,      3),
+        ("Supertrend", phase_st,        2),
+        ("Consensus",  phase_consensus, 1),
     ]
 
-    for ind_name, phases, y_level, color_map_ind, border_color in indicators:
-        dates = phases.index.tolist()
-        values = phases.values.tolist()
+    # 1 Tag in Millisekunden für Bar-Breite
+    one_day_ms = 24 * 60 * 60 * 1000
 
-        i = 0
-        while i < len(dates):
-            current_phase = values[i]
-            j = i
-            while j < len(dates) and values[j] == current_phase:
-                j += 1
-            x0 = dates[i]
-            x1 = dates[j - 1] if j - 1 < len(dates) else dates[-1]
-            fig.add_shape(
-                type="rect",
-                x0=x0, x1=x1,
-                y0=y_level - 0.35, y1=y_level + 0.35,
-                fillcolor=color_map_ind.get(current_phase, "#555555"),
-                opacity=0.8,
-                line=dict(color=border_color, width=1),
-                row=2, col=1,
-            )
-            i = j
+    for ind_name, phases, y_level in indicators:
+        colors = color_schemes[ind_name]
+        bar_colors = [colors.get(p, "#444444") for p in phases.values]
+        hover_texts = [f"{ind_name}: {p}" for p in phases.values]
 
-    # Y-axis labels für Phase-Chart
+        fig.add_trace(go.Bar(
+            x=phases.index,
+            y=[0.7] * len(phases),
+            base=[y_level - 0.35] * len(phases),
+            marker_color=bar_colors,
+            marker_line_width=0,
+            width=one_day_ms,
+            showlegend=False,
+            hovertext=hover_texts,
+            hoverinfo="text+x",
+            name=ind_name,
+        ), row=2, col=1)
+
+    # Y-axis Labels
     fig.update_yaxes(
         tickvals=[1, 2, 3, 4],
         ticktext=["Consensus (2/3)", "Supertrend", "KAMA", "JMA"],
         range=[0.3, 4.7],
+        fixedrange=True,
         row=2, col=1,
     )
 
-    # Legende: Phase-Typen
+    # Legende für Phasen-Farben
     legend_items = [
         ("Up (Aufwärts)", "#27ae60"),
         ("Down (Abwärts)", "#e74c3c"),
@@ -372,8 +366,7 @@ def build_market_phase_chart(symbol, df_daily, df_jma, df_kama, df_supertrend):
             x=[None], y=[None],
             mode="markers",
             marker=dict(size=12, color=color, symbol="square"),
-            name=label,
-            showlegend=True,
+            name=label, showlegend=True,
         ), row=2, col=1)
 
     fig.update_layout(
@@ -382,6 +375,8 @@ def build_market_phase_chart(symbol, df_daily, df_jma, df_kama, df_supertrend):
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         xaxis=dict(rangeslider=dict(visible=False)),
         xaxis2=dict(rangeslider=dict(visible=True, thickness=0.04), type="date"),
+        bargap=0,
+        bargroupgap=0,
         template="plotly_dark",
     )
     fig.update_yaxes(title_text="Preis", row=1, col=1)
