@@ -326,6 +326,12 @@ def update_cache_for_trading(
 # Source of truth for trade signals (always report_html)
 SIGNAL_SOURCE_DIR = "report_html"
 BEST_PARAMS_CSV = st.OVERALL_PARAMS_CSV
+PHASE_PARAMS_CSV = st.PHASE_PARAMS_CSV  # Phase-based best params
+
+# Phase-based strategy execution settings
+USE_PHASE_BASED_EXECUTION = True  # Enable phase-based indicator selection
+PHASE_LOOKBACK_BARS = 10  # Bars to use for phase detection
+
 START_TOTAL_CAPITAL = 16_500.0
 MAX_OPEN_POSITIONS = 10
 STAKE_DIVISOR = 10  # stake = current total_capital / STAKE_DIVISOR = 16500/10 = 1650
@@ -1166,6 +1172,146 @@ def select_best_indicator_per_symbol(df: pd.DataFrame) -> pd.DataFrame:
     sorted_df = df.sort_values("FinalEquity", ascending=False)
     reduced_df = sorted_df.drop_duplicates(subset=group_cols, keep="first")
     return reduced_df.reset_index(drop=True)
+
+
+# ============================================================================
+# PHASE-BASED STRATEGY SELECTION
+# ============================================================================
+
+def load_phase_based_rows(active_indicators: Optional[List[str]] = None) -> pd.DataFrame:
+    """
+    Load phase-based best parameters from CSV.
+
+    Returns DataFrame with columns: Symbol, Direction, Phase, Indicator, Params...
+    Each row represents the best indicator for a specific Symbol+Direction+Phase combo.
+    """
+    if not os.path.exists(PHASE_PARAMS_CSV):
+        print(f"[Phase] Phase params CSV not found: {PHASE_PARAMS_CSV}")
+        return pd.DataFrame()
+
+    try:
+        df = pd.read_csv(PHASE_PARAMS_CSV, sep=";", decimal=",")
+    except Exception as exc:
+        print(f"[Phase] Failed to load phase params: {exc}")
+        return pd.DataFrame()
+
+    if df.empty:
+        return df
+
+    if active_indicators:
+        allowed = {item.strip().lower() for item in active_indicators if item}
+        df = df[df["Indicator"].str.lower().isin(allowed)]
+
+    return df
+
+
+def get_current_market_phase(symbol: str, indicator: str = None) -> str:
+    """
+    Determine the current market phase for a symbol.
+
+    Uses indicator slope to determine: Up, Down, or Flat
+
+    Args:
+        symbol: Trading symbol (e.g., "BTC/USDC")
+        indicator: Optional specific indicator to use for phase detection
+
+    Returns:
+        Phase string: "Up", "Down", or "Flat"
+    """
+    try:
+        # Fetch recent data for the symbol
+        df = st.prepare_symbol_dataframe(symbol, lookback=PHASE_LOOKBACK_BARS * 2)
+
+        if df.empty:
+            return st.PHASE_FLAT
+
+        # Use the indicator-specific phase detection
+        if indicator:
+            return st.determine_indicator_phase(df, indicator, lookback=PHASE_LOOKBACK_BARS)
+
+        # Default: use HTF trend if available
+        return st.determine_market_phase_from_df(df, indicator=None, lookback=PHASE_LOOKBACK_BARS)
+
+    except Exception as exc:
+        print(f"[Phase] Error detecting phase for {symbol}: {exc}")
+        return st.PHASE_FLAT
+
+
+def select_strategy_for_phase(
+    phase_df: pd.DataFrame,
+    symbol: str,
+    direction: str,
+    current_phase: str
+) -> Optional[pd.Series]:
+    """
+    Select the best strategy for the current phase.
+
+    Args:
+        phase_df: DataFrame with phase-based params
+        symbol: Trading symbol
+        direction: Trade direction (Long/Short)
+        current_phase: Current market phase (Up/Down/Flat)
+
+    Returns:
+        Series with strategy params, or None if not found
+    """
+    if phase_df.empty:
+        return None
+
+    # Filter for this symbol + direction + phase
+    mask = (
+        (phase_df["Symbol"] == symbol) &
+        (phase_df["Direction"].str.capitalize() == direction.capitalize()) &
+        (phase_df["Phase"] == current_phase)
+    )
+
+    matching = phase_df[mask]
+
+    if matching.empty:
+        # Fallback: try without phase filter
+        mask_no_phase = (
+            (phase_df["Symbol"] == symbol) &
+            (phase_df["Direction"].str.capitalize() == direction.capitalize())
+        )
+        matching = phase_df[mask_no_phase]
+
+        if matching.empty:
+            return None
+
+        # Return first (should be best by FinalEquity)
+        return matching.iloc[0]
+
+    return matching.iloc[0]
+
+
+def get_all_strategies_for_symbol(
+    phase_df: pd.DataFrame,
+    symbol: str,
+    direction: str
+) -> pd.DataFrame:
+    """
+    Get all phase-based strategies for a symbol (for parallel execution).
+
+    All indicators need to run in parallel so their values are calculated.
+    Only the signals from the phase-appropriate indicator are used for trading.
+
+    Args:
+        phase_df: DataFrame with phase-based params
+        symbol: Trading symbol
+        direction: Trade direction
+
+    Returns:
+        DataFrame with all strategies for this symbol
+    """
+    if phase_df.empty:
+        return pd.DataFrame()
+
+    mask = (
+        (phase_df["Symbol"] == symbol) &
+        (phase_df["Direction"].str.capitalize() == direction.capitalize())
+    )
+
+    return phase_df[mask].copy()
 
 
 def determine_position_size(symbol: str, state: Dict, fixed_stake: Optional[float], direction: str = "long") -> float:
@@ -3965,8 +4111,47 @@ def main(
     if use_testnet:
         best_df = remap_best_rows_for_testnet(best_df)
         print(f"[DEBUG] After remap: symbols = {best_df['Symbol'].unique().tolist() if not best_df.empty else []}")
-    best_df = select_best_indicator_per_symbol(best_df)
-    print(f"[DEBUG] After select_best: {len(best_df)} rows")
+    # ========================================================================
+    # PHASE-BASED STRATEGY SELECTION
+    # ========================================================================
+    if USE_PHASE_BASED_EXECUTION:
+        # Try to load phase-based params
+        phase_df = load_phase_based_rows(active_indicators=allowed_indicators)
+        if not phase_df.empty:
+            print(f"[Phase] Loaded {len(phase_df)} phase-based strategy rows")
+            # Apply symbol filter
+            if use_testnet:
+                phase_df = phase_df[phase_df["Symbol"].isin(symbol_filter)]
+                phase_df = remap_best_rows_for_testnet(phase_df)
+            else:
+                phase_df = phase_df[phase_df["Symbol"].isin(symbol_filter)]
+            print(f"[Phase] After filter: {len(phase_df)} rows for {len(phase_df['Symbol'].unique())} symbols")
+
+            # Determine current phase for each symbol and select appropriate strategy
+            phase_selected_rows = []
+            for symbol in phase_df["Symbol"].unique():
+                for direction in ["Long", "Short"]:
+                    # Get current phase for this symbol
+                    current_phase = get_current_market_phase(symbol)
+                    print(f"[Phase] {symbol} {direction}: Current phase = {current_phase}")
+
+                    # Select strategy for this phase
+                    strategy_row = select_strategy_for_phase(phase_df, symbol, direction, current_phase)
+                    if strategy_row is not None:
+                        phase_selected_rows.append(strategy_row)
+                        indicator = strategy_row.get("Indicator", "unknown")
+                        print(f"[Phase] {symbol} {direction}: Using {indicator} for {current_phase} phase")
+
+            if phase_selected_rows:
+                best_df = pd.DataFrame(phase_selected_rows)
+                print(f"[Phase] Selected {len(best_df)} phase-appropriate strategies")
+        else:
+            print("[Phase] No phase-based params found, falling back to overall best")
+            best_df = select_best_indicator_per_symbol(best_df)
+    else:
+        best_df = select_best_indicator_per_symbol(best_df)
+
+    print(f"[DEBUG] Final strategy count: {len(best_df)} rows")
     if best_df.empty:
         print("[Skip] best_params_overall.csv enthält keine Daten.")
         return
@@ -3975,6 +4160,12 @@ def main(
     # Pass stake through: None = dynamic sizing, value = fixed stake
     stake_value = fixed_stake
     closed_trades: List[TradeResult] = []
+
+    # ========================================================================
+    # PARALLEL INDICATOR EXECUTION
+    # All indicators run in parallel for calculation, but only phase-appropriate
+    # indicators generate trading signals.
+    # ========================================================================
     for _, row in best_df.iterrows():
         trades = process_strategy_row(
             row,
@@ -4019,6 +4210,9 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         help="Fixed stake size per trade (default: dynamic sizing with total_capital/7)",
     )
     parser.add_argument("--testnet", action="store_true", help="Use Binance testnet credentials and endpoints")
+    parser.add_argument("--phase-mode", action="store_true", help="Enable phase-based indicator selection (Up/Down/Flat)")
+    parser.add_argument("--no-phase-mode", action="store_true", help="Disable phase-based selection (use overall best)")
+    parser.add_argument("--show-phases", action="store_true", help="Show current market phases for all symbols and exit")
     parser.add_argument("--debug-signals", action="store_true", help="Verbose logging for entry filter decisions")
     parser.add_argument("--refresh-params", action="store_true", help="Re-run overall-best parameter export before trading")
     parser.add_argument("--reset-state", action="store_true", help="Delete the saved state before running")
@@ -4095,6 +4289,25 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
 
     use_testnet = bool(args.testnet or DEFAULT_USE_TESTNET)
     set_testnet_active(use_testnet)
+
+    # Handle phase-mode arguments
+    global USE_PHASE_BASED_EXECUTION
+    if args.phase_mode:
+        USE_PHASE_BASED_EXECUTION = True
+        print("[Config] Phase-based indicator selection ENABLED")
+    elif args.no_phase_mode:
+        USE_PHASE_BASED_EXECUTION = False
+        print("[Config] Phase-based indicator selection DISABLED (using overall best)")
+
+    # Show current phases and exit if requested
+    if args.show_phases:
+        print("\n[Phase] Current Market Phases for all symbols:")
+        print("=" * 60)
+        for symbol in TRADING_SYMBOLS:
+            phase = get_current_market_phase(symbol)
+            print(f"  {symbol:15s} -> {phase}")
+        print("=" * 60)
+        return
 
     # Set dashboard start date for filtering trades
     try:

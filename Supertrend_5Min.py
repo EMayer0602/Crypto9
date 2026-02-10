@@ -172,6 +172,236 @@ HTF_KAMA_SLOW_LENGTH = 40
 HTF_MAMA_FAST_LIMIT = 0.5
 HTF_MAMA_SLOW_LIMIT = 0.05
 
+# ============================================================================
+# MARKET PHASE CONFIGURATION
+# Phases: Up (Bullish), Down (Bearish), Flat (Seitwärts/Sideways)
+# Phase is determined by the SLOPE of each indicator
+# ============================================================================
+MARKET_PHASES = ["Up", "Down", "Flat"]
+PHASE_UP = "Up"      # Bullish phase - indicator slope is positive (rising)
+PHASE_DOWN = "Down"  # Bearish phase - indicator slope is negative (falling)
+PHASE_FLAT = "Flat"  # Sideways phase - indicator slope is flat/neutral
+
+# Slope threshold for phase determination (percentage change per bar)
+PHASE_SLOPE_THRESHOLD = 0.0001  # 0.01% - below this is considered "Flat"
+
+# Enable phase-based strategy selection
+USE_PHASE_BASED_SELECTION = True
+
+# ============================================================================
+# FEAR & GREED / SENTIMENT PHASE MODIFIERS
+# ============================================================================
+USE_FEAR_GREED_MODIFIER = False  # Enable Fear & Greed Index for phase modification
+FEAR_GREED_API_URL = "https://api.alternative.me/fng/"  # Fear & Greed API
+
+# Fear & Greed thresholds
+FEAR_THRESHOLD = 25   # Below this = Extreme Fear (prefer Flat/Down phases)
+GREED_THRESHOLD = 75  # Above this = Extreme Greed (prefer Up/risk of reversal)
+
+# Sentiment weights for phase adjustment
+SENTIMENT_WEIGHT = 0.3  # How much sentiment affects phase (0.0-1.0)
+
+
+def fetch_fear_greed_index() -> dict:
+    """
+    Fetch the current Fear & Greed Index from API.
+
+    Returns:
+        dict with 'value' (0-100), 'value_classification' (Extreme Fear/Fear/Neutral/Greed/Extreme Greed)
+    """
+    try:
+        import requests
+        response = requests.get(FEAR_GREED_API_URL, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            if data.get("data"):
+                return {
+                    "value": int(data["data"][0]["value"]),
+                    "classification": data["data"][0]["value_classification"],
+                    "timestamp": data["data"][0]["timestamp"]
+                }
+    except Exception as exc:
+        print(f"[FearGreed] Failed to fetch index: {exc}")
+
+    return {"value": 50, "classification": "Neutral", "timestamp": None}
+
+
+def modify_phase_with_sentiment(base_phase: str, fear_greed_value: int) -> str:
+    """
+    Optionally modify the detected phase based on Fear & Greed sentiment.
+
+    Args:
+        base_phase: Original phase from indicator slope
+        fear_greed_value: Fear & Greed Index value (0-100)
+
+    Returns:
+        Modified phase string
+    """
+    if not USE_FEAR_GREED_MODIFIER:
+        return base_phase
+
+    # Extreme Fear: More cautious, prefer Flat
+    if fear_greed_value < FEAR_THRESHOLD:
+        if base_phase == PHASE_UP:
+            # In extreme fear, uptrends might be fake - be cautious
+            return PHASE_FLAT  # Could also return PHASE_DOWN
+
+    # Extreme Greed: Risk of reversal
+    elif fear_greed_value > GREED_THRESHOLD:
+        if base_phase == PHASE_UP:
+            # In extreme greed, uptrend might be ending
+            # Keep as Up but could add warning flag
+            pass
+
+    return base_phase
+
+
+def calculate_indicator_slope(values: pd.Series, lookback: int = 5) -> float:
+    """
+    Calculate the slope of an indicator over the last `lookback` bars.
+
+    Args:
+        values: Series of indicator values
+        lookback: Number of bars to calculate slope over
+
+    Returns:
+        Slope as percentage change per bar
+    """
+    if len(values) < lookback + 1:
+        return 0.0
+
+    recent = values.iloc[-lookback:].dropna()
+    if len(recent) < 2:
+        return 0.0
+
+    # Calculate average percentage change per bar
+    first_val = recent.iloc[0]
+    last_val = recent.iloc[-1]
+
+    if first_val == 0 or pd.isna(first_val) or pd.isna(last_val):
+        return 0.0
+
+    pct_change = (last_val - first_val) / abs(first_val)
+    slope_per_bar = pct_change / len(recent)
+
+    return slope_per_bar
+
+
+def determine_phase_from_slope(slope: float, threshold: float = PHASE_SLOPE_THRESHOLD) -> str:
+    """
+    Determine market phase from indicator slope.
+
+    Args:
+        slope: Slope value (percentage change per bar)
+        threshold: Minimum slope for Up/Down classification
+
+    Returns:
+        Market phase string: "Up", "Down", or "Flat"
+    """
+    if slope > threshold:
+        return PHASE_UP
+    elif slope < -threshold:
+        return PHASE_DOWN
+    else:
+        return PHASE_FLAT
+
+
+def determine_market_phase(htf_trend: int) -> str:
+    """
+    Determine market phase based on HTF trend (legacy/fallback method).
+
+    Args:
+        htf_trend: Higher timeframe trend value (1=bullish, -1=bearish, 0=neutral)
+
+    Returns:
+        Market phase string: "Up", "Down", or "Flat"
+    """
+    if htf_trend >= 1:
+        return PHASE_UP
+    elif htf_trend <= -1:
+        return PHASE_DOWN
+    else:
+        return PHASE_FLAT
+
+
+def determine_indicator_phase(df: pd.DataFrame, indicator: str, lookback: int = 5) -> str:
+    """
+    Determine market phase based on the slope of a specific indicator.
+
+    Args:
+        df: DataFrame containing indicator columns
+        indicator: Indicator type ("supertrend", "htf_crossover", "jma", "kama")
+        lookback: Number of bars to calculate slope over
+
+    Returns:
+        Market phase string: "Up", "Down", or "Flat"
+    """
+    # Map indicator to its value column
+    indicator_columns = {
+        "supertrend": "supertrend",
+        "htf_crossover": "htf_indicator",
+        "jma": "jma",
+        "kama": "kama",
+    }
+
+    col = indicator_columns.get(indicator.lower())
+
+    # Fallback to indicator_line if specific column not found
+    if col is None or col not in df.columns:
+        col = "indicator_line"
+
+    if col not in df.columns:
+        # Use trend_flag as fallback
+        if "trend_flag" in df.columns:
+            recent = df["trend_flag"].iloc[-lookback:].dropna()
+            if len(recent) > 0:
+                avg_trend = recent.mean()
+                if avg_trend > 0.5:
+                    return PHASE_UP
+                elif avg_trend < -0.5:
+                    return PHASE_DOWN
+        return PHASE_FLAT
+
+    slope = calculate_indicator_slope(df[col], lookback)
+    return determine_phase_from_slope(slope)
+
+
+def determine_market_phase_from_df(df: pd.DataFrame, indicator: str = None, lookback: int = 10) -> str:
+    """
+    Determine market phase from DataFrame.
+    Uses indicator slope if indicator is specified, otherwise uses HTF trend.
+
+    Args:
+        df: DataFrame with indicator columns
+        indicator: Optional indicator type for slope-based detection
+        lookback: Number of bars to consider for phase determination
+
+    Returns:
+        Market phase string: "Up", "Down", or "Flat"
+    """
+    if indicator:
+        return determine_indicator_phase(df, indicator, lookback)
+
+    # Fallback to HTF trend method
+    if df.empty or "htf_trend" not in df.columns:
+        return PHASE_FLAT
+
+    recent_trends = df["htf_trend"].iloc[-lookback:].dropna()
+    if recent_trends.empty:
+        return PHASE_FLAT
+
+    # Majority voting
+    up_count = (recent_trends >= 1).sum()
+    down_count = (recent_trends <= -1).sum()
+
+    if up_count > down_count and up_count > len(recent_trends) / 3:
+        return PHASE_UP
+    elif down_count > up_count and down_count > len(recent_trends) / 3:
+        return PHASE_DOWN
+    else:
+        return PHASE_FLAT
+
+
 USE_MOMENTUM_FILTER = False
 MOMENTUM_TYPE = "RSI"
 MOMENTUM_WINDOW = 14
@@ -228,6 +458,7 @@ CLEAR_BASE_OUTPUT_ON_SWEEP = True
 # Output file paths
 OVERALL_SUMMARY_HTML = os.path.join(BASE_OUT_DIR, "overall_best_results.html")
 OVERALL_PARAMS_CSV = os.path.join(BASE_OUT_DIR, "best_params_overall.csv")
+PHASE_PARAMS_CSV = os.path.join(BASE_OUT_DIR, "best_params_by_phase.csv")
 OVERALL_DETAILED_HTML = os.path.join(BASE_OUT_DIR, "overall_best_detailed.html")
 OVERALL_FLAT_CSV = os.path.join(BASE_OUT_DIR, "overall_best_flat_trades.csv")
 OVERALL_FLAT_JSON = os.path.join(BASE_OUT_DIR, "overall_best_flat_trades.json")
@@ -1844,6 +2075,7 @@ def backtest_supertrend(df, atr_stop_mult=None, direction="long", min_hold_bars=
 	entry_ts = None
 	entry_capital = None
 	entry_atr = None
+	entry_phase = PHASE_FLAT  # Track market phase at entry
 	bars_in_position = 0
 
 	for i in range(1, len(df)):
@@ -1936,6 +2168,8 @@ def backtest_supertrend(df, atr_stop_mult=None, direction="long", min_hold_bars=
 				lowest_price = entry_price if not long_mode else entry_price
 				remaining_position = 1.0  # 100% of position
 				partial_exits_taken = []  # Track which partial exit levels hit
+				# Track market phase at entry
+				entry_phase = determine_market_phase(htf_value)
 			continue
 
 		bars_in_position += 1
@@ -1997,7 +2231,8 @@ def backtest_supertrend(df, atr_stop_mult=None, direction="long", min_hold_bars=
 						"PnL (USD)": pnl_usd,
 						"Equity": equity,
 						"Direction": direction.capitalize(),
-						"MinHoldBars": min_hold_bars
+						"MinHoldBars": min_hold_bars,
+						"Phase": entry_phase
 					})
 					if remaining_position <= 0.01:  # Essentially fully exited
 						in_position = False
@@ -2063,7 +2298,8 @@ def backtest_supertrend(df, atr_stop_mult=None, direction="long", min_hold_bars=
 			"PnL (USD)": pnl_usd,
 			"Equity": equity,
 			"Direction": direction.capitalize(),
-			"MinHoldBars": min_hold_bars
+			"MinHoldBars": min_hold_bars,
+			"Phase": entry_phase
 		})
 		in_position = False
 		entry_capital = None
@@ -2091,7 +2327,8 @@ def backtest_supertrend(df, atr_stop_mult=None, direction="long", min_hold_bars=
 			"PnL (USD)": pnl_usd,
 			"Equity": equity,
 			"Direction": direction.capitalize(),
-			"MinHoldBars": min_hold_bars
+			"MinHoldBars": min_hold_bars,
+			"Phase": entry_phase
 		})
 
 	return pd.DataFrame(trades)
@@ -2116,6 +2353,7 @@ def backtest_htf_crossover(df, atr_stop_mult=None, direction="long", min_hold_ba
 	entry_ts = None
 	entry_capital = None
 	entry_atr = None
+	entry_phase = PHASE_FLAT  # Track market phase at entry
 	bars_in_position = 0
 
 	# Check if HTF indicator column exists
@@ -2227,6 +2465,8 @@ def backtest_htf_crossover(df, atr_stop_mult=None, direction="long", min_hold_ba
 					lowest_price = entry_price if not long_mode else entry_price
 					remaining_position = 1.0
 					partial_exits_taken = []
+					# Track market phase at entry
+					entry_phase = determine_market_phase(htf_value)
 			continue
 
 		bars_in_position += 1
@@ -2281,7 +2521,8 @@ def backtest_htf_crossover(df, atr_stop_mult=None, direction="long", min_hold_ba
 						"PnL (USD)": pnl_usd,
 						"Equity": equity,
 						"Direction": direction.capitalize(),
-						"MinHoldBars": min_hold_bars
+						"MinHoldBars": min_hold_bars,
+						"Phase": entry_phase
 					})
 					if remaining_position <= 0.01:
 						in_position = False
@@ -2349,7 +2590,8 @@ def backtest_htf_crossover(df, atr_stop_mult=None, direction="long", min_hold_ba
 			"PnL (USD)": pnl_usd,
 			"Equity": equity,
 			"Direction": direction.capitalize(),
-			"MinHoldBars": min_hold_bars
+			"MinHoldBars": min_hold_bars,
+			"Phase": entry_phase
 		})
 		in_position = False
 		entry_capital = None
@@ -2378,7 +2620,8 @@ def backtest_htf_crossover(df, atr_stop_mult=None, direction="long", min_hold_ba
 			"PnL (USD)": pnl_usd,
 			"Equity": equity,
 			"Direction": direction.capitalize(),
-			"MinHoldBars": min_hold_bars
+			"MinHoldBars": min_hold_bars,
+			"Phase": entry_phase
 		})
 
 	return pd.DataFrame(trades)
@@ -2430,6 +2673,99 @@ def performance_report(trades_df, symbol, param_a, param_b, direction, min_hold_
 		"Direction": direction,
 		"MinHoldBars": min_hold_bars,
 	}
+
+
+def performance_report_by_phase(trades_df, symbol, param_a, param_b, direction, min_hold_bars):
+	"""
+	Calculate performance metrics grouped by market phase.
+
+	Returns a dict with:
+	- Overall metrics
+	- Per-phase metrics (Up, Down, Flat)
+	"""
+	base = {
+		"Symbol": symbol,
+		"ParamA": param_a,
+		"ParamB": param_b,
+		PARAM_A_LABEL: param_a,
+		PARAM_B_LABEL: param_b,
+		"Indicator": INDICATOR_TYPE,
+		"IndicatorDisplay": INDICATOR_DISPLAY_NAME,
+	}
+	if INDICATOR_TYPE == "supertrend":
+		base["Length"] = param_a
+		base["Factor"] = param_b
+
+	result = {"overall": None, "by_phase": {}}
+
+	if trades_df.empty or "Phase" not in trades_df.columns:
+		empty_stats = {
+			**base,
+			"Trades": 0,
+			"WinRate": 0.0,
+			"AvgPnL": 0.0,
+			"ProfitFactor": 0.0,
+			"MaxDrawdown": 0.0,
+			"FinalEquity": START_EQUITY,
+			"Direction": direction,
+			"MinHoldBars": min_hold_bars,
+			"Phase": "All",
+		}
+		result["overall"] = empty_stats
+		for phase in MARKET_PHASES:
+			result["by_phase"][phase] = {**empty_stats, "Phase": phase}
+		return result
+
+	# Overall performance
+	overall_stats = performance_report(trades_df, symbol, param_a, param_b, direction, min_hold_bars)
+	overall_stats["Phase"] = "All"
+	overall_stats["Indicator"] = INDICATOR_TYPE
+	overall_stats["IndicatorDisplay"] = INDICATOR_DISPLAY_NAME
+	result["overall"] = overall_stats
+
+	# Per-phase performance
+	for phase in MARKET_PHASES:
+		phase_trades = trades_df[trades_df["Phase"] == phase]
+		if phase_trades.empty:
+			phase_stats = {
+				**base,
+				"Trades": 0,
+				"WinRate": 0.0,
+				"AvgPnL": 0.0,
+				"ProfitFactor": 0.0,
+				"MaxDrawdown": 0.0,
+				"FinalEquity": START_EQUITY,
+				"Direction": direction,
+				"MinHoldBars": min_hold_bars,
+				"Phase": phase,
+			}
+		else:
+			wins = phase_trades[phase_trades["PnL (USD)"] > 0]
+			losses = phase_trades[phase_trades["PnL (USD)"] < 0]
+			win_rate = len(wins) / len(phase_trades) if len(phase_trades) > 0 else 0.0
+			avg_pnl = phase_trades["PnL (USD)"].mean()
+			total_win = wins["PnL (USD)"].sum()
+			total_loss = abs(losses["PnL (USD)"].sum())
+			profit_factor = (total_win / total_loss) if total_loss > 0 else np.inf
+			# Calculate FinalEquity for this phase only
+			phase_pnl = phase_trades["PnL (USD)"].sum()
+			phase_final_eq = START_EQUITY + phase_pnl
+
+			phase_stats = {
+				**base,
+				"Trades": len(phase_trades),
+				"WinRate": win_rate,
+				"AvgPnL": avg_pnl,
+				"ProfitFactor": profit_factor,
+				"MaxDrawdown": 0.0,  # Simplified for phase
+				"FinalEquity": phase_final_eq,
+				"Direction": direction,
+				"MinHoldBars": min_hold_bars,
+				"Phase": phase,
+			}
+		result["by_phase"][phase] = phase_stats
+
+	return result
 
 
 def build_equity_series(df, trades_df, direction):
@@ -3293,6 +3629,90 @@ def run_overall_best_params():
 	return updated_all_rows
 
 
+def generate_phase_based_params():
+	"""
+	Generate best indicator assignment for each Symbol+Direction+Phase combination.
+
+	This function:
+	1. Loads best_params_overall.csv with all indicator results
+	2. For each Symbol+Direction+Phase, selects the best indicator (highest FinalEquity)
+	3. Saves results to best_params_by_phase.csv
+
+	The resulting CSV has one row per Symbol+Direction+Phase with the best indicator assigned.
+	"""
+	if not os.path.exists(OVERALL_PARAMS_CSV):
+		print("[Phase] Overall params CSV not found. Run sweep first.")
+		return None
+
+	overall_df = pd.read_csv(OVERALL_PARAMS_CSV, sep=";", decimal=",")
+	if overall_df.empty:
+		print("[Phase] Overall params CSV is empty.")
+		return None
+
+	# Ensure Phase column exists
+	if "Phase" not in overall_df.columns:
+		overall_df["Phase"] = PHASE_FLAT  # Default to Flat if not present
+
+	# Filter by active indicators
+	if ACTIVE_INDICATORS:
+		overall_df = overall_df[overall_df["Indicator"].isin(ACTIVE_INDICATORS)]
+
+	# Generate phase-based best params
+	phase_results = []
+
+	# Group by Symbol, Direction
+	for (symbol, direction), symbol_df in overall_df.groupby(["Symbol", "Direction"]):
+		# For each phase, find the best indicator
+		for phase in MARKET_PHASES:
+			# Find all rows for this phase (or use overall if no phase-specific data)
+			phase_rows = symbol_df[symbol_df["Phase"] == phase]
+
+			if phase_rows.empty:
+				# Use overall best as fallback
+				phase_rows = symbol_df
+
+			if phase_rows.empty:
+				continue
+
+			# Select best by FinalEquity
+			best_row = phase_rows.sort_values("FinalEquity", ascending=False).iloc[0].to_dict()
+			best_row["Phase"] = phase
+
+			# Add phase-specific naming convention: {Indicator}_{Phase}{rank}
+			# e.g., JMA_Up1, KAMA_Down2, Supertrend_Flat1
+			indicator = best_row.get("Indicator", "unknown")
+			param_a = best_row.get("ParamA", "")
+			param_b = best_row.get("ParamB", "")
+			best_row["StrategyName"] = f"{indicator}_{phase}_{param_a}_{param_b}"
+
+			phase_results.append(best_row)
+
+	if not phase_results:
+		print("[Phase] No phase-based results generated.")
+		return None
+
+	phase_df = pd.DataFrame(phase_results)
+
+	# Reorder columns for clarity
+	priority_cols = ["Symbol", "Direction", "Phase", "Indicator", "IndicatorDisplay",
+					 "StrategyName", "ParamA", "ParamB", "FinalEquity", "Trades", "WinRate"]
+	existing_priority = [c for c in priority_cols if c in phase_df.columns]
+	other_cols = [c for c in phase_df.columns if c not in existing_priority]
+	phase_df = phase_df[existing_priority + other_cols]
+
+	# Save to CSV
+	os.makedirs(BASE_OUT_DIR, exist_ok=True)
+	phase_df.to_csv(PHASE_PARAMS_CSV, sep=";", decimal=",", index=False, encoding="utf-8")
+	print(f"[Phase] Saved phase-based params to {PHASE_PARAMS_CSV}")
+	print(f"[Phase] Generated {len(phase_df)} phase-based strategy assignments")
+
+	# Print summary
+	summary = phase_df.groupby(["Symbol", "Direction"]).size().reset_index(name="Phases")
+	print(f"[Phase] Summary: {len(summary)} Symbol-Direction combinations with 3 phases each")
+
+	return phase_df
+
+
 def run_current_configuration():
 	os.makedirs(OUT_DIR, exist_ok=True)
 	if RUN_PARAMETER_SWEEP:
@@ -3326,3 +3746,8 @@ if __name__ == "__main__":
 				summary_rows = run_current_configuration()
 				record_global_best(indicator_name, summary_rows)
 		write_overall_result_tables()
+
+		# Generate phase-based best params after all sweeps complete
+		if USE_PHASE_BASED_SELECTION:
+			print("\n[Phase] Generating phase-based parameter assignments...")
+			generate_phase_based_params()
