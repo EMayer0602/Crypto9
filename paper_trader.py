@@ -3156,30 +3156,42 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
         print(f"  Start Equity: {START_TOTAL_CAPITAL}")
         print(f"  Max Open Positions: {MAX_OPEN_POSITIONS}")
         print(f"  Stake Divisor: {STAKE_DIVISOR}")
+        print(f"  Max Hold Bars: {st.MAX_HOLD_BAR_VALUES}")
         print("=" * 70)
         sweep_start = _time.time()
-        # Run full parameter sweep across all indicators and HTFs
+        # Run full parameter sweep across all indicators, HTFs, and HTF filter params
         old_sweep = st.RUN_PARAMETER_SWEEP
         old_overall = st.RUN_OVERALL_BEST
         st.RUN_PARAMETER_SWEEP = True
         st.RUN_OVERALL_BEST = False
         indicator_candidates = st.get_indicator_candidates()
         htf_candidates = st.get_highertimeframe_candidates()
+        htf_length_values = st.HTF_LENGTH_VALUES
+        htf_factor_values = st.HTF_FACTOR_VALUES
+        trend_phase_combos = len(htf_length_values) * len(htf_factor_values)
+        total_combos = len(indicator_candidates) * len(htf_candidates) * trend_phase_combos
         print(f"  Indicators: {indicator_candidates}")
         print(f"  HTFs: {htf_candidates}")
-        total_combos = len(indicator_candidates) * len(htf_candidates)
-        print(f"  Total indicator×HTF combos: {total_combos}")
+        print(f"  Trend-Phase-Parameter: HTF_LENGTH={htf_length_values} x HTF_FACTOR={htf_factor_values} = {trend_phase_combos} Kombis/Paar")
+        print(f"  Total Sweep-Kombinationen: {total_combos}")
         print("=" * 70)
         if st.CLEAR_BASE_OUTPUT_ON_SWEEP:
             st.clear_sweep_targets(indicator_candidates, htf_candidates)
-        for i, indicator_name in enumerate(indicator_candidates):
+        combo_num = 0
+        for indicator_name in indicator_candidates:
             st.apply_indicator_type(indicator_name)
-            for j, htf_value in enumerate(htf_candidates):
+            for htf_value in htf_candidates:
                 st.apply_higher_timeframe(htf_value)
-                combo_num = i * len(htf_candidates) + j + 1
-                print(f"\n[Sweep {combo_num}/{total_combos}] Indicator={st.INDICATOR_DISPLAY_NAME}, HTF={htf_value}")
-                summary_rows = st.run_parameter_sweep()
-                st.record_global_best(indicator_name, summary_rows)
+                for htf_len in htf_length_values:
+                    for htf_fac in htf_factor_values:
+                        combo_num += 1
+                        # Set HTF filter parameters for this trend phase combo
+                        st.HTF_LENGTH = htf_len
+                        st.HTF_FACTOR = htf_fac
+                        st.clear_data_cache()  # Force recompute with new HTF params
+                        print(f"\n[Sweep {combo_num}/{total_combos}] {st.INDICATOR_DISPLAY_NAME} HTF={htf_value} HTF_Length={htf_len} HTF_Factor={htf_fac}")
+                        summary_rows = st.run_parameter_sweep()
+                        st.record_global_best(indicator_name, summary_rows)
         st.write_overall_result_tables()
         st.RUN_PARAMETER_SWEEP = old_sweep
         st.RUN_OVERALL_BEST = old_overall
