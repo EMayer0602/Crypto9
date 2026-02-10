@@ -135,12 +135,18 @@ def get_daily_market_phases(symbol: str, lookback_days: int = 365) -> pd.DataFra
     """
     Ermittle Marktphasen auf DAILY Basis für ein Symbol.
 
+    Verwendet alle drei Indikatoren (Supertrend, JMA, KAMA) und bestimmt
+    die Phase durch Mehrheitsentscheidung. Dadurch dauern Phasen
+    typischerweise WOCHEN oder MONATE.
+
     Returns:
         DataFrame mit Datum und Phase für jeden Tag
     """
     from Supertrend_5Min import (
         download_historical_ohlcv,
         compute_supertrend,
+        compute_jma,
+        compute_kama,
         calculate_indicator_slope,
         determine_phase_from_slope,
         load_ohlcv_from_cache,
@@ -162,21 +168,60 @@ def get_daily_market_phases(symbol: str, lookback_days: int = 365) -> pd.DataFra
         if df_daily is None or df_daily.empty:
             return pd.DataFrame()
 
-        # Supertrend auf Daily berechnen
+        # Alle drei Indikatoren auf Daily berechnen
         df_daily = compute_supertrend(df_daily, length=10, factor=3.0)
 
-        # Phase für jeden Tag berechnen
+        try:
+            df_jma = compute_jma(df_daily.copy(), length=30, phase=0)
+            df_daily["jma"] = df_jma["jma"]
+        except Exception:
+            df_daily["jma"] = df_daily["supertrend"]  # Fallback
+
+        try:
+            df_kama = compute_kama(df_daily.copy(), length=20, slow_length=40)
+            df_daily["kama"] = df_kama["kama"]
+        except Exception:
+            df_daily["kama"] = df_daily["supertrend"]  # Fallback
+
+        # Slope-Threshold für Daily (höher als bei Stundendaten)
+        threshold = 0.0002
+
+        # Phase für jeden Tag berechnen (Mehrheitsentscheidung)
         phases = []
-        for i in range(10, len(df_daily)):
+        lookback = 10  # 10 Tage für Slope-Berechnung
+
+        for i in range(lookback, len(df_daily)):
             date = df_daily.index[i]
-            # Slope über die letzten 5 Tage
-            values = df_daily["supertrend"].iloc[i-5:i+1]
-            if len(values) >= 2:
-                slope = calculate_indicator_slope(values, lookback=5)
-                phase = determine_phase_from_slope(slope)
+
+            # Berechne Phase für jeden Indikator
+            indicator_phases = []
+
+            for indicator_col in ["supertrend", "jma", "kama"]:
+                if indicator_col in df_daily.columns:
+                    values = df_daily[indicator_col].iloc[i-lookback:i+1]
+                    if len(values) >= 2 and not values.isna().all():
+                        slope = calculate_indicator_slope(values, lookback=lookback)
+                        phase = determine_phase_from_slope(slope, threshold)
+                        indicator_phases.append(phase)
+
+            # Mehrheitsentscheidung
+            if indicator_phases:
+                up_count = indicator_phases.count(PHASE_UP)
+                down_count = indicator_phases.count(PHASE_DOWN)
+
+                if up_count >= 2:
+                    final_phase = PHASE_UP
+                elif down_count >= 2:
+                    final_phase = PHASE_DOWN
+                else:
+                    final_phase = PHASE_FLAT
             else:
-                phase = PHASE_FLAT
-            phases.append({"date": date.date() if hasattr(date, 'date') else date, "phase": phase})
+                final_phase = PHASE_FLAT
+
+            phases.append({
+                "date": date.date() if hasattr(date, 'date') else date,
+                "phase": final_phase
+            })
 
         return pd.DataFrame(phases)
     except Exception as e:
