@@ -143,8 +143,8 @@ DEFAULT_MIN_HOLD_BARS = 0
 MIN_HOLD_BAR_VALUES = [0, 12, 24]
 
 # Max hold bars (time-based exit): Force-close after N bars. 0 = kein Limit.
-# 48 = 2 Tage, 96 = 4 Tage, 168 = 7 Tage (bei 1h Bars)
-MAX_HOLD_BAR_VALUES = [0, 48, 96, 168]
+# 24 = 1 Tag, 48 = 2 Tage, 60 = 2.5 Tage (bei 1h Bars)
+MAX_HOLD_BAR_VALUES = [0, 24, 48, 60]
 
 USE_HIGHER_TIMEFRAME_FILTER = True
 HIGHER_TIMEFRAME = "6h"
