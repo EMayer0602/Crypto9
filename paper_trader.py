@@ -102,6 +102,21 @@ DEFAULT_SPIKE_INTERVAL_MIN = 5
 DEFAULT_ATR_SPIKE_MULT = 2.5
 DEFAULT_POLL_SECONDS = 30
 TESTNET_DEFAULT_STAKE = 2000.0
+_TESTNET_ACTIVE = False  # Track if testnet mode is active for dashboard updates
+_DASHBOARD_START = None  # Dashboard start date for filtering trades (datetime object)
+
+
+def set_dashboard_start(start_date) -> None:
+    """Set dashboard start date for filtering trades."""
+    global _DASHBOARD_START
+    _DASHBOARD_START = start_date
+
+
+def get_dashboard_start_str() -> str | None:
+    """Get dashboard start date as YYYY-MM-DD string for generate_dashboard()."""
+    if _DASHBOARD_START is None:
+        return None
+    return _DASHBOARD_START.strftime("%Y-%m-%d")
 
 
 def set_max_open_positions(value: int) -> None:
@@ -1762,6 +1777,68 @@ def build_summary_payload(
     # Per-symbol statistics
     symbol_stats = calc_symbol_stats(trades_df)
 
+    # Convert trades DataFrame to list of dicts for JSON/HTML export
+    # Apply compound growth recalculation
+    trades_list = []
+    if not trades_df.empty:
+        trades_export = trades_df.copy()
+        if "entry_time" in trades_export.columns:
+            trades_export = trades_export.sort_values("entry_time", ascending=True)
+
+        capital = float(START_TOTAL_CAPITAL)
+        max_positions = MAX_OPEN_POSITIONS
+
+        entry_prices = trades_export["entry_price"].fillna(0).astype(float)
+        exit_prices = trades_export["exit_price"].fillna(0).astype(float)
+        directions = trades_export["direction"].fillna("long").astype(str).str.lower()
+
+        pnl_pct = np.where(
+            entry_prices > 0,
+            np.where(
+                directions == "long",
+                (exit_prices - entry_prices) / entry_prices,
+                (entry_prices - exit_prices) / entry_prices
+            ),
+            0.0
+        )
+
+        n = len(trades_export)
+        new_stakes = np.zeros(n)
+        new_pnls = np.zeros(n)
+
+        for i in range(n):
+            stake = capital / max_positions
+            pnl = pnl_pct[i] * stake
+            new_stakes[i] = stake
+            new_pnls[i] = pnl
+            capital += pnl
+
+        trades_export["stake"] = new_stakes
+        trades_export["pnl"] = new_pnls
+
+        if "entry_time" in trades_export.columns:
+            trades_export = trades_export.sort_values("entry_time", ascending=False)
+
+        for col in trades_export.columns:
+            if pd.api.types.is_datetime64_any_dtype(trades_export[col]):
+                trades_export[col] = trades_export[col].apply(
+                    lambda x: x.isoformat() if pd.notna(x) else None
+                )
+        trades_list = trades_export.to_dict(orient="records")
+
+    # Convert open positions DataFrame to list of dicts
+    open_positions_list = []
+    if not open_positions_df.empty:
+        positions_export = open_positions_df.copy()
+        if "entry_time" in positions_export.columns:
+            positions_export = positions_export.sort_values("entry_time", ascending=False)
+        for col in positions_export.columns:
+            if pd.api.types.is_datetime64_any_dtype(positions_export[col]):
+                positions_export[col] = positions_export[col].apply(
+                    lambda x: x.isoformat() if pd.notna(x) else None
+                )
+        open_positions_list = positions_export.to_dict(orient="records")
+
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "start": start_ts.isoformat(),
@@ -1780,193 +1857,197 @@ def build_summary_payload(
         **long_open_stats,
         **short_open_stats,
         "symbol_stats": symbol_stats,
+        "trades": trades_list,
+        "open_positions_data": open_positions_list,
     }
 
 
-def generate_summary_html(
-    summary: Dict[str, Any],
-    trades_df: pd.DataFrame,
-    open_positions_df: pd.DataFrame,
-    path: str,
-) -> None:
-    html_parts = [
-        "<html><head><meta charset='utf-8'>",
-        "<title>Paper Trading Simulation Summary</title>",
-        "<style>body{font-family:Arial,sans-serif;margin:20px;}table{border-collapse:collapse;margin-top:12px;width:auto;}th,td{border:1px solid #ccc;padding:6px 10px;text-align:right;}th{text-align:center;background:#f0f0f0;font-weight:bold;}td:first-child{text-align:left;}h1{margin-bottom:10px;}h2{margin-top:30px;margin-bottom:10px;}.stats-container{display:flex;gap:20px;flex-wrap:wrap;}</style>",
-        "</head><body>",
-        f"<h1>Simulation Summary {summary['start']} → {summary['end']}</h1>",
+def write_summary_json(summary: Dict[str, Any], path: str) -> None:
+    import re as _re
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(summary, fh, ensure_ascii=False, indent=2)
 
-        # Combined Statistics Table (Overall + Long + Short)
+    # Post-process to replace scientific notation with decimal format
+    # This ensures LUNC prices like 3.749e-05 become 0.00003749
+    with open(path, "r", encoding="utf-8") as fh:
+        content = fh.read()
+
+    def replace_scientific(match):
+        try:
+            value = float(match.group(0))
+            formatted = format(value, '.10f').rstrip('0').rstrip('.')
+            return formatted
+        except (ValueError, OverflowError):
+            return match.group(0)
+
+    content = _re.sub(r'-?\d+\.?\d*[eE][+-]?\d+', replace_scientific, content)
+
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(content)
+
+    print(f"[Simulation] Summary JSON saved to {path}")
+
+    # Also generate trading_summary.html
+    html_path = path.replace(".json", ".html")
+    write_summary_html(summary, html_path)
+
+
+def write_summary_html(summary: Dict[str, Any], path: str) -> None:
+    """Generate trading_summary.html from summary data."""
+    trades = summary.get("trades", [])
+    open_positions_raw = summary.get("open_positions_data", [])
+
+    total_trades = len(trades)
+    open_count = len(open_positions_raw)
+    total_pnl = sum(float(t.get("pnl", 0) or 0) for t in trades)
+    winners = sum(1 for t in trades if float(t.get("pnl", 0) or 0) > 0)
+    losers = sum(1 for t in trades if float(t.get("pnl", 0) or 0) < 0)
+    win_rate = (winners / total_trades * 100) if total_trades > 0 else 0
+
+    final_capital = summary.get("final_capital", 16500.0)
+    max_positions = MAX_OPEN_POSITIONS
+    dynamic_stake = final_capital / max_positions
+
+    # Recalculate open positions with dynamic stake
+    open_positions = []
+    for p in open_positions_raw:
+        entry_price = float(p.get("entry_price", 0) or 0)
+        last_price = float(p.get("last_price", 0) or 0)
+        direction = str(p.get("direction", "long")).lower()
+        stake = dynamic_stake
+
+        if entry_price > 0 and stake > 0:
+            if direction == "long":
+                pnl_pct = (last_price - entry_price) / entry_price
+            else:
+                pnl_pct = (entry_price - last_price) / entry_price
+            unrealized_pnl = pnl_pct * stake
+        else:
+            pnl_pct = 0
+            unrealized_pnl = 0
+
+        recalc_pos = dict(p)
+        recalc_pos["stake"] = stake
+        recalc_pos["unrealized_pnl"] = unrealized_pnl
+        recalc_pos["unrealized_pct"] = pnl_pct * 100
+        open_positions.append(recalc_pos)
+
+    open_pnl = sum(float(p.get("unrealized_pnl", 0) or 0) for p in open_positions)
+
+    def fmt(val):
+        """Format number with German locale."""
+        if val is None or val == "NaN":
+            return "-"
+        try:
+            return f"{float(val):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        except (ValueError, TypeError):
+            return str(val)
+
+    def fmt_pct(val):
+        if val is None or val == "NaN":
+            return "-"
+        try:
+            return f"{float(val):+.2f}%"
+        except (ValueError, TypeError):
+            return str(val)
+
+    def fmt_price(price):
+        """Format price with appropriate decimals - avoids scientific notation."""
+        if price is None or price == "NaN":
+            return "-"
+        try:
+            p = float(price)
+            if p < 0.0001:
+                return f"{p:.8f}"
+            elif p < 1:
+                return f"{p:.6f}"
+            elif p < 100:
+                return f"{p:.4f}"
+            else:
+                return fmt(p)
+        except (ValueError, TypeError):
+            return str(price)
+
+    def pnl_class(val):
+        try:
+            return "pos" if float(val) >= 0 else "neg"
+        except (ValueError, TypeError):
+            return ""
+
+    def status_text(val):
+        try:
+            return "Gewinn" if float(val) >= 0 else "Verlust"
+        except (ValueError, TypeError):
+            return ""
+
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    html_parts = [
+        "<html><head><meta charset='utf-8'><meta http-equiv='refresh' content='60'><title>Trading Summary</title>",
+        "<style>body{font-family:Arial;margin:20px}table{border-collapse:collapse;margin:12px 0}",
+        "th,td{border:1px solid #ccc;padding:6px 10px;text-align:right}th{background:#f0f0f0}",
+        "td:first-child{text-align:left}.pos{color:green}.neg{color:red}.source-note{color:#666;font-style:italic;margin-bottom:20px}</style></head><body>",
+        "<h1>Trading Summary</h1>",
+        f"<p class='source-note'>Updated: {timestamp}</p>",
         "<h2>Statistics</h2>",
-        "<table>",
-        "<tr><th>Metric</th><th>Overall</th><th>Long</th><th>Short</th></tr>",
-        f"<tr><td>Closed trades</td><td>{summary['closed_trades']}</td><td>{summary.get('long_trades', 0)}</td><td>{summary.get('short_trades', 0)}</td></tr>",
-        f"<tr><td>Open positions</td><td>{summary['open_positions']}</td><td>{summary.get('long_open', 0)}</td><td>{summary.get('short_open', 0)}</td></tr>",
-        f"<tr><td>PnL (USDT)</td><td>{summary['closed_pnl']:.2f}</td><td>{summary.get('long_pnl', 0):.2f}</td><td>{summary.get('short_pnl', 0):.2f}</td></tr>",
-        f"<tr><td>Avg PnL (USDT)</td><td>{summary['avg_trade_pnl']:.2f}</td><td>{summary.get('long_avg_pnl', 0):.2f}</td><td>{summary.get('short_avg_pnl', 0):.2f}</td></tr>",
-        f"<tr><td>Win rate (%)</td><td>{summary['win_rate_pct']:.2f}</td><td>{summary.get('long_win_rate', 0):.2f}</td><td>{summary.get('short_win_rate', 0):.2f}</td></tr>",
-        f"<tr><td>Winners</td><td>{summary['winners']}</td><td>{summary.get('long_winners', 0)}</td><td>{summary.get('short_winners', 0)}</td></tr>",
-        f"<tr><td>Losers</td><td>{summary['losers']}</td><td>{summary.get('long_losers', 0)}</td><td>{summary.get('short_losers', 0)}</td></tr>",
-        f"<tr><td>Open equity (USDT)</td><td>{summary['open_equity']:.2f}</td><td>{summary.get('long_open_equity', 0):.2f}</td><td>{summary.get('short_open_equity', 0):.2f}</td></tr>",
-        f"<tr style='font-weight:bold;'><td>Final capital (USDT)</td><td>{summary['final_capital']:.2f}</td><td>-</td><td>-</td></tr>",
+        "<table><tr><th>Metric</th><th>Value</th></tr>",
+        f"<tr><td>Closed trades</td><td>{total_trades}</td></tr>",
+        f"<tr><td>Open positions</td><td>{open_count}</td></tr>",
+        f"<tr><td>Total PnL (closed)</td><td class=\"{pnl_class(total_pnl)}\">{fmt(total_pnl)} USDT</td></tr>",
+        f"<tr><td>Open PnL (unrealized)</td><td class=\"{pnl_class(open_pnl)}\">{fmt(open_pnl)} USDT</td></tr>",
+        f"<tr><td>Winners</td><td>{winners}</td></tr>",
+        f"<tr><td>Losers</td><td>{losers}</td></tr>",
+        f"<tr><td>Win Rate</td><td>{win_rate:.1f}%</td></tr>",
         "</table>",
     ]
 
-    # Per-Symbol Statistics Table
-    symbol_stats = summary.get("symbol_stats", [])
-    if symbol_stats:
-        html_parts.append("<h2>Statistics by Symbol</h2>")
-        html_parts.append("<table>")
-        html_parts.append("<tr><th>Symbol</th><th>Trades</th><th>Win</th><th>Loss</th><th>Win%</th><th>Total PnL</th><th>Avg PnL</th><th>Best</th><th>Worst</th><th>Max DD</th><th>PF</th><th>Long</th><th>Short</th><th>Long PnL</th><th>Short PnL</th></tr>")
-        for ss in symbol_stats:
-            pnl_color = "green" if ss["total_pnl"] >= 0 else "red"
-            html_parts.append(
-                f"<tr>"
-                f"<td>{ss['symbol']}</td>"
-                f"<td>{ss['trades']}</td>"
-                f"<td>{ss['winners']}</td>"
-                f"<td>{ss['losers']}</td>"
-                f"<td>{ss['win_rate']:.1f}%</td>"
-                f"<td style='color:{pnl_color}'>{ss['total_pnl']:.2f}</td>"
-                f"<td>{ss['avg_pnl']:.2f}</td>"
-                f"<td style='color:green'>{ss['best_trade']:.2f}</td>"
-                f"<td style='color:red'>{ss['worst_trade']:.2f}</td>"
-                f"<td style='color:orange'>{ss['max_drawdown']:.2f}</td>"
-                f"<td>{ss['profit_factor']}</td>"
-                f"<td>{ss['long_trades']}</td>"
-                f"<td>{ss['short_trades']}</td>"
-                f"<td>{ss['long_pnl']:.2f}</td>"
-                f"<td>{ss['short_pnl']:.2f}</td>"
-                f"</tr>"
-            )
-        html_parts.append("</table>")
+    # Open Positions
+    html_parts.append(f"<h2>Open Positions ({open_count}, Equity: <span class=\"{pnl_class(open_pnl)}\">{fmt(open_pnl)}</span>)</h2>")
+    html_parts.append("<table><tr><th>Symbol</th><th>Direction</th><th>Indicator</th><th>HTF</th><th>Entry Time</th><th>Entry Price</th><th>Last Price</th><th>Stake</th><th>Amount</th><th>Bars</th><th>PnL %</th><th>PnL</th><th>Status</th></tr>")
+    sorted_open_positions = sorted(open_positions, key=lambda p: p.get("entry_time", "") or "", reverse=True)
+    for pos in sorted_open_positions:
+        symbol = pos.get("symbol", "")
+        direction = pos.get("direction", "")
+        indicator = pos.get("indicator", "")
+        htf = pos.get("htf", "")
+        entry_time = pos.get("entry_time", "")[:16] if pos.get("entry_time") else ""
+        entry_price_val = float(pos.get("entry_price", 0) or 0)
+        last_price_val = float(pos.get("last_price", 0) or 0)
+        stake_val = float(pos.get("stake", 0) or 0)
+        amount = stake_val / entry_price_val if entry_price_val > 0 else 0
+        bars_held = pos.get("bars_held", "")
+        unrealized_pct = float(pos.get("unrealized_pct", 0) or 0)
+        unrealized_pnl = float(pos.get("unrealized_pnl", 0) or 0)
+        status = status_text(unrealized_pnl)
+        html_parts.append(f"<tr><td>{symbol}</td><td>{direction}</td><td>{indicator}</td><td>{htf}</td><td>{entry_time}</td><td>{fmt_price(entry_price_val)}</td><td>{fmt_price(last_price_val) if last_price_val else '-'}</td><td>{fmt(stake_val)}</td><td>{fmt(amount)}</td><td>{bars_held}</td><td class='{pnl_class(unrealized_pct)}'>{fmt_pct(unrealized_pct)}</td><td class='{pnl_class(unrealized_pnl)}'>{fmt(unrealized_pnl)}</td><td class='{pnl_class(unrealized_pnl)}'>{status}</td></tr>")
+    html_parts.append("</table>")
 
-    if not trades_df.empty:
-        full_cols = [c for c in [
-            "symbol","direction","indicator","htf","entry_time","entry_price","exit_time","exit_price","stake","pnl","reason"
-        ] if c in trades_df.columns]
+    # Closed Trades
+    html_parts.append(f"<h2>Closed Trades ({total_trades}, PnL: <span class=\"{pnl_class(total_pnl)}\">{fmt(total_pnl)}</span>)</h2>")
+    html_parts.append("<table><tr><th>Symbol</th><th>Direction</th><th>Indicator</th><th>HTF</th><th>Entry Time</th><th>Entry Price</th><th>Exit Time</th><th>Exit Price</th><th>Stake</th><th>Amount</th><th>PnL</th><th>%</th><th>Reason</th></tr>")
+    sorted_trades = sorted(trades, key=lambda t: t.get("entry_time", "") or "", reverse=True)
+    for t in sorted_trades:
+        symbol = t.get("symbol", "")
+        direction = t.get("direction", "")
+        indicator = t.get("indicator", "")
+        htf = t.get("htf", "")
+        entry_time = (t.get("entry_time", "") or "")[:16]
+        entry_price_val = float(t.get("entry_price", 0) or 0)
+        exit_time = (t.get("exit_time", "") or "")[:16]
+        exit_price_val = float(t.get("exit_price", 0) or 0)
+        stake_val = float(t.get("stake", 0) or 0)
+        amount = stake_val / entry_price_val if entry_price_val > 0 else 0
+        pnl = float(t.get("pnl", 0) or 0)
+        pnl_pct = (exit_price_val / entry_price_val - 1) * 100 if entry_price_val > 0 else 0
+        reason = t.get("exit_reason", "") or t.get("reason", "")
+        html_parts.append(f"<tr><td>{symbol}</td><td>{direction}</td><td>{indicator}</td><td>{htf}</td><td>{entry_time}</td><td>{fmt_price(entry_price_val)}</td><td>{exit_time}</td><td>{fmt_price(exit_price_val)}</td><td>{fmt(stake_val)}</td><td>{fmt(amount)}</td><td class='{pnl_class(pnl)}'>{fmt(pnl)}</td><td class='{pnl_class(pnl_pct)}'>{fmt_pct(pnl_pct)}</td><td>{reason}</td></tr>")
 
-        # Prepare display DataFrame - ensure numeric columns are actually numeric
-        trades_display = trades_df[full_cols].copy()
-
-        # Remove rows where essential columns are NaN (filter out empty rows)
-        if "symbol" in trades_display.columns:
-            trades_display = trades_display[trades_display["symbol"].notna()]
-
-        for col in ["entry_price", "exit_price", "stake", "pnl"]:
-            if col in trades_display.columns:
-                trades_display[col] = pd.to_numeric(trades_display[col], errors="coerce")
-
-        # Use formatters parameter to format specific columns during HTML generation
-        # Note: Must use default parameter to avoid closure bug with lambda in loop
-        def make_formatter(precision):
-            return lambda x: f"{x:.{precision}f}" if pd.notna(x) else ""
-
-        formatters = {}
-        for col in ["entry_price", "exit_price", "stake", "pnl"]:
-            if col in trades_display.columns:
-                formatters[col] = make_formatter(8)
-
-        # Separate Long and Short trades
-        if "direction" in trades_display.columns:
-            long_trades = trades_display[trades_display["direction"].str.lower() == "long"].copy()
-            short_trades = trades_display[trades_display["direction"].str.lower() == "short"].copy()
-
-            # Display Long Trades
-            if not long_trades.empty:
-                long_pnl = long_trades["pnl"].sum() if "pnl" in long_trades.columns else 0
-                html_parts.append(f"<h2>Long Trades ({len(long_trades)} trades, PnL: {long_pnl:.2f} USDT)</h2>")
-                html_parts.append(long_trades.to_html(index=False, escape=False, formatters=formatters))
-
-            # Display Short Trades
-            if not short_trades.empty:
-                short_pnl = short_trades["pnl"].sum() if "pnl" in short_trades.columns else 0
-                html_parts.append(f"<h2>Short Trades ({len(short_trades)} trades, PnL: {short_pnl:.2f} USDT)</h2>")
-                html_parts.append(short_trades.to_html(index=False, escape=False, formatters=formatters))
-        else:
-            # Fallback if no direction column
-            html_parts.append("<h2>Complete Closed Trades (with Entry and Exit)</h2>")
-            html_parts.append(trades_display.to_html(index=False, escape=False, formatters=formatters))
-
-    if not open_positions_df.empty:
-        # Prepare display DataFrame - ensure numeric columns are actually numeric
-        open_display = open_positions_df.copy()
-
-        # Remove rows where essential columns are NaN (filter out empty rows)
-        if "symbol" in open_display.columns:
-            open_display = open_display[open_display["symbol"].notna()]
-
-        # Convert all numeric columns to proper types
-        for col in ["entry_price", "stake", "last_price", "unrealized_pnl", "unrealized_pct"]:
-            if col in open_display.columns:
-                open_display[col] = pd.to_numeric(open_display[col], errors="coerce")
-
-        for col in ["param_a", "param_b", "atr_mult"]:
-            if col in open_display.columns:
-                open_display[col] = pd.to_numeric(open_display[col], errors="coerce")
-
-        for col in ["min_hold_bars", "bars_held"]:
-            if col in open_display.columns:
-                open_display[col] = pd.to_numeric(open_display[col], errors="coerce")
-
-        # Use formatters parameter to format specific columns during HTML generation
-        # Note: Must use factory function to avoid closure bug with lambda in loop
-        def make_float_formatter(precision):
-            return lambda x: f"{x:.{precision}f}" if pd.notna(x) else ""
-
-        def make_int_formatter():
-            return lambda x: f"{int(x)}" if pd.notna(x) else "0"
-
-        formatters = {}
-
-        # 8 decimal places for prices and amounts
-        for col in ["entry_price", "stake", "last_price", "unrealized_pnl", "unrealized_pct"]:
-            if col in open_display.columns:
-                formatters[col] = make_float_formatter(8)
-
-        # 2 decimal places for float params
-        for col in ["param_a", "param_b", "atr_mult"]:
-            if col in open_display.columns:
-                formatters[col] = make_float_formatter(2)
-
-        # Integers for counts
-        for col in ["min_hold_bars", "bars_held"]:
-            if col in open_display.columns:
-                formatters[col] = make_int_formatter()
-
-        # Separate Long and Short open positions
-        if "direction" in open_display.columns:
-            long_open = open_display[open_display["direction"].str.lower() == "long"].copy()
-            short_open = open_display[open_display["direction"].str.lower() == "short"].copy()
-
-            # Display Long Open Positions
-            if not long_open.empty:
-                long_equity = compute_net_open_equity(long_open)
-                html_parts.append(f"<h2>Long Open Positions ({len(long_open)} positions, Equity: {long_equity:.2f} USDT)</h2>")
-                html_parts.append(long_open.to_html(index=False, escape=False, formatters=formatters))
-
-            # Display Short Open Positions
-            if not short_open.empty:
-                short_equity = compute_net_open_equity(short_open)
-                html_parts.append(f"<h2>Short Open Positions ({len(short_open)} positions, Equity: {short_equity:.2f} USDT)</h2>")
-                html_parts.append(short_open.to_html(index=False, escape=False, formatters=formatters))
-        else:
-            # Fallback if no direction column
-            html_parts.append("<h2>Open positions</h2>")
-            html_parts.append(open_display.to_html(index=False, escape=False, formatters=formatters))
-
+    html_parts.append("</table>")
     html_parts.append("</body></html>")
 
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as fh:
-        fh.write("".join(html_parts))
-    print(f"[Simulation] Summary HTML saved to {path}")
-
-
-def write_summary_json(summary: Dict[str, Any], path: str) -> None:
-    with open(path, "w", encoding="utf-8") as fh:
-        json.dump(summary, fh, ensure_ascii=False, indent=2)
-    print(f"[Simulation] Summary JSON saved to {path}")
+        fh.write("\n".join(html_parts))
+    print(f"[Summary] HTML saved to {path}")
 
 
 def generate_trade_charts(trades_df: pd.DataFrame, open_positions_df: pd.DataFrame = None, output_dir: str = os.path.join("report_html", "charts")) -> None:
@@ -2478,9 +2559,8 @@ def write_live_reports(final_state: Dict, closed_trades: List[TradeResult]) -> N
     open_df = open_positions_to_dataframe(open_positions)
     start_ts, end_ts = _derive_summary_window(all_trades_df)
     summary = build_summary_payload(all_trades_df, open_df, final_state, start_ts, end_ts)
-    generate_summary_html(summary, all_trades_df, open_df, SIMULATION_SUMMARY_HTML)
     write_summary_json(summary, SIMULATION_SUMMARY_JSON)
-    
+
     # Generate charts with ALL historical trades + open positions
     if not all_trades_df.empty or not open_df.empty:
         chart_df = all_trades_df.copy() if not all_trades_df.empty else pd.DataFrame()
@@ -2491,11 +2571,23 @@ def write_live_reports(final_state: Dict, closed_trades: List[TradeResult]) -> N
                     subset=["symbol", "entry_time", "exit_time", "exit_price"], keep="last"
                 )
         generate_trade_charts(chart_df, open_df, output_dir=os.path.join(REPORT_DIR, "charts"))
-    
+
     if current_trades_df.empty:
         print(f"[Live] Snapshot updated with no new trades this cycle. Total history: {len(all_trades_df)} trades.")
     else:
         print(f"[Live] Snapshot includes {len(current_trades_df)} new trade(s). Total history: {len(all_trades_df)} trades.")
+
+    # Regenerate dashboards
+    try:
+        from TestnetDashboard import generate_dashboard
+        output_dir = Path(REPORT_DIR)
+        ds_start = get_dashboard_start_str()
+        generate_dashboard(start_date=ds_start, output_dir=output_dir, german=False)
+        generate_dashboard(start_date=ds_start, output_dir=output_dir, german=True)
+        print(f"[Dashboard] Updated (EN + DE) in {REPORT_DIR}")
+    except Exception as e:
+        print(f"[Dashboard] Failed to update: {e}")
+
     return float(summary.get("final_capital", final_state.get("total_capital", 0.0)))
 
 
@@ -3226,10 +3318,20 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
         write_open_positions_report(open_positions, open_path, open_json_path)
         open_df = open_positions_to_dataframe(open_positions)
         summary_data = build_summary_payload(trades_df, open_df, final_state, start_ts, end_ts)
-        summary_html_path = args.summary_html or SIMULATION_SUMMARY_HTML
-        generate_summary_html(summary_data, trades_df, open_df, summary_html_path)
         summary_json_path = args.summary_json or SIMULATION_SUMMARY_JSON
         write_summary_json(summary_data, summary_json_path)
+
+        # Regenerate dashboards
+        try:
+            from TestnetDashboard import generate_dashboard
+            output_dir = Path(REPORT_DIR)
+            ds_start = get_dashboard_start_str()
+            generate_dashboard(start_date=ds_start, output_dir=output_dir, german=False)
+            generate_dashboard(start_date=ds_start, output_dir=output_dir, german=True)
+            print(f"[Dashboard] Updated (EN + DE) in {REPORT_DIR}")
+        except Exception as e:
+            print(f"[Dashboard] Failed to update: {e}")
+
         symbol_stats = summary_data.get("symbol_stats", [])
         if symbol_stats:
             print("\n" + "=" * 120)
@@ -3316,10 +3418,19 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
         write_open_positions_report(open_positions, open_path, open_json_path)
         open_df = open_positions_to_dataframe(open_positions)
         summary_data = build_summary_payload(trades_df, open_df, final_state, start_ts, end_ts)
-        summary_html_path = args.summary_html or SIMULATION_SUMMARY_HTML
-        generate_summary_html(summary_data, trades_df, open_df, summary_html_path)
         summary_json_path = args.summary_json or SIMULATION_SUMMARY_JSON
         write_summary_json(summary_data, summary_json_path)
+
+        # Regenerate dashboards
+        try:
+            from TestnetDashboard import generate_dashboard
+            output_dir = Path(REPORT_DIR)
+            ds_start = get_dashboard_start_str()
+            generate_dashboard(start_date=ds_start, output_dir=output_dir, german=False)
+            generate_dashboard(start_date=ds_start, output_dir=output_dir, german=True)
+            print(f"[Dashboard] Updated (EN + DE) in {REPORT_DIR}")
+        except Exception as e:
+            print(f"[Dashboard] Failed to update: {e}")
 
         # Print per-symbol statistics to console
         symbol_stats = summary_data.get("symbol_stats", [])
