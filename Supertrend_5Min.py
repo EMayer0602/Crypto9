@@ -126,9 +126,9 @@ def map_symbol_for_params(symbol: str) -> str:
 	return TESTNET_TO_USDC_MAP.get(symbol, symbol)
 
 
-RUN_PARAMETER_SWEEP = False  # ← Deaktiviert, Parameter bereits berechnet
+RUN_PARAMETER_SWEEP = True  # ← Sweep aktiviert
 RUN_SAVED_PARAMS = False
-RUN_OVERALL_BEST = True  # ← AKTIVIERT für Portfolio-Simulation
+RUN_OVERALL_BEST = False
 ENABLE_LONGS = True
 ENABLE_SHORTS = False  # Shorts deaktiviert – nur Long-Trades
 
@@ -184,9 +184,9 @@ USE_DIVERGENCE_FILTER = True  # Detect price/RSI divergence (bull traps)
 DIVERGENCE_LOOKBACK = 10  # How many bars to look back for divergence
 DIVERGENCE_RSI_PERIOD = 14  # RSI period for divergence detection
 
-START_EQUITY = 14000.0
+START_EQUITY = 16500.0  # Gemeinsames Konto, alle Paare
 RISK_FRACTION = 1
-STAKE_DIVISOR = 14
+STAKE_DIVISOR = 14  # 16500/14 ≈ 1178 pro Trade, max 12 offene Positionen
 FEE_RATE = 0.001
 ATR_WINDOW = 14
 ATR_STOP_MULTS = [None, 1.0, 1.5, 2.0]
@@ -196,11 +196,8 @@ USE_TRAILING_STOP = True  # Enable trailing stop after peak
 TRAILING_STOP_PCT = 0.05  # 5% drawdown from peak triggers exit
 TRAILING_STOP_ACTIVATION_PCT = 0.02  # Activate after 2% profit
 
-USE_PARTIAL_EXIT = True  # Take partial profits at targets
-PARTIAL_EXIT_LEVELS = [
-    {"profit_pct": 0.03, "exit_pct": 0.30},  # At +3%, sell 30%
-    {"profit_pct": 0.05, "exit_pct": 0.30},  # At +5%, sell another 30%
-]
+USE_PARTIAL_EXIT = False  # Partial exits deaktiviert
+PARTIAL_EXIT_LEVELS = []
 
 USE_PROFIT_TARGET = True  # Full exit at profit target
 PROFIT_TARGET_PCT = 0.10  # 10% profit = full exit
@@ -861,8 +858,8 @@ def get_enabled_directions():
 
 
 def get_highertimeframe_candidates():
-	# Include shorter timeframes (1h, 2h) plus standard range (3h-24h)
-	return ["1h", "2h"] + [f"{hours}h" for hours in range(3, 25)]
+	# Praxistaugliche HTF-Werte für den Sweep (4h, 6h, 8h, 12h)
+	return ["4h", "6h", "8h", "12h"]
 
 
 def compute_supertrend(df, length=10, factor=3.0):
