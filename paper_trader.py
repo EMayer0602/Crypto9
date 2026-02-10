@@ -86,7 +86,7 @@ def get_report_dir(use_testnet: bool = False) -> str:
     return "report_testnet" if use_testnet else "report_html"
 BEST_PARAMS_CSV = st.OVERALL_PARAMS_CSV
 START_TOTAL_CAPITAL = 16_500.0
-MAX_OPEN_POSITIONS = 10
+MAX_OPEN_POSITIONS = 12
 STAKE_DIVISOR = 10  # stake = current total_capital / STAKE_DIVISOR = 16500/10 = 1650
 DEFAULT_DIRECTION_CAPITAL = 2_800.0
 BASE_BAR_MINUTES = st.timeframe_to_minutes(st.TIMEFRAME)

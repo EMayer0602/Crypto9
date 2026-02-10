@@ -40,7 +40,7 @@ SUPERTREND_FACTOR = 3.0
 # =====================================================================
 
 def generate_sweep_dashboard():
-    """Generate report_html/sweep_dashboard.html from best_params_overall.csv."""
+    """Generate report_html/sweep_dashboard.html from best_params_overall.csv + Trade-CSVs."""
     os.makedirs(REPORT_DIR, exist_ok=True)
     params_csv = os.path.join(REPORT_DIR, "best_params_overall.csv")
     if not os.path.exists(params_csv):
@@ -58,7 +58,6 @@ def generate_sweep_dashboard():
         print("[Dashboard] Keine Long-Ergebnisse vorhanden.")
         return
 
-    # Numerische Spalten sicherstellen
     for col in ("FinalEquity", "Trades", "WinRate", "MaxDrawdown", "AvgPnL", "ProfitFactor"):
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
@@ -66,6 +65,8 @@ def generate_sweep_dashboard():
     df.sort_values("FinalEquity", ascending=False, inplace=True)
 
     now = datetime.now(st.BERLIN_TZ).strftime("%Y-%m-%d %H:%M:%S %Z")
+    stake_info = f"Equity / {st.STAKE_DIVISOR} (dynamisch)"
+    max_pos = 12
 
     # ── Summary stats ────────────────────────────────────────────────
     total_symbols = df["Symbol"].nunique()
@@ -77,12 +78,12 @@ def generate_sweep_dashboard():
 
     # ── Equity bar chart ─────────────────────────────────────────────
     fig_equity = go.Figure()
-    colors = ["#27ae60" if eq >= st.START_EQUITY else "#e74c3c" for eq in df["FinalEquity"]]
+    colors = ["#27ae60" if eq >= st.START_EQUITY else "#e74c3c" for eq in df["FinalEquity"].values]
     fig_equity.add_trace(go.Bar(
-        x=df["Symbol"],
-        y=df["FinalEquity"],
+        x=df["Symbol"].values.tolist(),
+        y=df["FinalEquity"].values.tolist(),
         marker_color=colors,
-        text=[f"${v:,.0f}" for v in df["FinalEquity"]],
+        text=[f"${v:,.0f}" for v in df["FinalEquity"].values],
         textposition="outside",
     ))
     fig_equity.add_hline(y=st.START_EQUITY, line_dash="dash", line_color="gray",
@@ -90,27 +91,25 @@ def generate_sweep_dashboard():
     fig_equity.update_layout(
         title="Final Equity pro Symbol (nur Long)",
         yaxis_title="Equity (USD)",
-        height=420,
-        margin=dict(t=50, b=30),
+        height=420, margin=dict(t=50, b=30), template="plotly_dark",
     )
     equity_html = pio.to_html(fig_equity, include_plotlyjs=False, full_html=False)
 
     # ── Win-Rate bar chart ───────────────────────────────────────────
     fig_wr = go.Figure()
-    wr_colors = ["#2980b9" if wr >= 0.6 else "#e67e22" for wr in df["WinRate"]]
+    wr_colors = ["#2980b9" if wr >= 0.6 else "#e67e22" for wr in df["WinRate"].values]
     fig_wr.add_trace(go.Bar(
-        x=df["Symbol"],
-        y=df["WinRate"] * 100,
+        x=df["Symbol"].values.tolist(),
+        y=(df["WinRate"] * 100).values.tolist(),
         marker_color=wr_colors,
-        text=[f"{v*100:.1f}%" for v in df["WinRate"]],
+        text=[f"{v*100:.1f}%" for v in df["WinRate"].values],
         textposition="outside",
     ))
     fig_wr.add_hline(y=50, line_dash="dash", line_color="gray", annotation_text="50%")
     fig_wr.update_layout(
         title="Win-Rate pro Symbol (nur Long)",
         yaxis_title="Win-Rate (%)",
-        height=380,
-        margin=dict(t=50, b=30),
+        height=380, margin=dict(t=50, b=30), template="plotly_dark",
     )
     winrate_html = pio.to_html(fig_wr, include_plotlyjs=False, full_html=False)
 
@@ -133,6 +132,94 @@ def generate_sweep_dashboard():
         table_df["ProfitFactor"] = table_df["ProfitFactor"].apply(lambda v: f"{v:.2f}")
     param_table_html = table_df.to_html(index=False, classes="param-table", border=0, justify="left")
 
+    # ── Trade-Listen pro Symbol ──────────────────────────────────────
+    trade_sections = []
+    nav_links = []
+    for _, row in df.iterrows():
+        symbol = row["Symbol"]
+        anchor = symbol.replace("/", "_")
+        nav_links.append(f'<a href="#{anchor}">{symbol}</a>')
+        trades_csv = row.get("TradesCSV", "")
+        if not trades_csv or pd.isna(trades_csv) or not os.path.exists(trades_csv):
+            trade_sections.append(f'<div id="{anchor}" class="symbol-section"><h3>{symbol}</h3>'
+                                  f'<p class="no-trades">Keine Trade-CSV vorhanden ({trades_csv})</p></div>')
+            continue
+
+        trades = pd.read_csv(trades_csv, sep=";", decimal=",")
+        if trades.empty:
+            trade_sections.append(f'<div id="{anchor}" class="symbol-section"><h3>{symbol}</h3>'
+                                  f'<p class="no-trades">Keine Trades</p></div>')
+            continue
+
+        # Nur Long
+        if "Direction" in trades.columns:
+            trades = trades[trades["Direction"].str.lower() == "long"]
+
+        # Numerisch konvertieren
+        for col in ("Stake", "Fees", "PnL (USD)", "Equity", "Entry", "ExitPreis"):
+            if col in trades.columns:
+                trades[col] = pd.to_numeric(trades[col], errors="coerce")
+
+        # Stats
+        n_trades = len(trades)
+        wins = (trades["PnL (USD)"] > 0).sum() if "PnL (USD)" in trades.columns else 0
+        wr = wins / n_trades * 100 if n_trades > 0 else 0
+        total_pnl = trades["PnL (USD)"].sum() if "PnL (USD)" in trades.columns else 0
+        final_eq = trades["Equity"].iloc[-1] if "Equity" in trades.columns and len(trades) > 0 else 0
+
+        # Equity Curve
+        if "Equity" in trades.columns and len(trades) > 1:
+            eq_values = trades["Equity"].values.tolist()
+            eq_x = list(range(len(eq_values)))
+            fig_eq = go.Figure()
+            fig_eq.add_trace(go.Scatter(
+                x=eq_x, y=eq_values,
+                mode="lines", fill="tozeroy",
+                line=dict(color="#00d4ff", width=2),
+                fillcolor="rgba(0,212,255,0.15)",
+            ))
+            fig_eq.update_layout(
+                height=200, margin=dict(t=10, b=30, l=60, r=20),
+                template="plotly_dark",
+                xaxis=dict(title="Trade #"), yaxis=dict(title="Equity"),
+            )
+            eq_chart = pio.to_html(fig_eq, include_plotlyjs=False, full_html=False)
+        else:
+            eq_chart = ""
+
+        # Trade Tabelle (formatiert)
+        trade_display = trades.copy()
+        fmt_cols = {
+            "Entry": lambda v: f"{v:.4f}" if pd.notna(v) else "",
+            "ExitPreis": lambda v: f"{v:.4f}" if pd.notna(v) else "",
+            "Stake": lambda v: f"${v:,.2f}" if pd.notna(v) else "",
+            "Fees": lambda v: f"${v:,.2f}" if pd.notna(v) else "",
+            "PnL (USD)": lambda v: f"${v:+,.2f}" if pd.notna(v) else "",
+            "Equity": lambda v: f"${v:,.2f}" if pd.notna(v) else "",
+        }
+        for col, fmt in fmt_cols.items():
+            if col in trade_display.columns:
+                trade_display[col] = trade_display[col].apply(fmt)
+
+        show_cols = [c for c in ["Zeit", "Entry", "ExitZeit", "ExitPreis", "Stake",
+                                  "ExitReason", "PnL (USD)", "Equity"] if c in trade_display.columns]
+        trade_table = trade_display[show_cols].to_html(
+            index=False, classes="trade-table", border=0, justify="left")
+
+        pnl_class = "positive" if total_pnl >= 0 else "negative"
+        section = f'''<div id="{anchor}" class="symbol-section">
+  <h3>{symbol} <span class="badge badge-long">LONG</span>
+    <span class="stats">{n_trades} Trades | WR: {wr:.1f}% |
+    PnL: <span class="{pnl_class}">${total_pnl:+,.2f}</span> |
+    Final: ${final_eq:,.2f}</span></h3>
+  <div class="chart-container">{eq_chart}</div>
+  <div class="table-scroll">{trade_table}</div>
+</div>'''
+        trade_sections.append(section)
+        print(f"  [Dashboard] {symbol}: {n_trades} Trades, PnL=${total_pnl:+,.2f}")
+
+    nav_html = " | ".join(nav_links)
+
     # ── Assemble HTML ────────────────────────────────────────────────
     html = f"""<!DOCTYPE html>
 <html lang="de">
@@ -144,35 +231,48 @@ def generate_sweep_dashboard():
   body {{ font-family: 'Segoe UI', Arial, sans-serif; margin: 0; padding: 20px; background: #1a1a2e; color: #e0e0e0; }}
   h1 {{ color: #00d4ff; border-bottom: 2px solid #00d4ff; padding-bottom: 10px; }}
   h2 {{ color: #00d4ff; margin-top: 30px; }}
-  .summary-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin: 20px 0; }}
+  h3 {{ color: #e0e0e0; margin-top: 20px; border-bottom: 1px solid #0f3460; padding-bottom: 8px; }}
+  h3 .stats {{ font-size: 14px; font-weight: normal; color: #aaa; margin-left: 10px; }}
+  .nav {{ background: #16213e; padding: 12px 20px; border-radius: 8px; margin: 15px 0; font-size: 14px; }}
+  .nav a {{ color: #00d4ff; text-decoration: none; margin: 0 4px; }}
+  .nav a:hover {{ text-decoration: underline; }}
+  .summary-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px; margin: 20px 0; }}
   .summary-card {{ background: #16213e; border-radius: 10px; padding: 20px; text-align: center; border: 1px solid #0f3460; }}
-  .summary-card .value {{ font-size: 28px; font-weight: bold; color: #00d4ff; }}
+  .summary-card .value {{ font-size: 26px; font-weight: bold; color: #00d4ff; }}
   .summary-card .label {{ font-size: 13px; color: #aaa; margin-top: 5px; }}
-  .param-table {{ width: 100%; border-collapse: collapse; margin: 15px 0; font-size: 14px; }}
-  .param-table th {{ background: #0f3460; padding: 10px 8px; text-align: left; border-bottom: 2px solid #00d4ff; }}
-  .param-table td {{ padding: 8px; border-bottom: 1px solid #2a2a4a; }}
-  .param-table tr:hover {{ background: #16213e; }}
-  .chart-container {{ background: #16213e; border-radius: 10px; padding: 15px; margin: 15px 0; border: 1px solid #0f3460; }}
+  .param-table, .trade-table {{ width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 13px; }}
+  .param-table th, .trade-table th {{ background: #0f3460; padding: 8px 6px; text-align: left; border-bottom: 2px solid #00d4ff; }}
+  .param-table td, .trade-table td {{ padding: 6px; border-bottom: 1px solid #2a2a4a; }}
+  .param-table tr:hover, .trade-table tr:hover {{ background: #16213e; }}
+  .chart-container {{ background: #16213e; border-radius: 10px; padding: 10px; margin: 10px 0; border: 1px solid #0f3460; }}
+  .symbol-section {{ margin-bottom: 30px; background: #0d1b2a; border-radius: 10px; padding: 15px; }}
+  .table-scroll {{ max-height: 400px; overflow-y: auto; }}
   .footer {{ margin-top: 40px; text-align: center; color: #666; font-size: 12px; }}
   .badge {{ display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 12px; font-weight: bold; }}
   .badge-long {{ background: #27ae60; color: white; }}
   .note {{ background: #16213e; border-left: 4px solid #e74c3c; padding: 10px 15px; margin: 15px 0; border-radius: 0 8px 8px 0; }}
+  .positive {{ color: #27ae60; }}
+  .negative {{ color: #e74c3c; }}
+  .no-trades {{ color: #888; font-style: italic; }}
 </style>
 </head>
 <body>
 
 <h1>Sweep Dashboard – Crypto9</h1>
-<p>Stand: {now} &nbsp; <span class="badge badge-long">NUR LONG</span> &nbsp; Max Open Positions: 10</p>
+<p>Stand: {now} &nbsp; <span class="badge badge-long">NUR LONG</span> &nbsp;
+  Max Open Positions: {max_pos} &nbsp; Stake: {stake_info}</p>
 
-<div class="note">Short-Trades sind deaktiviert. Alle Ergebnisse zeigen ausschließlich Long-Strategien.</div>
+<div class="note">Short-Trades sind deaktiviert. Alle Ergebnisse zeigen ausschließlich Long-Strategien.
+  Dynamischer Stake: Position = aktuelle Equity / {st.STAKE_DIVISOR}.</div>
 
 <div class="summary-grid">
   <div class="summary-card"><div class="value">{total_symbols}</div><div class="label">Symbole</div></div>
-  <div class="summary-card"><div class="value">${avg_equity:,.0f}</div><div class="label">Ø Final Equity</div></div>
-  <div class="summary-card"><div class="value">{avg_winrate:.1f}%</div><div class="label">Ø Win-Rate</div></div>
+  <div class="summary-card"><div class="value">${avg_equity:,.0f}</div><div class="label">&Oslash; Final Equity</div></div>
+  <div class="summary-card"><div class="value">{avg_winrate:.1f}%</div><div class="label">&Oslash; Win-Rate</div></div>
   <div class="summary-card"><div class="value">{total_trades:,}</div><div class="label">Total Trades</div></div>
   <div class="summary-card"><div class="value">{best_symbol}</div><div class="label">Bestes Symbol</div></div>
   <div class="summary-card"><div class="value">${best_equity:,.0f}</div><div class="label">Beste Equity</div></div>
+  <div class="summary-card"><div class="value">{max_pos}</div><div class="label">Max Positionen</div></div>
 </div>
 
 <h2>Final Equity pro Symbol</h2>
@@ -183,6 +283,10 @@ def generate_sweep_dashboard():
 
 <h2>Optimale Parameter (Long)</h2>
 {param_table_html}
+
+<h2>Trade-Listen pro Symbol</h2>
+<div class="nav">Navigation: {nav_html}</div>
+{''.join(trade_sections)}
 
 <div class="footer">Crypto9 Sweep Dashboard – generiert am {now}</div>
 </body>
