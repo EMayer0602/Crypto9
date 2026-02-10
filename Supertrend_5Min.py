@@ -1952,7 +1952,7 @@ def detect_divergence(df):
 	return df
 
 
-def prepare_symbol_dataframe(symbol, use_all_cached_data=False):
+def prepare_symbol_dataframe(symbol, use_all_cached_data=False, lookback=None):
 	"""
 	Prepare symbol dataframe with indicators.
 
@@ -1960,8 +1960,14 @@ def prepare_symbol_dataframe(symbol, use_all_cached_data=False):
 		symbol: Trading pair
 		use_all_cached_data: If True, load ALL cached historical data (for simulations)
 	                         If False, use LOOKBACK limit (for live trading)
+		lookback: Optional custom lookback value (overrides LOOKBACK constant)
 	"""
-	limit = None if use_all_cached_data else LOOKBACK
+	if lookback is not None:
+		limit = lookback
+	elif use_all_cached_data:
+		limit = None
+	else:
+		limit = LOOKBACK
 	df = fetch_data(symbol, TIMEFRAME, limit)
 	df = attach_higher_timeframe_trend(df, symbol)
 	# Debug: Check htf_indicator
