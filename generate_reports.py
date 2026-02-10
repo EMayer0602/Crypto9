@@ -243,23 +243,14 @@ def compute_indicators_daily(df_daily):
 
 def build_market_phase_chart(symbol, df_daily, df_jma, df_kama, df_supertrend):
     """
-    Build a 2-row chart:
-      Row 1: 1D Candlesticks + JMA + KAMA + Supertrend lines
-      Row 2: Market phases (Up/Down/Flat) as go.Heatmap – zuverlässig, keine Diagonalen
+    Build TWO separate figures (no subplots – avoids Candlestick+Heatmap conflicts):
+      fig_candle: 1D Candlesticks + JMA + KAMA + Supertrend lines
+      fig_phase:  Market phases (Up/Down/Flat) as go.Heatmap
     """
-    fig = make_subplots(
-        rows=2, cols=1,
-        shared_xaxes=True,
-        vertical_spacing=0.08,
-        row_heights=[0.60, 0.40],
-        subplot_titles=(
-            f"{symbol} – 1D Candlesticks + JMA / KAMA / Supertrend",
-            f"{symbol} – Marktphasen + Consensus (2 von 3 = Signal)",
-        ),
-    )
+    # ── Figure 1: Candlestick + Indikatoren ──────────────────────────
+    fig_candle = go.Figure()
 
-    # ── Row 1: Candlesticks ──────────────────────────────────────────
-    fig.add_trace(go.Candlestick(
+    fig_candle.add_trace(go.Candlestick(
         x=df_daily.index,
         open=df_daily["open"],
         high=df_daily["high"],
@@ -267,36 +258,47 @@ def build_market_phase_chart(symbol, df_daily, df_jma, df_kama, df_supertrend):
         close=df_daily["close"],
         name="Price",
         increasing_line_color="#27ae60",
+        increasing_fillcolor="#27ae60",
         decreasing_line_color="#e74c3c",
-    ), row=1, col=1)
+        decreasing_fillcolor="#e74c3c",
+    ))
 
-    # JMA line
-    fig.add_trace(go.Scatter(
+    fig_candle.add_trace(go.Scatter(
         x=df_jma.index, y=df_jma["jma"],
         mode="lines", name=f"JMA({JMA_LENGTH})",
         line=dict(color="#f39c12", width=2),
-    ), row=1, col=1)
+    ))
 
-    # KAMA line
-    fig.add_trace(go.Scatter(
+    fig_candle.add_trace(go.Scatter(
         x=df_kama.index, y=df_kama["kama"],
         mode="lines", name=f"KAMA({KAMA_LENGTH},{KAMA_SLOW_LENGTH})",
         line=dict(color="#3498db", width=2),
-    ), row=1, col=1)
+    ))
 
-    # Supertrend line
-    fig.add_trace(go.Scatter(
+    fig_candle.add_trace(go.Scatter(
         x=df_supertrend.index, y=df_supertrend["supertrend"],
         mode="lines", name=f"Supertrend({SUPERTREND_LENGTH},{SUPERTREND_FACTOR})",
         line=dict(color="#e74c3c", width=2, dash="dot"),
-    ), row=1, col=1)
+    ))
 
-    # ── Row 2: Market Phases als Heatmap ─────────────────────────────
+    price_min = df_daily["low"].min() * 0.98
+    price_max = df_daily["high"].max() * 1.02
+
+    fig_candle.update_layout(
+        title=f"{symbol} – 1D Candlesticks + JMA / KAMA / Supertrend",
+        height=500,
+        showlegend=True,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        xaxis=dict(rangeslider=dict(visible=False), type="date"),
+        yaxis=dict(title="Preis", range=[price_min, price_max]),
+        template="plotly_dark",
+    )
+
+    # ── Figure 2: Marktphasen-Heatmap ────────────────────────────────
     phase_jma = classify_phase_by_slope(df_jma["jma"], smooth_window=5, threshold_pct=0.001)
     phase_kama = classify_phase_by_slope(df_kama["kama"], smooth_window=5, threshold_pct=0.001)
     phase_st = classify_phase_by_slope(df_supertrend["supertrend"], smooth_window=3, threshold_pct=0.002)
 
-    # Consensus: Mehrheitsentscheidung der 3 Indikatoren
     phase_consensus = pd.Series("Flat", index=df_daily.index)
     for idx in df_daily.index:
         votes = [phase_jma.get(idx, "Flat"), phase_kama.get(idx, "Flat"), phase_st.get(idx, "Flat")]
@@ -307,7 +309,6 @@ def build_market_phase_chart(symbol, df_daily, df_jma, df_kama, df_supertrend):
         elif down_count >= 2:
             phase_consensus[idx] = "Down"
 
-    # Phasen → Zahlenwerte: Down=0, Flat=1, Up=2
     phase_map = {"Down": 0, "Flat": 1, "Up": 2}
 
     indicators_data = [
@@ -328,37 +329,36 @@ def build_market_phase_chart(symbol, df_daily, df_jma, df_kama, df_supertrend):
         text_matrix.append(row_text)
         y_labels.append(name)
 
-    fig.add_trace(go.Heatmap(
+    fig_phase = go.Figure()
+
+    fig_phase.add_trace(go.Heatmap(
         x=df_daily.index,
         y=y_labels,
         z=z_matrix,
         text=text_matrix,
         hovertemplate="%{text}<extra></extra>",
         colorscale=[
-            [0.0, "#e74c3c"],   # Down = rot
-            [0.5, "#7f8c8d"],   # Flat = grau
-            [1.0, "#27ae60"],   # Up   = grün
+            [0.0, "#e74c3c"],
+            [0.5, "#7f8c8d"],
+            [1.0, "#27ae60"],
         ],
         showscale=False,
         xgap=1,
         ygap=4,
         zmin=0,
         zmax=2,
-    ), row=2, col=1)
+    ))
 
-    fig.update_layout(
-        height=900,
-        showlegend=True,
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        xaxis=dict(rangeslider=dict(visible=False)),
-        xaxis2=dict(type="date"),
+    fig_phase.update_layout(
+        title=f"{symbol} – Marktphasen + Consensus (2 von 3 = Signal)",
+        height=250,
+        xaxis=dict(type="date"),
+        yaxis=dict(title="Indikator", fixedrange=True),
         template="plotly_dark",
+        margin=dict(t=40, b=30),
     )
-    fig.update_yaxes(title_text="Preis", row=1, col=1)
-    fig.update_yaxes(title_text="Indikator", fixedrange=True, row=2, col=1)
-    fig.update_xaxes(title_text="Datum", row=2, col=1)
 
-    return fig
+    return fig_candle, fig_phase
 
 
 def generate_market_phase_report():
@@ -380,9 +380,10 @@ def generate_market_phase_report():
                 continue
 
             df_jma, df_kama, df_supertrend = compute_indicators_daily(df_daily)
-            fig = build_market_phase_chart(symbol, df_daily, df_jma, df_kama, df_supertrend)
-            fig_html = pio.to_html(fig, include_plotlyjs=False, full_html=False)
-            chart_sections.append((symbol, fig_html))
+            fig_candle, fig_phase = build_market_phase_chart(symbol, df_daily, df_jma, df_kama, df_supertrend)
+            candle_html = pio.to_html(fig_candle, include_plotlyjs=False, full_html=False)
+            phase_html = pio.to_html(fig_phase, include_plotlyjs=False, full_html=False)
+            chart_sections.append((symbol, candle_html + phase_html))
         except Exception as exc:
             print(f"[MarketPhase] Fehler bei {symbol}: {exc}")
             continue
