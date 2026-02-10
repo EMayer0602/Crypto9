@@ -2993,6 +2993,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     )
     parser.add_argument("--testnet", action="store_true", help="Use Binance testnet credentials and endpoints")
     parser.add_argument("--debug-signals", action="store_true", help="Verbose logging for entry filter decisions")
+    parser.add_argument("--sweep", action="store_true", help="Run full parameter sweep (all indicators × HTFs × param combos), then simulate with best params")
     parser.add_argument("--refresh-params", action="store_true", help="Re-run overall-best parameter export before trading")
     parser.add_argument("--reset-state", action="store_true", help="Delete the saved state before running")
     parser.add_argument(
@@ -3146,6 +3147,91 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
         st.configure_exchange(use_testnet=use_testnet)
         order_executor = BinanceOrderExecutor(st.get_exchange())
         configure_exchange_flag = False
+
+    if args.sweep:
+        import time as _time
+        print("=" * 70)
+        print("  PARAMETER SWEEP + PORTFOLIO SIMULATION")
+        print("=" * 70)
+        print(f"  Start Equity: {START_TOTAL_CAPITAL}")
+        print(f"  Max Open Positions: {MAX_OPEN_POSITIONS}")
+        print(f"  Stake Divisor: {STAKE_DIVISOR}")
+        print("=" * 70)
+        sweep_start = _time.time()
+        # Run full parameter sweep across all indicators and HTFs
+        old_sweep = st.RUN_PARAMETER_SWEEP
+        old_overall = st.RUN_OVERALL_BEST
+        st.RUN_PARAMETER_SWEEP = True
+        st.RUN_OVERALL_BEST = False
+        indicator_candidates = st.get_indicator_candidates()
+        htf_candidates = st.get_highertimeframe_candidates()
+        print(f"  Indicators: {indicator_candidates}")
+        print(f"  HTFs: {htf_candidates}")
+        total_combos = len(indicator_candidates) * len(htf_candidates)
+        print(f"  Total indicator×HTF combos: {total_combos}")
+        print("=" * 70)
+        if st.CLEAR_BASE_OUTPUT_ON_SWEEP:
+            st.clear_sweep_targets(indicator_candidates, htf_candidates)
+        for i, indicator_name in enumerate(indicator_candidates):
+            st.apply_indicator_type(indicator_name)
+            for j, htf_value in enumerate(htf_candidates):
+                st.apply_higher_timeframe(htf_value)
+                combo_num = i * len(htf_candidates) + j + 1
+                print(f"\n[Sweep {combo_num}/{total_combos}] Indicator={st.INDICATOR_DISPLAY_NAME}, HTF={htf_value}")
+                summary_rows = st.run_parameter_sweep()
+                st.record_global_best(indicator_name, summary_rows)
+        st.write_overall_result_tables()
+        st.RUN_PARAMETER_SWEEP = old_sweep
+        st.RUN_OVERALL_BEST = old_overall
+        sweep_elapsed = _time.time() - sweep_start
+        print(f"\n[Sweep] Complete in {sweep_elapsed:.0f}s ({sweep_elapsed/60:.1f} min)")
+        # Now run portfolio simulation with best params
+        end_ts = resolve_timestamp(args.end, pd.Timestamp.now(tz=st.BERLIN_TZ))
+        default_start = end_ts - pd.Timedelta(days=365)
+        start_ts = resolve_timestamp(args.start, default_start)
+        print(f"\n[Simulation] Portfolio-Simulation: {start_ts.strftime('%Y-%m-%d')} bis {end_ts.strftime('%Y-%m-%d')}")
+        trades, final_state = run_simulation(
+            start_ts,
+            end_ts,
+            use_saved_state=False,
+            emit_entry_log=False,
+            allowed_symbols=allowed_symbols,
+            allowed_indicators=allowed_indicators,
+            fixed_stake=stake_value,
+            use_testnet=use_testnet,
+            refresh_params=False,
+            reset_state=True,
+            clear_outputs=True,
+        )
+        trades_df = trades_to_dataframe(trades)
+        open_positions = final_state.get("positions", [])
+        print(f"[Simulation] {len(trades)} Trades, Final Capital: {final_state['total_capital']:.2f} USDT")
+        log_path = args.sim_log or SIMULATION_LOG_FILE
+        log_json_path = args.sim_json or SIMULATION_LOG_JSON
+        write_closed_trades_report(trades_df, log_path, log_json_path)
+        open_path = args.open_log or SIMULATION_OPEN_POSITIONS_FILE
+        open_json_path = args.open_json or SIMULATION_OPEN_POSITIONS_JSON
+        write_open_positions_report(open_positions, open_path, open_json_path)
+        open_df = open_positions_to_dataframe(open_positions)
+        summary_data = build_summary_payload(trades_df, open_df, final_state, start_ts, end_ts)
+        summary_html_path = args.summary_html or SIMULATION_SUMMARY_HTML
+        generate_summary_html(summary_data, trades_df, open_df, summary_html_path)
+        summary_json_path = args.summary_json or SIMULATION_SUMMARY_JSON
+        write_summary_json(summary_data, summary_json_path)
+        symbol_stats = summary_data.get("symbol_stats", [])
+        if symbol_stats:
+            print("\n" + "=" * 120)
+            print("STATISTICS BY SYMBOL")
+            print("=" * 120)
+            print(f"{'Symbol':<12} {'Trades':>7} {'Win':>5} {'Loss':>5} {'Win%':>6} {'Total PnL':>12} {'Avg PnL':>10} {'Best':>10} {'Worst':>10} {'Max DD':>10} {'PF':>6}")
+            print("-" * 120)
+            for ss in symbol_stats:
+                pf_str = f"{ss['profit_factor']}" if ss['profit_factor'] != "∞" else "inf"
+                print(f"{ss['symbol']:<12} {ss['trades']:>7} {ss['winners']:>5} {ss['losers']:>5} {ss['win_rate']:>5.1f}% {ss['total_pnl']:>12.2f} {ss['avg_pnl']:>10.2f} {ss['best_trade']:>10.2f} {ss['worst_trade']:>10.2f} {ss['max_drawdown']:>10.2f} {pf_str:>6}")
+            print("=" * 120 + "\n")
+        generate_trade_charts(trades_df, output_dir=os.path.join(REPORT_DIR, "charts"))
+        generate_equity_curve(trades_df, start_capital=START_TOTAL_CAPITAL, output_dir=os.path.join(REPORT_DIR, "charts"))
+        return
 
     if args.simulate:
         trades: List[TradeResult] = []

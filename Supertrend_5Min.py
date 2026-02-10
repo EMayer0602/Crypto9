@@ -126,9 +126,9 @@ def map_symbol_for_params(symbol: str) -> str:
 	return TESTNET_TO_USDC_MAP.get(symbol, symbol)
 
 
-RUN_PARAMETER_SWEEP = True  # ← Sweep aktiviert
+RUN_PARAMETER_SWEEP = False  # Sweep wird über paper_trader.py --sweep gestartet
 RUN_SAVED_PARAMS = False
-RUN_OVERALL_BEST = False
+RUN_OVERALL_BEST = True  # Portfolio-Simulation mit gespeicherten Parametern
 ENABLE_LONGS = True
 ENABLE_SHORTS = False  # Shorts deaktiviert – nur Long-Trades
 
