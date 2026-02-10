@@ -250,12 +250,15 @@ def build_market_phase_chart(symbol, df_daily, df_jma, df_kama, df_supertrend):
     # ── Figure 1: Candlestick + Indikatoren ──────────────────────────
     fig_candle = go.Figure()
 
+    # Plotly braucht plain Python lists, keine pandas Series (sonst bdata-Bug)
+    x_dates = [d.strftime("%Y-%m-%d") for d in df_daily.index]
+
     fig_candle.add_trace(go.Candlestick(
-        x=df_daily.index,
-        open=df_daily["open"],
-        high=df_daily["high"],
-        low=df_daily["low"],
-        close=df_daily["close"],
+        x=x_dates,
+        open=df_daily["open"].values.tolist(),
+        high=df_daily["high"].values.tolist(),
+        low=df_daily["low"].values.tolist(),
+        close=df_daily["close"].values.tolist(),
         name="Price",
         increasing_line_color="#27ae60",
         increasing_fillcolor="#27ae60",
@@ -264,19 +267,19 @@ def build_market_phase_chart(symbol, df_daily, df_jma, df_kama, df_supertrend):
     ))
 
     fig_candle.add_trace(go.Scatter(
-        x=df_jma.index, y=df_jma["jma"],
+        x=x_dates, y=df_jma["jma"].values.tolist(),
         mode="lines", name=f"JMA({JMA_LENGTH})",
         line=dict(color="#f39c12", width=2),
     ))
 
     fig_candle.add_trace(go.Scatter(
-        x=df_kama.index, y=df_kama["kama"],
+        x=x_dates, y=df_kama["kama"].values.tolist(),
         mode="lines", name=f"KAMA({KAMA_LENGTH},{KAMA_SLOW_LENGTH})",
         line=dict(color="#3498db", width=2),
     ))
 
     fig_candle.add_trace(go.Scatter(
-        x=df_supertrend.index, y=df_supertrend["supertrend"],
+        x=x_dates, y=df_supertrend["supertrend"].values.tolist(),
         mode="lines", name=f"Supertrend({SUPERTREND_LENGTH},{SUPERTREND_FACTOR})",
         line=dict(color="#e74c3c", width=2, dash="dot"),
     ))
@@ -332,7 +335,7 @@ def build_market_phase_chart(symbol, df_daily, df_jma, df_kama, df_supertrend):
     fig_phase = go.Figure()
 
     fig_phase.add_trace(go.Heatmap(
-        x=df_daily.index,
+        x=x_dates,
         y=y_labels,
         z=z_matrix,
         text=text_matrix,
