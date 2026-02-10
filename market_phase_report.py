@@ -242,7 +242,12 @@ def create_phase_regions(df: pd.DataFrame, phase_col: str = "market_phase") -> l
 
 
 def create_symbol_chart(symbol: str, df: pd.DataFrame) -> go.Figure:
-    """Create interactive chart for a single symbol."""
+    """Create interactive chart for a single symbol.
+
+    Layout:
+    - Row 1 (top): Candlesticks only
+    - Row 2 (bottom): Trend indicators (Supertrend, JMA, KAMA) + phase regions + rangeslider
+    """
 
     # Resample to 4h for smoother visualization (reduces 15k to ~4k points)
     df_4h = df.resample("4h").agg({
@@ -256,16 +261,16 @@ def create_symbol_chart(symbol: str, df: pd.DataFrame) -> go.Figure:
         "market_phase": "last",
     }).dropna()
 
-    # Create subplots: main price chart + phase indicator
+    # Create subplots: candlesticks on top, indicators with phases below
     fig = make_subplots(
         rows=2, cols=1,
         shared_xaxes=True,
-        vertical_spacing=0.05,
-        row_heights=[0.85, 0.15],
-        subplot_titles=[f"{symbol} - Price & Indicators (4h)", "Market Phase"]
+        vertical_spacing=0.08,
+        row_heights=[0.5, 0.5],
+        subplot_titles=[f"{symbol} - Price (4h)", "Trend Indicators & Market Phases"]
     )
 
-    # Candlestick chart (use resampled data)
+    # Row 1: Candlestick chart only
     fig.add_trace(
         go.Candlestick(
             x=df_4h.index,
@@ -280,7 +285,7 @@ def create_symbol_chart(symbol: str, df: pd.DataFrame) -> go.Figure:
         row=1, col=1
     )
 
-    # Add indicator lines (use resampled data)
+    # Row 2: Add indicator lines
     for indicator, color in INDICATOR_COLORS.items():
         if indicator in df_4h.columns:
             fig.add_trace(
@@ -292,39 +297,14 @@ def create_symbol_chart(symbol: str, df: pd.DataFrame) -> go.Figure:
                     line=dict(color=color, width=1.5),
                     hovertemplate=f"{INDICATOR_NAMES[indicator]}: %{{y:.2f}}<extra></extra>",
                 ),
-                row=1, col=1
+                row=2, col=1
             )
 
-    # Add phase regions to main chart (use resampled data)
+    # Add phase regions to the indicator chart (Row 2)
     shapes = create_phase_regions(df_4h, "market_phase")
     for shape in shapes:
-        shape["yref"] = "y domain"
-        fig.add_shape(shape, row=1, col=1)
-
-    # Phase indicator (bottom panel) - use scatter instead of bar for speed
-    phase_map = {"Up": 1, "Flat": 0, "Down": -1}
-    phase_values = df_4h["market_phase"].map(phase_map)
-
-    # Color by phase
-    colors = df_4h["market_phase"].map({
-        "Up": "#4CAF50",
-        "Flat": "#9E9E9E",
-        "Down": "#F44336"
-    })
-
-    fig.add_trace(
-        go.Scatter(
-            x=df_4h.index,
-            y=phase_values,
-            mode="markers",
-            marker=dict(color=colors.tolist(), size=4),
-            name="Phase",
-            showlegend=False,
-            hovertemplate="Phase: %{text}<extra></extra>",
-            text=df_4h["market_phase"],
-        ),
-        row=2, col=1
-    )
+        shape["yref"] = "y2 domain"
+        fig.add_shape(shape, row=2, col=1)
 
     # Calculate phase statistics
     phase_counts = df["market_phase"].value_counts()
@@ -341,7 +321,7 @@ def create_symbol_chart(symbol: str, df: pd.DataFrame) -> go.Figure:
             font=dict(size=16),
         ),
         template="plotly_dark",
-        height=800,
+        height=900,
         showlegend=True,
         legend=dict(
             orientation="h",
@@ -350,18 +330,21 @@ def create_symbol_chart(symbol: str, df: pd.DataFrame) -> go.Figure:
             xanchor="right",
             x=1
         ),
-        xaxis_rangeslider_visible=False,
         hovermode="x unified",
+    )
+
+    # Row 1: No rangeslider
+    fig.update_xaxes(rangeslider_visible=False, row=1, col=1)
+
+    # Row 2: Add rangeslider
+    fig.update_xaxes(
+        rangeslider=dict(visible=True, thickness=0.05),
+        row=2, col=1
     )
 
     # Update y-axis labels
     fig.update_yaxes(title_text="Price", row=1, col=1)
-    fig.update_yaxes(
-        title_text="Phase",
-        tickvals=[-1, 0, 1],
-        ticktext=["Down", "Flat", "Up"],
-        row=2, col=1
-    )
+    fig.update_yaxes(title_text="Indicators", row=2, col=1)
 
     return fig
 
