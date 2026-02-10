@@ -2474,6 +2474,12 @@ def write_overall_result_tables():
 				row["Direction"] = direction.capitalize()
 				csv_rows.append(row)
 	if csv_rows:
+		# Backup existing best_params_overall.csv before overwriting
+		if os.path.exists(OVERALL_PARAMS_CSV):
+			bck_path = OVERALL_PARAMS_CSV.replace(".csv", "_bck.csv")
+			import shutil
+			shutil.copy2(OVERALL_PARAMS_CSV, bck_path)
+			print(f"[Sweep] Backed up existing {OVERALL_PARAMS_CSV} → {bck_path}")
 		pd.DataFrame(csv_rows).to_csv(OVERALL_PARAMS_CSV, sep=";", decimal=",", index=False, encoding="utf-8")
 
 
