@@ -62,7 +62,8 @@ def timeframe_to_minutes(tf_str: str) -> int:
 
 EXCHANGE_ID = "binance"
 TIMEFRAME = "1h"
-LOOKBACK = 8760  # ~1 year of hourly bars (365 days × 24 hours)
+LOOKBACK = 9750  # Großzügiger Puffer – wird durch BACKTEST_START_DATE begrenzt
+BACKTEST_START_DATE = "2025-01-01"  # Backtest beginnt ab diesem Datum
 OHLCV_CACHE_DIR = "ohlcv_cache"  # Directory for persistent OHLCV data storage
 # USDx symbols for optimization sweep
 SYMBOLS = [
@@ -1501,6 +1502,13 @@ def prepare_symbol_dataframe(symbol, use_all_cached_data=False):
 	"""
 	limit = None if use_all_cached_data else LOOKBACK
 	df = fetch_data(symbol, TIMEFRAME, limit)
+	# Backtest-Start-Datum anwenden: alles vor BACKTEST_START_DATE abschneiden
+	if BACKTEST_START_DATE:
+		start_ts = pd.Timestamp(BACKTEST_START_DATE, tz=BERLIN_TZ)
+		before = len(df)
+		df = df[df.index >= start_ts]
+		if len(df) < before:
+			print(f"[Date Filter] {symbol}: {before} → {len(df)} Bars (ab {BACKTEST_START_DATE})")
 	df = attach_higher_timeframe_trend(df, symbol)
 	# Debug: Check htf_indicator
 	htf_valid = df["htf_indicator"].notna().sum() if "htf_indicator" in df.columns else 0
