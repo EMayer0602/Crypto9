@@ -1,93 +1,95 @@
 Symbol;Direction;Indicator;Phase;ParamA;ParamB;ATRStopMult;MinHoldBars;HTF;Trades;PnL;WinRate
-ADA/USDC;long;HTF Crossover;Up;14,0;4,0;2.0;24;4h;20;89141773,69;80,0
-ADA/USDC;long;Jurik Moving Average;Up;20,0;-50,0;None;12;12h;295;182617048,8;62,37
-ADA/USDC;long;Kaufman AMA;Up;10,0;50,0;None;0;12h;2;746,93;100,0
-ADA/USDC;long;Supertrend;Up;7,0;4,0;None;24;1h;32;72525961,2;75,0
-ADA/USDC;short;HTF Crossover;Down;7,0;2,0;None;12;2h;31;53519399,31;96,77
-ADA/USDC;short;Jurik Moving Average;Down;30,0;0,0;None;24;8h;271;237780825,79;73,8
-ADA/USDC;short;Kaufman AMA;Down;20,0;50,0;1.5;12;2h;2;-775171,09;0,0
-ADA/USDC;short;Supertrend;Down;7,0;4,0;None;12;1h;40;73431731,98;90,0
-BNB/USDC;long;HTF Crossover;Up;14,0;4,0;2.0;24;2h;27;52891382,8;77,78
-BNB/USDC;long;Jurik Moving Average;Up;20,0;50,0;None;24;12h;3;34556,67;100,0
-BNB/USDC;long;Kaufman AMA;Up;20,0;30,0;1.0;24;6h;2;-1835,03;0,0
-BNB/USDC;long;Supertrend;Up;14,0;2,0;None;24;6h;100;143823,56;76,0
-BNB/USDC;short;HTF Crossover;Down;7,0;2,0;None;12;6h;33;21025768,37;93,94
-BNB/USDC;short;Jurik Moving Average;Down;50,0;0,0;None;24;12h;157;42066562,34;60,51
-BNB/USDC;short;Kaufman AMA;Down;20,0;30,0;1.5;24;12h;3;-1173047,29;0,0
-BNB/USDC;short;Supertrend;Down;14,0;4,0;None;24;9h;29;9332276,35;86,21
-BTC/USDC;long;HTF Crossover;Up;7,0;2,0;None;12;2h;29;40643705,66;86,21
-BTC/USDC;long;Jurik Moving Average;Up;20,0;-50,0;None;24;12h;187;7449621,79;56,15
-BTC/USDC;long;Supertrend;Up;7,0;2,0;None;24;2h;61;-4552763,06;65,57
-BTC/USDC;short;HTF Crossover;Down;7,0;2,0;None;0;4h;29;4803779,38;79,31
-BTC/USDC;short;Jurik Moving Average;Down;20,0;50,0;None;12;12h;3;2627005,89;100,0
-BTC/USDC;short;Kaufman AMA;Down;30,0;50,0;1.5;12;3h;4;955684,14;50,0
-BTC/USDC;short;Supertrend;Down;14,0;3,0;1.0;24;4h;54;22582021,01;50,0
-ETH/USDC;long;HTF Crossover;Up;7,0;2,0;None;12;2h;35;58549063,68;82,86
-ETH/USDC;long;Jurik Moving Average;Up;30,0;0,0;2.0;12;12h;247;63638339,5;59,11
-ETH/USDC;long;Kaufman AMA;Up;20,0;40,0;None;24;1h;3;36180,24;100,0
-ETH/USDC;long;Supertrend;Up;14,0;3,0;None;12;5h;54;40968669,26;72,22
-ETH/USDC;short;HTF Crossover;Down;7,0;2,0;None;12;2h;32;18470797,52;93,75
-ETH/USDC;short;Jurik Moving Average;Down;20,0;0,0;None;12;12h;317;94610862,78;59,62
-ETH/USDC;short;Kaufman AMA;Down;20,0;50,0;None;12;12h;5;8424608,23;100,0
-ETH/USDC;short;Supertrend;Down;7,0;3,0;None;24;6h;69;39753842,03;75,36
-ICP/USDC;long;HTF Crossover;Up;10,0;2,0;1.0;12;6h;38;127552917,67;81,58
-ICP/USDC;long;Jurik Moving Average;Up;20,0;50,0;None;12;12h;2;5873672,12;100,0
-ICP/USDC;long;Kaufman AMA;Up;10,0;50,0;1.0;12;4h;2;-1075965,8;0,0
-ICP/USDC;long;Supertrend;Up;14,0;2,0;2.0;12;4h;67;23567187,19;67,16
-ICP/USDC;short;HTF Crossover;Down;7,0;2,0;None;0;4h;37;56658524,85;91,89
-ICP/USDC;short;Jurik Moving Average;Down;20,0;0,0;None;24;12h;314;326790587,15;72,29
-ICP/USDC;short;Supertrend;Down;7,0;3,0;None;24;1h;105;141675663,83;80,95
-LINK/USDC;long;HTF Crossover;Up;7,0;2,0;None;0;4h;18;66246454,64;94,44
-LINK/USDC;long;Jurik Moving Average;Up;50,0;-50,0;None;12;12h;296;56905586,74;65,88
-LINK/USDC;long;Kaufman AMA;Up;20,0;30,0;None;12;4h;2;13911,15;100,0
-LINK/USDC;long;Supertrend;Up;7,0;4,0;None;24;15h;51;-4754854,83;82,35
-LINK/USDC;short;HTF Crossover;Down;7,0;2,0;None;0;6h;35;49738136,24;97,14
-LINK/USDC;short;Jurik Moving Average;Down;20,0;50,0;None;24;6h;6;6978240,89;100,0
-LINK/USDC;short;Kaufman AMA;Down;20,0;30,0;None;12;6h;1;121,51;100,0
-LINK/USDC;short;Supertrend;Down;10,0;4,0;None;24;3h;46;8452460,99;84,78
-LUNC/USDT;long;HTF Crossover;Up;14,0;3,0;1.5;12;4h;26;53992873,26;61,54
-LUNC/USDT;long;Jurik Moving Average;Up;20,0;0,0;None;12;12h;205;288065170,17;60,98
-LUNC/USDT;long;Kaufman AMA;Up;30,0;30,0;None;24;4h;4;34438402,46;100,0
-LUNC/USDT;long;Supertrend;Up;14,0;3,0;1.0;0;2h;38;-13402,67;47,37
-LUNC/USDT;short;HTF Crossover;Down;14,0;3,0;1.0;24;2h;29;16527221,1;72,41
-LUNC/USDT;short;Jurik Moving Average;Down;20,0;50,0;2.0;12;8h;3;-3023033,87;66,67
-LUNC/USDT;short;Kaufman AMA;Down;30,0;40,0;2.0;24;2h;2;5835613,01;100,0
-LUNC/USDT;short;Supertrend;Down;10,0;4,0;None;24;1h;62;127934467,36;88,71
-SOL/USDC;long;HTF Crossover;Up;7,0;2,0;None;0;4h;27;72742109,82;88,89
-SOL/USDC;long;Jurik Moving Average;Up;20,0;0,0;None;12;12h;270;60685309,69;64,44
-SOL/USDC;long;Kaufman AMA;Up;20,0;30,0;None;24;12h;3;226531,57;100,0
-SOL/USDC;long;Supertrend;Up;14,0;4,0;None;24;4h;49;-6659425,28;75,51
-SOL/USDC;short;HTF Crossover;Down;7,0;2,0;None;12;2h;35;7949755,67;91,43
-SOL/USDC;short;Jurik Moving Average;Down;20,0;50,0;None;12;12h;4;4566421,7;100,0
-SOL/USDC;short;Kaufman AMA;Down;10,0;30,0;2.0;24;6h;6;1588383,99;83,33
-SOL/USDC;short;Supertrend;Down;7,0;2,0;None;12;1h;105;34063039,75;68,57
-SUI/USDC;long;HTF Crossover;Up;7,0;2,0;None;24;2h;31;119566273,84;90,32
-SUI/USDC;long;Jurik Moving Average;Up;20,0;0,0;None;12;12h;269;123943380,2;62,08
-SUI/USDC;long;Kaufman AMA;Up;10,0;50,0;2.0;12;4h;1;2609,53;100,0
-SUI/USDC;long;Supertrend;Up;14,0;4,0;None;24;2h;36;7439535,98;83,33
-SUI/USDC;short;HTF Crossover;Down;7,0;2,0;None;12;2h;45;39474888,56;97,78
-SUI/USDC;short;Jurik Moving Average;Down;20,0;-50,0;None;12;12h;400;122285923,88;64,5
-SUI/USDC;short;Kaufman AMA;Down;30,0;30,0;None;24;12h;4;-357468,86;75,0
-SUI/USDC;short;Supertrend;Down;14,0;4,0;None;12;1h;50;78644044,33;78,0
-TNSR/USDC;long;HTF Crossover;Up;14,0;4,0;2.0;12;8h;26;17446162,03;57,69
-TNSR/USDC;long;Jurik Moving Average;Up;30,0;50,0;None;24;12h;4;17932913,64;100,0
-TNSR/USDC;long;Kaufman AMA;Up;10,0;40,0;1.0;24;8h;4;18305084,03;50,0
-TNSR/USDC;long;Supertrend;Up;10,0;2,0;1.0;24;4h;91;22876080,37;41,76
-TNSR/USDC;short;HTF Crossover;Down;7,0;2,0;None;12;2h;34;24045760,18;97,06
-TNSR/USDC;short;Jurik Moving Average;Down;20,0;0,0;None;12;8h;445;265407976,86;71,91
-TNSR/USDC;short;Kaufman AMA;Down;10,0;50,0;None;12;12h;7;2533858,92;71,43
-TNSR/USDC;short;Supertrend;Down;7,0;3,0;None;24;2h;103;190689696,7;82,52
-XRP/USDC;long;HTF Crossover;Up;7,0;2,0;None;12;2h;35;86428587,98;82,86
-XRP/USDC;long;Jurik Moving Average;Up;30,0;-50,0;None;12;12h;357;120961144,24;60,5
-XRP/USDC;long;Kaufman AMA;Up;30,0;30,0;2.0;12;4h;2;-7040869,59;0,0
-XRP/USDC;long;Supertrend;Up;14,0;3,0;None;24;4h;72;13726274,27;80,56
-XRP/USDC;short;HTF Crossover;Down;7,0;2,0;1.5;0;2h;33;2954516,02;84,85
-XRP/USDC;short;Jurik Moving Average;Down;20,0;-50,0;1.5;24;12h;252;24039593,5;54,76
-XRP/USDC;short;Kaufman AMA;Down;20,0;50,0;2.0;12;12h;1;-653,74;0,0
-XRP/USDC;short;Supertrend;Down;14,0;2,0;None;12;8h;76;40704769,18;77,63
-ZEC/USDC;long;HTF Crossover;Up;7,0;2,0;None;24;1h;5;70685394,74;100,0
-ZEC/USDC;long;Jurik Moving Average;Up;20,0;-50,0;None;12;8h;64;113202319,62;59,38
-ZEC/USDC;long;Supertrend;Up;7,0;3,0;None;24;1h;6;-3919500,34;66,67
-ZEC/USDC;short;HTF Crossover;Down;7,0;2,0;None;0;4h;2;6955613,13;100,0
-ZEC/USDC;short;Jurik Moving Average;Down;20,0;0,0;None;12;12h;57;97759320,12;66,67
-ZEC/USDC;short;Supertrend;Down;7,0;2,0;None;24;16h;12;80344552,47;91,67
+ADA/USDC;long;HTF Crossover;Up;14,0;4,0;2.0;24;4h;52;370065665776,73;84,62
+ADA/USDC;long;Jurik Moving Average;Up;20,0;-50,0;None;12;12h;489;758121305637,95;64,83
+ADA/USDC;long;Kaufman AMA;Up;10,0;50,0;None;0;12h;5;3181736,05;100,0
+ADA/USDC;long;Supertrend;Up;7,0;4,0;None;24;1h;53;301084681863,11;69,81
+ADA/USDC;short;HTF Crossover;Down;7,0;2,0;None;12;2h;50;222180942167,46;90,0
+ADA/USDC;short;Jurik Moving Average;Down;30,0;0,0;None;24;8h;435;987126176210,82;72,64
+ADA/USDC;short;Kaufman AMA;Down;20,0;50,0;1.5;12;2h;4;-3218033816,22;50,0
+ADA/USDC;short;Supertrend;Down;7,0;4,0;None;12;1h;70;304844096480,52;72,86
+BNB/USDC;long;HTF Crossover;Up;14,0;4,0;2.0;24;2h;42;219573741936,57;80,95
+BNB/USDC;long;Jurik Moving Average;Up;20,0;50,0;None;24;12h;6;143748455,16;100,0
+BNB/USDC;long;Kaufman AMA;Up;20,0;30,0;1.0;24;6h;3;-7653582,36;0,0
+BNB/USDC;long;Supertrend;Up;14,0;2,0;None;24;6h;163;597910869,1;75,46
+BNB/USDC;short;HTF Crossover;Down;7,0;2,0;None;12;6h;50;87287134865,79;94,0
+BNB/USDC;short;Jurik Moving Average;Down;50,0;0,0;None;24;12h;265;174636467970,48;63,4
+BNB/USDC;short;Kaufman AMA;Down;20,0;30,0;1.5;24;12h;5;-4869799183,35;0,0
+BNB/USDC;short;Supertrend;Down;14,0;4,0;None;24;9h;52;38742591380,44;75,0
+BTC/USDC;long;HTF Crossover;Up;7,0;2,0;None;12;2h;42;168729072704,7;83,33
+BTC/USDC;long;Jurik Moving Average;Up;20,0;-50,0;None;24;12h;337;30927895534,45;59,64
+BTC/USDC;long;Kaufman AMA;Up;30,0;40,0;2.0;24;2h;1;-3661,57;0,0
+BTC/USDC;long;Supertrend;Up;7,0;2,0;None;24;2h;115;-18899726166,1;67,83
+BTC/USDC;short;HTF Crossover;Down;7,0;2,0;None;0;4h;47;19943125059,87;76,6
+BTC/USDC;short;Jurik Moving Average;Down;20,0;50,0;None;12;12h;6;10905760225,13;100,0
+BTC/USDC;short;Kaufman AMA;Down;30,0;50,0;1.5;12;3h;4;3967465689,26;50,0
+BTC/USDC;short;Supertrend;Down;14,0;3,0;1.0;24;4h;72;93746870232,02;40,28
+ETH/USDC;long;HTF Crossover;Up;7,0;2,0;None;12;2h;54;243061622467,87;83,33
+ETH/USDC;long;Jurik Moving Average;Up;30,0;0,0;2.0;12;12h;430;264189348270,52;56,98
+ETH/USDC;long;Kaufman AMA;Up;20,0;40,0;None;24;1h;6;150304469,26;100,0
+ETH/USDC;long;Supertrend;Up;14,0;3,0;None;12;5h;98;170077698480,15;65,31
+ETH/USDC;short;HTF Crossover;Down;7,0;2,0;None;12;2h;50;76679965010,08;92,0
+ETH/USDC;short;Jurik Moving Average;Down;20,0;0,0;None;12;12h;488;392768811804,97;59,22
+ETH/USDC;short;Kaufman AMA;Down;20,0;50,0;None;12;12h;8;34973925858,02;100,0
+ETH/USDC;short;Supertrend;Down;7,0;3,0;None;24;6h;105;165034645780,51;69,52
+ICP/USDC;long;HTF Crossover;Up;10,0;2,0;1.0;12;6h;52;529524870703,19;73,08
+ICP/USDC;long;Jurik Moving Average;Up;20,0;50,0;None;12;12h;2;24383977801,29;100,0
+ICP/USDC;long;Kaufman AMA;Up;10,0;50,0;1.0;12;4h;3;-4466767608,05;0,0
+ICP/USDC;long;Supertrend;Up;14,0;2,0;2.0;12;4h;136;97837275187,63;66,91
+ICP/USDC;short;HTF Crossover;Down;7,0;2,0;None;0;4h;57;235212667815,16;94,74
+ICP/USDC;short;Jurik Moving Average;Down;20,0;0,0;None;24;12h;509;1356644015510,38;73,87
+ICP/USDC;short;Kaufman AMA;Down;30,0;50,0;None;24;8h;4;2202371,72;100,0
+ICP/USDC;short;Supertrend;Down;7,0;3,0;None;24;1h;185;588154332471,12;76,76
+LINK/USDC;long;HTF Crossover;Up;7,0;2,0;None;0;4h;42;275016309612,32;90,48
+LINK/USDC;long;Jurik Moving Average;Up;50,0;-50,0;None;12;12h;579;236242516892,62;64,94
+LINK/USDC;long;Kaufman AMA;Up;20,0;30,0;None;12;4h;2;57750793,32;100,0
+LINK/USDC;long;Supertrend;Up;7,0;4,0;None;24;15h;103;-19738167010,24;85,44
+LINK/USDC;short;HTF Crossover;Down;7,0;2,0;None;0;6h;66;206483407475,76;95,45
+LINK/USDC;short;Jurik Moving Average;Down;20,0;50,0;None;24;6h;8;28969488897,74;100,0
+LINK/USDC;short;Kaufman AMA;Down;20,0;30,0;None;12;6h;4;501813,9;100,0
+LINK/USDC;short;Supertrend;Down;10,0;4,0;None;24;3h;79;35091192571,62;83,54
+LUNC/USDT;long;HTF Crossover;Up;14,0;3,0;1.5;12;4h;42;224146344795,85;71,43
+LUNC/USDT;long;Jurik Moving Average;Up;20,0;0,0;None;12;12h;443;1195878962972,78;63,21
+LUNC/USDT;long;Kaufman AMA;Up;30,0;30,0;None;24;4h;6;142967704539,25;100,0
+LUNC/USDT;long;Supertrend;Up;14,0;3,0;1.0;0;2h;76;-54673491,34;39,47
+LUNC/USDT;short;HTF Crossover;Down;14,0;3,0;1.0;24;2h;42;68612007718,29;73,81
+LUNC/USDT;short;Jurik Moving Average;Down;20,0;50,0;2.0;12;8h;4;-12552795578,06;50,0
+LUNC/USDT;short;Kaufman AMA;Down;30,0;40,0;2.0;24;2h;5;24226633572,19;100,0
+LUNC/USDT;short;Supertrend;Down;10,0;4,0;None;24;1h;78;531106861493,2;82,05
+SOL/USDC;long;HTF Crossover;Up;7,0;2,0;None;0;4h;48;301982744100,45;91,67
+SOL/USDC;long;Jurik Moving Average;Up;20,0;0,0;None;12;12h;488;251931597344,81;66,19
+SOL/USDC;long;Kaufman AMA;Up;20,0;30,0;None;24;12h;12;942827173,09;100,0
+SOL/USDC;long;Supertrend;Up;14,0;4,0;None;24;4h;86;-27645939218,27;79,07
+SOL/USDC;short;HTF Crossover;Down;7,0;2,0;None;12;2h;48;33002592834,25;89,58
+SOL/USDC;short;Jurik Moving Average;Down;20,0;50,0;None;12;12h;4;18955453692,39;100,0
+SOL/USDC;short;Kaufman AMA;Down;10,0;30,0;2.0;24;6h;9;6594294939,63;77,78
+SOL/USDC;short;Supertrend;Down;7,0;2,0;None;12;1h;160;141412194245,59;68,75
+SUI/USDC;long;HTF Crossover;Up;7,0;2,0;None;24;2h;54;496368945324,49;92,59
+SUI/USDC;long;Jurik Moving Average;Up;20,0;0,0;None;12;12h;582;514547891008,81;63,92
+SUI/USDC;long;Kaufman AMA;Up;10,0;50,0;2.0;12;4h;3;10840414,18;100,0
+SUI/USDC;long;Supertrend;Up;14,0;4,0;None;24;2h;66;30885819481,09;81,82
+SUI/USDC;short;HTF Crossover;Down;7,0;2,0;None;12;2h;69;163876774529,19;97,1
+SUI/USDC;short;Jurik Moving Average;Down;20,0;-50,0;None;12;12h;589;507658714343,66;65,7
+SUI/USDC;short;Kaufman AMA;Down;30,0;30,0;None;24;12h;4;-1483975834,7;75,0
+SUI/USDC;short;Supertrend;Down;14,0;4,0;None;12;1h;72;326483160993,16;80,56
+TNSR/USDC;long;HTF Crossover;Up;14,0;4,0;2.0;12;8h;43;72427231379,57;69,77
+TNSR/USDC;long;Jurik Moving Average;Up;30,0;50,0;None;24;12h;5;74409834770,04;80,0
+TNSR/USDC;long;Kaufman AMA;Up;10,0;40,0;1.0;24;8h;6;75991823426,77;50,0
+TNSR/USDC;long;Supertrend;Up;10,0;2,0;1.0;24;4h;146;94969325666,94;44,52
+TNSR/USDC;short;HTF Crossover;Down;7,0;2,0;None;12;2h;51;99823954434,52;94,12
+TNSR/USDC;short;Jurik Moving Average;Down;20,0;0,0;None;12;8h;688;1101819077644,19;71,08
+TNSR/USDC;short;Kaufman AMA;Down;10,0;50,0;None;12;12h;9;10540698921,24;88,89
+TNSR/USDC;short;Supertrend;Down;7,0;3,0;None;24;2h;171;791631071561,89;78,95
+XRP/USDC;long;HTF Crossover;Up;7,0;2,0;None;12;2h;56;358801338063,11;83,93
+XRP/USDC;long;Jurik Moving Average;Up;30,0;-50,0;None;12;12h;617;502163129243,56;63,37
+XRP/USDC;long;Kaufman AMA;Up;30,0;30,0;2.0;12;4h;8;-29229469833,3;50,0
+XRP/USDC;long;Supertrend;Up;14,0;3,0;None;24;4h;113;56983988395,19;77,88
+XRP/USDC;short;HTF Crossover;Down;7,0;2,0;1.5;0;2h;39;12265962734,33;76,92
+XRP/USDC;short;Jurik Moving Average;Down;20,0;-50,0;1.5;24;12h;428;99801044032,66;53,27
+XRP/USDC;short;Kaufman AMA;Down;20,0;50,0;2.0;12;12h;1;-2696449,85;0,0
+XRP/USDC;short;Supertrend;Down;14,0;2,0;None;12;8h;128;168984213390,5;73,44
+ZEC/USDC;long;HTF Crossover;Up;7,0;2,0;None;24;1h;5;293443532403,68;100,0
+ZEC/USDC;long;Jurik Moving Average;Up;20,0;-50,0;None;12;8h;64;469948405469,0;59,38
+ZEC/USDC;long;Supertrend;Up;7,0;3,0;None;24;1h;6;-16271423935,76;66,67
+ZEC/USDC;short;HTF Crossover;Down;7,0;2,0;None;0;4h;2;28875550533,98;100,0
+ZEC/USDC;short;Jurik Moving Average;Down;20,0;0,0;None;12;12h;57;405838296976,98;66,67
+ZEC/USDC;short;Supertrend;Down;7,0;2,0;None;24;16h;12;333542585063,72;91,67

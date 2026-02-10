@@ -357,14 +357,14 @@ def run_sweep_dashboard():
     indicators = ["supertrend", "htf_crossover", "jma", "kama"]
     directions = ["long", "short"]
 
-    # Lookback für 1 Jahr Stundendaten
-    LOOKBACK_HOURS = 8760  # 365 Tage * 24 Stunden
+    # Lookback für 2 Jahre Stundendaten
+    LOOKBACK_HOURS = 17520  # 730 Tage * 24 Stunden (2 Jahre)
 
     print("\n[1/4] Lade Daily-Phasen für alle Symbole...")
 
     for symbol in SYMBOLS:
         print(f"  {symbol}: Lade Daily-Daten...")
-        phase_df = get_daily_market_phases(symbol, lookback_days=400)
+        phase_df = get_daily_market_phases(symbol, lookback_days=800)  # 2+ Jahre
         daily_phases[symbol] = phase_df
         if not phase_df.empty:
             current_phase = phase_df.iloc[-1]["phase"]
@@ -379,7 +379,7 @@ def run_sweep_dashboard():
             phase_info[symbol] = PHASE_FLAT
             print(f"    Keine Daily-Daten verfügbar")
 
-    print("\n[2/4] Führe Backtests aus (1 Jahr Stundendaten)...")
+    print("\n[2/4] Führe Backtests aus (2 Jahre Stundendaten)...")
 
     for symbol in SYMBOLS:
         print(f"\n  Processing {symbol}...")
