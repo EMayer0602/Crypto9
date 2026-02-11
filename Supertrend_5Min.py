@@ -222,7 +222,7 @@ OVERALL_FLAT_JSON = os.path.join(BASE_OUT_DIR, "overall_best_flat_trades.json")
 GLOBAL_BEST_RESULTS = {}
 
 # Phase-based sweep: optimized parameters per market phase (Up/Down/Flat)
-RUN_PHASE_BASED_SWEEP = False
+RUN_PHASE_BASED_SWEEP = True
 PHASE_STAKE_DIVISOR = 8  # stake = equity/8 (match paper_trader MAX_OPEN_POSITIONS=8)
 PHASE_PARAMS_CSV = os.path.join(BASE_OUT_DIR, "best_params_overall.csv")
 GLOBAL_PHASE_RESULTS = {}
