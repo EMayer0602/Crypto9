@@ -3564,9 +3564,15 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
                         else:
                             print(f"[Simulation] Open position {sym} closed in new sim")
 
-                    # Merge: kept existing + new from this sim
-                    open_positions = kept_open + new_open_positions
-                    print(f"[Simulation] Open positions: {len(kept_open)} existing + {len(new_open_positions)} new = {len(open_positions)}")
+                    # Merge: kept existing + new from this sim, deduplicate by symbol+entry_time
+                    seen_keys = set()
+                    open_positions = []
+                    for pos in kept_open + new_open_positions:
+                        key = (pos.get("symbol", ""), str(pos.get("entry_time", ""))[:16])
+                        if key not in seen_keys:
+                            open_positions.append(pos)
+                            seen_keys.add(key)
+                    print(f"[Simulation] Open positions: {len(kept_open)} existing + {len(new_open_positions)} new = {len(open_positions)} unique")
                 else:
                     open_positions = new_open_positions
             else:
