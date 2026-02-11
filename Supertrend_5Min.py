@@ -3364,6 +3364,120 @@ def record_global_phase_best(indicator_key, summary_rows):
 			dir_store[phase] = dict(row)
 
 
+def _write_phase_sweep_html(df_out):
+	"""Generate phase_sweep_report.html with params table + equity comparison."""
+	now = datetime.now(BERLIN_TZ).strftime("%Y-%m-%d %H:%M:%S %Z")
+	phase_colors = {"Up": "#27ae60", "Down": "#e74c3c", "Flat": "#f39c12"}
+
+	# ── 1. Best-Params Tabelle (Symbol × Phase × Indicator) ──
+	display_cols = ["Symbol", "Indicator", "Phase", "ParamA", "ParamB",
+		"ATRStopMult", "MinHoldBars", "MaxHoldBars",
+		"HTF", "HTFLength", "HTFFactor", "Trades", "WinRate", "FinalEquity"]
+	available = [c for c in display_cols if c in df_out.columns]
+	table_df = df_out[available].copy()
+	if "WinRate" in table_df.columns:
+		table_df["WinRate"] = table_df["WinRate"].apply(lambda x: f"{float(x)*100:.1f}%")
+	if "FinalEquity" in table_df.columns:
+		table_df["FinalEquity"] = table_df["FinalEquity"].apply(lambda x: f"{float(x):,.2f}")
+
+	params_html = table_df.to_html(index=False, justify="left", border=0, classes="params-table")
+
+	# ── 2. Equity-Vergleich pro Symbol (Balkendiagramm als HTML-Tabelle) ──
+	equity_rows = []
+	for symbol in SYMBOLS:
+		sym_data = df_out[df_out["Symbol"] == symbol]
+		if sym_data.empty:
+			continue
+		row_data = {"Symbol": symbol}
+		for phase in ["Up", "Down", "Flat"]:
+			phase_data = sym_data[sym_data["Phase"] == phase]
+			if not phase_data.empty:
+				best = phase_data.loc[phase_data["FinalEquity"].astype(float).idxmax()]
+				row_data[f"{phase}_Equity"] = float(best["FinalEquity"])
+				row_data[f"{phase}_Indicator"] = best.get("IndicatorDisplay", best.get("Indicator", ""))
+				row_data[f"{phase}_Trades"] = int(best.get("Trades", 0))
+			else:
+				row_data[f"{phase}_Equity"] = START_EQUITY
+				row_data[f"{phase}_Indicator"] = "-"
+				row_data[f"{phase}_Trades"] = 0
+		equity_rows.append(row_data)
+
+	# Find max equity for bar scaling
+	all_equities = []
+	for r in equity_rows:
+		for p in ["Up", "Down", "Flat"]:
+			all_equities.append(r.get(f"{p}_Equity", START_EQUITY))
+	max_eq = max(all_equities) if all_equities else START_EQUITY * 1.1
+	bar_scale = max(max_eq, START_EQUITY * 1.01)
+
+	equity_html_parts = []
+	for r in equity_rows:
+		symbol = r["Symbol"]
+		equity_html_parts.append(f'<tr><td class="sym-col" rowspan="3"><b>{symbol}</b></td>')
+		for i, phase in enumerate(["Up", "Down", "Flat"]):
+			eq = r[f"{phase}_Equity"]
+			ind = r[f"{phase}_Indicator"]
+			trades = r[f"{phase}_Trades"]
+			pnl = eq - START_EQUITY
+			pnl_str = f"+{pnl:,.2f}" if pnl >= 0 else f"{pnl:,.2f}"
+			bar_pct = max(5, (eq / bar_scale) * 100)
+			color = phase_colors[phase]
+			if i > 0:
+				equity_html_parts.append("<tr>")
+			equity_html_parts.append(
+				f'<td style="width:60px;color:{color};font-weight:bold">{phase}</td>'
+				f'<td style="width:120px">{ind}</td>'
+				f'<td style="width:50px;text-align:right">{trades}</td>'
+				f'<td style="width:300px">'
+				f'<div style="background:{color};width:{bar_pct:.0f}%;height:20px;border-radius:3px;'
+				f'display:inline-block;min-width:5px"></div></td>'
+				f'<td style="width:120px;text-align:right;font-weight:bold">{eq:,.2f}</td>'
+				f'<td style="width:100px;text-align:right;color:{"#27ae60" if pnl >= 0 else "#e74c3c"}">'
+				f'{pnl_str}</td></tr>'
+			)
+
+	html = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<title>Phase-Based Sweep Report</title>
+<style>
+body {{ font-family: Arial, sans-serif; margin: 20px; background: #1a1a2e; color: #e0e0e0; }}
+h1 {{ color: #00d2ff; }}
+h2 {{ color: #f39c12; margin-top: 40px; }}
+p.info {{ color: #888; }}
+.params-table {{ border-collapse: collapse; width: 100%; font-size: 13px; }}
+.params-table th {{ background: #16213e; color: #00d2ff; padding: 8px 10px; text-align: left;
+  border-bottom: 2px solid #0f3460; }}
+.params-table td {{ padding: 6px 10px; border-bottom: 1px solid #333; }}
+.params-table tr:hover {{ background: #16213e; }}
+.equity-table {{ border-collapse: collapse; width: 100%; font-size: 13px; }}
+.equity-table th {{ background: #16213e; color: #00d2ff; padding: 8px 10px; text-align: left;
+  border-bottom: 2px solid #0f3460; }}
+.equity-table td {{ padding: 5px 8px; border-bottom: 1px solid #222; }}
+.sym-col {{ background: #16213e; font-size: 14px; vertical-align: middle; }}
+</style>
+</head><body>
+<h1>Phase-Based Sweep Report</h1>
+<p class="info">Stand: {now} | Start-Kapital: {START_EQUITY:,.0f} USDT | Stake: equity/{PHASE_STAKE_DIVISOR}</p>
+
+<h2>Equity-Vergleich pro Symbol und Marktphase</h2>
+<p class="info">Bester Indikator pro Phase, Compound Growth mit stake = equity/{PHASE_STAKE_DIVISOR}</p>
+<table class="equity-table">
+<tr><th>Symbol</th><th>Phase</th><th>Indikator</th><th>Trades</th><th>Equity</th><th></th><th>PnL</th></tr>
+{"".join(equity_html_parts)}
+</table>
+
+<h2>Alle Best-Params pro Symbol x Phase x Indikator</h2>
+<p class="info">{len(df_out)} Eintr&auml;ge: je 3 Phasen (Up/Down/Flat) x Indikatoren x Symbole</p>
+{params_html}
+
+</body></html>"""
+
+	report_path = os.path.join(BASE_OUT_DIR, "phase_sweep_report.html")
+	with open(report_path, "w", encoding="utf-8") as f:
+		f.write(html)
+	print(f"[Phase Sweep] HTML report: {report_path}")
+
+
 def write_overall_phase_result_tables():
 	"""Write phase-based best parameters to PHASE_PARAMS_CSV (best_params_overall.csv)."""
 	if not GLOBAL_PHASE_RESULTS:
@@ -3396,7 +3510,10 @@ def write_overall_phase_result_tables():
 		df_out.to_csv(PHASE_PARAMS_CSV, sep=";", decimal=",", index=False, encoding="utf-8")
 		print(f"\n[Phase Sweep] Written {len(csv_rows)} rows to {PHASE_PARAMS_CSV}")
 
-		# Summary
+		# Generate HTML report
+		_write_phase_sweep_html(df_out)
+
+		# Console summary
 		print(f"\n{'='*80}")
 		print(f"  PHASE-BASED BEST PARAMETERS ({len(csv_rows)} entries)")
 		print(f"{'='*80}")
