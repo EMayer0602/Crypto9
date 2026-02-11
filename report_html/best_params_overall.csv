@@ -1,10 +1,7 @@
-Symbol;Direction;Indicator;IndicatorDisplay;ParamA;ParamB;Length;Factor;ATRStopMult;ATRStopMultValue;MinHoldBars;HTF;FinalEquity;Trades;WinRate;MaxDrawdown;Phase;SlowLength;AvgPnL;ProfitFactor;TradesCSV
-XRP/USDC;Long;supertrend;Supertrend;14;3,0;14;3,0;None;;24;6h;15087,731263797252;73;0,7808219178082192;201,72284263889014;;;14,900428271195215;2,36678214941721;report_html/supertrend_6h/trades_XRP_USDC_supertrend_best.csv
-LINK/USDC;Long;supertrend;Supertrend;10;3,0;10;3,0;None;;24;6h;14685,715002002853;61;0,7540983606557377;265,7630977359713;;;11,241229541030416;1,7949118209856678;report_html/supertrend_6h/trades_LINK_USDC_supertrend_best.csv
-ETH/USDC;Long;supertrend;Supertrend;10;3,0;10;3,0;None;;24;6h;14662,969998757126;51;0,7254901960784313;181,63482561867022;;;12,999411740335788;2,1078812714306623;report_html/supertrend_6h/trades_ETH_USDC_supertrend_best.csv
-SOL/USDC;Long;supertrend;Supertrend;14;4,0;14;4,0;1.5;1,5;0;6h;14389,553548631215;49;0,6122448979591837;187,7656741026385;;;7,950072421045122;1,6769914234949053;report_html/supertrend_6h/trades_SOL_USDC_supertrend_best.csv
-BTC/USDC;Long;supertrend;Supertrend;7;4,0;7;4,0;1.0;1,0;12;6h;14057,710258635218;43;0,4186046511627907;137,86533728566064;;;1,3420990380283515;1,133022063001358;report_html/supertrend_6h/trades_BTC_USDC_supertrend_best.csv
-ADA/USDC;Long;supertrend;Supertrend;7;4,0;7;4,0;None;;24;6h;14591,11259822006;32;0,75;153,53731580788917;;;18,472268694376734;2,403444337953486;report_html/supertrend_6h/trades_ADA_USDC_supertrend_best.csv
-SUI/USDC;Long;supertrend;Supertrend;10;4,0;10;4,0;2.0;2,0;0;6h;14629,501109081719;40;0,775;125,87286355527431;;;15,737527727042911;2,19081883172062;report_html/supertrend_6h/trades_SUI_USDC_supertrend_best.csv
-ICP/USDC;Long;supertrend;Supertrend;14;2,0;14;2,0;2.0;2,0;12;6h;14443,425520198623;68;0,6323529411764706;424,8887503905444;;;6,520963532332607;1,5168191035240017;report_html/supertrend_6h/trades_ICP_USDC_supertrend_best.csv
-TNSR/USDC;Long;supertrend;Supertrend;7;4,0;7;4,0;2.0;2,0;0;6h;14298,672198640079;53;0,6792452830188679;283,54850016804994;;;5,635324502643104;1,324419439972313;report_html/supertrend_6h/trades_TNSR_USDC_supertrend_best.csv
+Symbol;Direction;Indicator;IndicatorDisplay;Phase;ParamA;ParamB;Length;Factor;ATRStopMult;ATRStopMultValue;MinHoldBars;MaxHoldBars;HTF;HTFLength;HTFFactor;FinalEquity;Trades;WinRate;MaxDrawdown
+BTC/USDC;Long;supertrend;Supertrend;Down;7;3,0;7;3,0;None;;0;0;6h;20;3,0;16586,097011895483;3;0,6666666666666666;21,35538041109976
+BTC/USDC;Long;supertrend;Supertrend;Flat;7;3,0;7;3,0;None;;0;0;6h;20;3,0;16502,97166342048;41;0,2926829268292683;479,544947491946
+BTC/USDC;Long;supertrend;Supertrend;Up;7;2,0;7;2,0;None;;0;0;6h;20;3,0;16634,772655053464;5;0,4;52,77433794997705
+ETH/USDC;Long;supertrend;Supertrend;Down;7;3,0;7;3,0;None;;0;0;6h;20;3,0;16708,971127150362;1;1,0;0,0
+ETH/USDC;Long;supertrend;Supertrend;Flat;14;4,0;14;4,0;None;;0;0;6h;20;3,0;16929,596952777185;12;0,5;209,3343375717377
+ETH/USDC;Long;supertrend;Supertrend;Up;14;3,0;14;3,0;None;;0;0;6h;20;3,0;17030,787362988853;5;0,6;24,09610356975827
