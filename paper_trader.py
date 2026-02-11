@@ -1862,6 +1862,55 @@ def build_summary_payload(
     }
 
 
+def load_from_summary_json(path: str = None) -> tuple:
+    """Load trades and open positions from trading_summary_bck.json.
+
+    Returns:
+        (trades_list, open_positions_list) - both as list of dicts
+    """
+    if path is None:
+        path = os.path.join(get_report_dir(), "trading_summary_bck.json")
+
+    if not os.path.exists(path):
+        return [], []
+
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        trades = data.get("trades", [])
+        open_positions = data.get("open_positions_data", [])
+        return trades, open_positions
+    except Exception as e:
+        print(f"[JSON] Error loading {path}: {e}")
+        return [], []
+
+
+def merge_trades(existing_trades: list, new_trades: list) -> list:
+    """Merge new trades into existing trades, avoiding duplicates.
+
+    Duplicate detection: same symbol + entry_time + exit_time.
+    Existing closed trades are NEVER modified.
+    """
+    existing_keys = set()
+    for t in existing_trades:
+        key = (t.get("symbol", ""), t.get("entry_time", ""), t.get("exit_time", ""))
+        existing_keys.add(key)
+
+    merged = list(existing_trades)
+    added = 0
+    for t in new_trades:
+        key = (t.get("symbol", ""), t.get("entry_time", ""), t.get("exit_time", ""))
+        if key not in existing_keys:
+            merged.append(t)
+            existing_keys.add(key)
+            added += 1
+
+    if added > 0:
+        print(f"[JSON] Merged {added} new trades (total: {len(merged)})")
+
+    return merged
+
+
 def write_summary_json(summary: Dict[str, Any], path: str) -> None:
     import re as _re
     with open(path, "w", encoding="utf-8") as fh:
@@ -3134,6 +3183,10 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         action="store_true",
         help="Use futures data for signal generation (entries/exits from futures, trades on spot prices)",
     )
+    parser.add_argument("--loop", action="store_true",
+        help="Run simulation continuously, refreshing every --signal-interval minutes")
+    parser.add_argument("--dashboard-start", type=str, default="2025-12-01",
+        help="Start date for dashboard filtering (default: 2025-12-01)")
     return parser.parse_args(argv)
 
 
@@ -3208,7 +3261,12 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
         if not success:
             print("[Force] Manuelle Order konnte nicht erstellt werden.")
         return
-    if args.monitor:
+    # --simulate --monitor = --simulate --loop
+    if args.simulate and args.monitor:
+        args.loop = True
+        print("[Config] --simulate --monitor detected: running as --simulate --loop")
+
+    if args.monitor and not args.simulate:
         if args.refresh_params:
             st.run_overall_best_params()
         if args.clear_outputs:
@@ -3348,8 +3406,50 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
         return
 
     if args.simulate:
+      existing_trades_df = None
+      last_end_ts = None
+      is_fresh_start = False
+      HISTORICAL_START = pd.Timestamp("2025-01-01", tz=st.BERLIN_TZ)
+
+      # Check existing JSON for append mode
+      summary_path = args.summary_json or SIMULATION_SUMMARY_JSON
+
+      if not os.path.exists(summary_path):
+          is_fresh_start = True
+          print(f"[Simulation] No {summary_path} found")
+          print(f"[Simulation] FRESH START: {HISTORICAL_START.strftime('%Y-%m-%d')} to now")
+      else:
+          try:
+              with open(summary_path, "r", encoding="utf-8") as f:
+                  existing_summary = json.load(f)
+              existing_trades = existing_summary.get("trades", [])
+              if existing_trades:
+                  existing_trades_df = pd.DataFrame(existing_trades)
+                  last_exit = max(t.get("exit_time", "") for t in existing_trades if t.get("exit_time"))
+                  if last_exit:
+                      last_end_ts = pd.to_datetime(last_exit)
+                      if last_end_ts.tzinfo is None:
+                          last_end_ts = last_end_ts.tz_localize(st.BERLIN_TZ)
+                  print(f"[Simulation] Found {len(existing_trades)} existing trades (PROTECTED)")
+                  print(f"[Simulation] APPEND MODE: from {last_end_ts} to now")
+              else:
+                  is_fresh_start = True
+                  print(f"[Simulation] File exists but no trades")
+                  print(f"[Simulation] FRESH START: {HISTORICAL_START.strftime('%Y-%m-%d')} to now")
+          except Exception as e:
+              is_fresh_start = True
+              print(f"[Simulation] Error loading: {e}")
+              print(f"[Simulation] FRESH START: {HISTORICAL_START.strftime('%Y-%m-%d')} to now")
+
+      while True:
+        if args.loop:
+            print(f"\n{'='*60}")
+            print(f"[Loop] Running at {pd.Timestamp.now(tz=st.BERLIN_TZ).strftime('%Y-%m-%d %H:%M:%S')}")
+            print(f"{'='*60}")
+
         trades: List[TradeResult] = []
         open_positions: List[Dict[str, Any]] = []
+
         if args.replay_trades_csv:
             if args.clear_outputs:
                 clear_output_artifacts(include_state=args.reset_state)
@@ -3360,23 +3460,16 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
                 print(f"[Replay] No trades loaded from {args.replay_trades_csv}")
                 return
             start_default = _infer_timestamp_from_df(
-                trades_df,
-                "entry_time",
-                _infer_timestamp_from_df(
-                    trades_df,
-                    "Zeit",
-                    pd.Timestamp.now(tz=st.BERLIN_TZ) - pd.Timedelta(days=2),
-                ),
+                trades_df, "entry_time",
+                _infer_timestamp_from_df(trades_df, "Zeit", pd.Timestamp.now(tz=st.BERLIN_TZ) - pd.Timedelta(days=2)),
             )
             end_default = _infer_timestamp_from_df(
-                trades_df,
-                "exit_time",
+                trades_df, "exit_time",
                 _infer_timestamp_from_df(trades_df, "ExitZeit", pd.Timestamp.now(tz=st.BERLIN_TZ)),
             )
             end_ts = resolve_timestamp(args.end, end_default)
             start_ts = resolve_timestamp(args.start, start_default)
             pnl_series = _to_numeric_series(trades_df.get("pnl", pd.Series(dtype=float))).fillna(0.0)
-            # For replay, anchor capital to START_TOTAL_CAPITAL and add closed PnL only (ignore embedded equity_after from source files)
             final_capital = float(START_TOTAL_CAPITAL + pnl_series.sum())
             final_state = {
                 "total_capital": final_capital,
@@ -3389,10 +3482,34 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
                 else {},
             }
         else:
-            end_ts = resolve_timestamp(args.end, pd.Timestamp.now(tz=st.BERLIN_TZ))
-            default_start = end_ts - pd.Timedelta(days=1)
-            start_ts = resolve_timestamp(args.start, default_start)
+            now_ts = pd.Timestamp.now(tz=st.BERLIN_TZ)
+            end_ts = resolve_timestamp(args.end, now_ts)
+
+            # Determine start time based on append mode
+            if last_end_ts is not None:
+                start_ts = last_end_ts
+                print(f"[Simulation] Appending from last trade: {start_ts.strftime('%Y-%m-%d %H:%M')}")
+            elif args.start:
+                start_ts = resolve_timestamp(args.start, None)
+                print(f"[Simulation] Using provided start: {start_ts.strftime('%Y-%m-%d %H:%M')}")
+            else:
+                start_ts = HISTORICAL_START
+                print(f"[Simulation] Fresh start from: {start_ts.strftime('%Y-%m-%d %H:%M')}")
+
             print(f"[Simulation] Period: {start_ts.strftime('%Y-%m-%d %H:%M')} to {end_ts.strftime('%Y-%m-%d %H:%M')}")
+
+            if start_ts >= end_ts:
+                print(f"[Simulation] No new data available (start >= end).")
+                if args.loop:
+                    print(f"\n[Loop] Next refresh in {args.signal_interval:.0f} minutes. Press Ctrl+C to stop.")
+                    try:
+                        time.sleep(args.signal_interval * 60)
+                        st.clear_data_cache()
+                        continue
+                    except KeyboardInterrupt:
+                        print("\n[Loop] Stopped by user.")
+                break
+
             trades, final_state = run_simulation(
                 start_ts,
                 end_ts,
@@ -3408,16 +3525,42 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
             )
             trades_df = trades_to_dataframe(trades)
             open_positions = final_state.get("positions", [])
-            print(f"[Simulation] Generated {len(trades)} trades during simulation")
+
+            # MERGE with existing trades (append mode) - NEVER overwrite closed trades
+            if existing_trades_df is not None and not existing_trades_df.empty:
+                if not trades_df.empty:
+                    print(f"[Simulation] Merging {len(trades_df)} new trades with {len(existing_trades_df)} existing")
+                    trades_df = pd.concat([existing_trades_df, trades_df], ignore_index=True)
+                    if "symbol" in trades_df.columns and "entry_time" in trades_df.columns:
+                        before_dedup = len(trades_df)
+                        trades_df = trades_df.drop_duplicates(subset=["symbol", "entry_time"], keep="last")
+                        if before_dedup != len(trades_df):
+                            print(f"[Simulation] Removed {before_dedup - len(trades_df)} duplicate trades")
+                else:
+                    trades_df = existing_trades_df
+                print(f"[Simulation] Total trades after merge: {len(trades_df)}")
+
+                # Recalculate final capital based on ALL merged trades
+                pnl_col = None
+                for col in ["pnl", "pnl_usd", "PnL"]:
+                    if col in trades_df.columns:
+                        pnl_col = col
+                        break
+                if pnl_col:
+                    total_pnl = trades_df[pnl_col].sum()
+                    final_state["total_capital"] = START_TOTAL_CAPITAL + total_pnl
+                    print(f"[Simulation] Recalculated capital: {START_TOTAL_CAPITAL:.2f} + {total_pnl:.2f} PnL = {final_state['total_capital']:.2f}")
+
+        all_trades_df = trades_df
         log_path = args.sim_log or SIMULATION_LOG_FILE
         log_json_path = args.sim_json or SIMULATION_LOG_JSON
-        write_closed_trades_report(trades_df, log_path, log_json_path)
+        write_closed_trades_report(all_trades_df, log_path, log_json_path)
         print(f"[Simulation] Final capital: {final_state['total_capital']:.2f} USDT")
         open_path = args.open_log or SIMULATION_OPEN_POSITIONS_FILE
         open_json_path = args.open_json or SIMULATION_OPEN_POSITIONS_JSON
         write_open_positions_report(open_positions, open_path, open_json_path)
         open_df = open_positions_to_dataframe(open_positions)
-        summary_data = build_summary_payload(trades_df, open_df, final_state, start_ts, end_ts)
+        summary_data = build_summary_payload(all_trades_df, open_df, final_state, start_ts, end_ts)
         summary_json_path = args.summary_json or SIMULATION_SUMMARY_JSON
         write_summary_json(summary_data, summary_json_path)
 
@@ -3425,7 +3568,7 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
         try:
             from TestnetDashboard import generate_dashboard
             output_dir = Path(REPORT_DIR)
-            ds_start = get_dashboard_start_str()
+            ds_start = args.dashboard_start
             generate_dashboard(start_date=ds_start, output_dir=output_dir, german=False)
             generate_dashboard(start_date=ds_start, output_dir=output_dir, german=True)
             print(f"[Dashboard] Updated (EN + DE) in {REPORT_DIR}")
@@ -3445,22 +3588,32 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
                 print(f"{ss['symbol']:<12} {ss['trades']:>7} {ss['winners']:>5} {ss['losers']:>5} {ss['win_rate']:>5.1f}% {ss['total_pnl']:>12.2f} {ss['avg_pnl']:>10.2f} {ss['best_trade']:>10.2f} {ss['worst_trade']:>10.2f} {ss['max_drawdown']:>10.2f} {pf_str:>6}")
             print("=" * 120 + "\n")
 
-        generate_trade_charts(trades_df, output_dir=os.path.join(REPORT_DIR, "charts"))
-        generate_equity_curve(trades_df, start_capital=START_TOTAL_CAPITAL, output_dir=os.path.join(REPORT_DIR, "charts"))
+        generate_trade_charts(all_trades_df, output_dir=os.path.join(REPORT_DIR, "charts"))
+        generate_equity_curve(all_trades_df, start_capital=START_TOTAL_CAPITAL, output_dir=os.path.join(REPORT_DIR, "charts"))
         if open_positions:
             print(f"[Simulation] Open positions remaining: {len(open_positions)}")
         else:
             print("[Simulation] No open positions remaining.")
-        if not trades_df.empty:
-            if args.replay_trades_csv:
-                last_row = trades_df.tail(1).iloc[0]
-                sym_val = last_row.get("symbol") or last_row.get("Symbol") or "?"
-                dir_val = last_row.get("direction") or last_row.get("Direction") or "?"
-                exit_val = last_row.get("exit_time") or last_row.get("ExitZeit") or "?"
-                print(f"[Replay] Last trade: {sym_val} {dir_val} exited {exit_val}")
-            else:
-                last_trade = trades[-1]
-                print(f"[Simulation] Last trade: {last_trade.symbol} {last_trade.direction} exited {last_trade.exit_time}")
+        if not all_trades_df.empty:
+            last_row = all_trades_df.tail(1).iloc[0]
+            sym_val = last_row.get("symbol") or last_row.get("Symbol") or "?"
+            dir_val = last_row.get("direction") or last_row.get("Direction") or "?"
+            exit_val = last_row.get("exit_time") or last_row.get("ExitZeit") or "?"
+            print(f"[Simulation] Last trade: {sym_val} {dir_val} exited {exit_val}")
+
+        # Loop mode: sleep and repeat
+        if args.loop:
+            last_end_ts = end_ts
+            existing_trades_df = all_trades_df.copy() if not all_trades_df.empty else None
+            is_fresh_start = False
+            print(f"\n[Loop] Next refresh in {args.signal_interval:.0f} minutes. Press Ctrl+C to stop.")
+            try:
+                time.sleep(args.signal_interval * 60)
+                st.clear_data_cache()
+                continue
+            except KeyboardInterrupt:
+                print("\n[Loop] Stopped by user.")
+        break
     else:
         main(
             allowed_symbols=allowed_symbols,
