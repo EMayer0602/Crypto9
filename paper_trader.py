@@ -86,7 +86,7 @@ def get_report_dir(use_testnet: bool = False) -> str:
     return "report_testnet" if use_testnet else "report_html"
 BEST_PARAMS_CSV = st.OVERALL_PARAMS_CSV
 START_TOTAL_CAPITAL = 16_500.0
-MAX_OPEN_POSITIONS = 12
+MAX_OPEN_POSITIONS = 10
 STAKE_DIVISOR = 10  # stake = current total_capital / STAKE_DIVISOR = 16500/10 = 1650
 DEFAULT_DIRECTION_CAPITAL = 2_800.0
 BASE_BAR_MINUTES = st.timeframe_to_minutes(st.TIMEFRAME)
@@ -3524,7 +3524,53 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
                 clear_outputs=args.clear_outputs,
             )
             trades_df = trades_to_dataframe(trades)
-            open_positions = final_state.get("positions", [])
+            new_open_positions = final_state.get("positions", [])
+
+            # MERGE open positions: keep existing ones that weren't closed in new sim
+            if existing_trades_df is not None:
+                # Load existing open positions from JSON
+                summary_path_check = args.summary_json or SIMULATION_SUMMARY_JSON
+                existing_open = []
+                if os.path.exists(summary_path_check):
+                    try:
+                        with open(summary_path_check, "r", encoding="utf-8") as f:
+                            prev_summary = json.load(f)
+                        existing_open = prev_summary.get("open_positions_data", [])
+                    except Exception:
+                        pass
+
+                if existing_open:
+                    # Find which existing open positions were closed in this sim
+                    new_closed_symbols = set()
+                    if not trades_df.empty and "symbol" in trades_df.columns:
+                        new_closed_symbols = set(trades_df["symbol"].unique())
+
+                    # Keep existing open positions that were NOT closed
+                    kept_open = []
+                    for pos in existing_open:
+                        sym = pos.get("symbol", "")
+                        entry_time = pos.get("entry_time", "")
+                        # Check if this position was closed in the new simulation
+                        was_closed = False
+                        if not trades_df.empty and "symbol" in trades_df.columns and "entry_time" in trades_df.columns:
+                            matches = trades_df[
+                                (trades_df["symbol"] == sym) &
+                                (trades_df["entry_time"].astype(str).str[:16] == str(entry_time)[:16])
+                            ]
+                            if not matches.empty:
+                                was_closed = True
+                        if not was_closed:
+                            kept_open.append(pos)
+                        else:
+                            print(f"[Simulation] Open position {sym} closed in new sim")
+
+                    # Merge: kept existing + new from this sim
+                    open_positions = kept_open + new_open_positions
+                    print(f"[Simulation] Open positions: {len(kept_open)} existing + {len(new_open_positions)} new = {len(open_positions)}")
+                else:
+                    open_positions = new_open_positions
+            else:
+                open_positions = new_open_positions
 
             # MERGE with existing trades (append mode) - NEVER overwrite closed trades
             if existing_trades_df is not None and not existing_trades_df.empty:
