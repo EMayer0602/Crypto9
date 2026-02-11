@@ -3364,6 +3364,270 @@ def record_global_phase_best(indicator_key, summary_rows):
 			dir_store[phase] = dict(row)
 
 
+def _collect_best_phase_trades():
+	"""
+	Re-run backtests using the best params per phase from GLOBAL_PHASE_RESULTS.
+	For each symbol, picks the best indicator per phase, runs backtest,
+	keeps only trades matching the phase.
+	Returns chronological list of trade dicts.
+	"""
+	global HTF_LENGTH, HTF_FACTOR
+
+	# For each (symbol, phase): pick best across all indicators
+	best_per_sp = {}
+	for indicator_key, indicator_store in GLOBAL_PHASE_RESULTS.items():
+		for symbol, dir_dict in indicator_store.items():
+			for direction, phase_dict in dir_dict.items():
+				for phase, entry in phase_dict.items():
+					key = (symbol, phase)
+					existing = best_per_sp.get(key)
+					if existing is None or float(entry.get("FinalEquity", 0)) > float(existing.get("FinalEquity", 0)):
+						best_per_sp[key] = entry
+
+	all_trades = []
+	saved_htf_length = HTF_LENGTH
+	saved_htf_factor = HTF_FACTOR
+
+	# Group by (symbol, indicator, htf, htf_length, htf_factor) to avoid redundant backtests
+	backtest_groups = {}
+	for (symbol, phase), params in best_per_sp.items():
+		group_key = (
+			symbol, params["Indicator"], params.get("HTF", HIGHER_TIMEFRAME),
+			int(params.get("HTFLength", HTF_LENGTH)), float(params.get("HTFFactor", HTF_FACTOR)),
+			params["ParamA"], params["ParamB"],
+			params.get("ATRStopMultValue"), int(params.get("MinHoldBars", 0)), int(params.get("MaxHoldBars", 0)),
+		)
+		backtest_groups.setdefault(group_key, []).append((phase, params))
+
+	for group_key, phase_list in backtest_groups.items():
+		symbol, indicator, htf, htf_len, htf_fac, param_a, param_b, atr_mult, min_hold, max_hold = group_key
+
+		apply_indicator_type(indicator)
+		apply_higher_timeframe(htf)
+		HTF_LENGTH = htf_len
+		HTF_FACTOR = htf_fac
+		clear_data_cache()
+
+		df_raw = prepare_symbol_dataframe(symbol)
+		if df_raw.empty:
+			continue
+
+		phase_labels = classify_market_phases(df_raw, symbol)
+
+		df_ind = compute_indicator(df_raw, param_a, param_b)
+		for col in ("htf_trend", "htf_indicator", "momentum"):
+			if col in df_raw.columns:
+				df_ind[col] = df_raw[col]
+
+		direction = str(phase_list[0][1].get("Direction", "Long")).lower()
+
+		if indicator == "htf_crossover":
+			trades = backtest_htf_crossover(df_ind, atr_stop_mult=atr_mult, direction=direction,
+				min_hold_bars=min_hold, max_hold_bars=max_hold)
+		else:
+			trades = backtest_supertrend(df_ind, atr_stop_mult=atr_mult, direction=direction,
+				min_hold_bars=min_hold, max_hold_bars=max_hold)
+
+		if trades.empty:
+			continue
+
+		target_phases = {p for p, _ in phase_list}
+
+		for _, trade in trades.iterrows():
+			entry_time = trade["Zeit"]
+			if entry_time in phase_labels.index:
+				trade_phase = phase_labels.loc[entry_time]
+			else:
+				idx = phase_labels.index.get_indexer([entry_time], method="ffill")[0]
+				trade_phase = phase_labels.iloc[idx] if idx >= 0 else "Flat"
+
+			if trade_phase not in target_phases:
+				continue
+
+			all_trades.append({
+				"symbol": symbol,
+				"indicator": INDICATOR_DISPLAY_NAME,
+				"indicator_key": indicator,
+				"htf": htf,
+				"direction": direction,
+				"phase": trade_phase,
+				"entry_time": str(entry_time),
+				"exit_time": str(trade["ExitZeit"]),
+				"entry_price": float(trade["Entry"]),
+				"exit_price": float(trade["ExitPreis"]),
+				"reason": str(trade.get("ExitReason", "")),
+			})
+
+	HTF_LENGTH = saved_htf_length
+	HTF_FACTOR = saved_htf_factor
+
+	all_trades.sort(key=lambda t: t["entry_time"])
+	return all_trades
+
+
+def _generate_phase_dashboard(all_trades, dashboard_start="2025-12-01"):
+	"""
+	Generate dashboard_Ph.html and trading_summary_Ph.html from phase-tagged trades.
+	Applies compound growth (stake = capital / 8).
+	Same format as TestnetDashboard / write_summary_html.
+	"""
+	now = datetime.now(BERLIN_TZ).strftime("%Y-%m-%d %H:%M:%S %Z")
+	phase_colors = {"Up": "#27ae60", "Down": "#e74c3c", "Flat": "#f39c12"}
+	max_positions = PHASE_STAKE_DIVISOR  # 8
+
+	# German number formatting
+	def fmt_de(val):
+		s = f"{val:,.2f}"
+		return s.replace(",", "X").replace(".", ",").replace("X", ".")
+
+	def fmt_price(val):
+		v = abs(val)
+		if v < 0.0001:
+			return f"{val:.8f}"
+		elif v < 1:
+			return f"{val:.6f}"
+		elif v < 100:
+			return f"{val:.4f}"
+		return fmt_de(val)
+
+	# Apply compound growth to ALL trades (from beginning for correct equity)
+	capital = START_EQUITY
+	processed = []
+	for t in all_trades:
+		stake = capital / max_positions
+		ep = t["entry_price"]
+		xp = t["exit_price"]
+		if t["direction"] == "long":
+			pnl_pct = (xp - ep) / ep if ep else 0
+		else:
+			pnl_pct = (ep - xp) / ep if ep else 0
+		pnl_gross = pnl_pct * stake
+		fees = stake * FEE_RATE * 2.0
+		pnl_net = pnl_gross - fees
+		capital += pnl_net
+		t["stake"] = stake
+		t["pnl"] = pnl_net
+		t["pnl_pct"] = pnl_pct
+		t["fees"] = fees
+		t["equity_after"] = capital
+		processed.append(t)
+
+	# Filter for dashboard display (from dashboard_start)
+	display_trades = [t for t in processed if t["entry_time"][:10] >= dashboard_start]
+
+	# Stats
+	total_trades = len(display_trades)
+	winners = sum(1 for t in display_trades if t["pnl"] > 0)
+	losers = sum(1 for t in display_trades if t["pnl"] <= 0)
+	win_rate = (winners / total_trades * 100) if total_trades else 0
+	total_pnl = sum(t["pnl"] for t in display_trades)
+	final_capital = display_trades[-1]["equity_after"] if display_trades else capital
+	start_capital_at_dashboard = display_trades[0]["equity_after"] - display_trades[0]["pnl"] if display_trades else START_EQUITY
+
+	# Open positions = trades with reason "Final bar" (still open at backtest end)
+	open_trades = [t for t in display_trades if t["reason"] == "Final bar"]
+	closed_trades = [t for t in display_trades if t["reason"] != "Final bar"]
+	open_pnl = sum(t["pnl"] for t in open_trades)
+	closed_pnl = sum(t["pnl"] for t in closed_trades)
+
+	# Build trades table rows
+	def trade_row(t, show_exit=True):
+		pnl_class = "pos" if t["pnl"] >= 0 else "neg"
+		pnl_pct_str = f"{'+' if t['pnl_pct'] >= 0 else ''}{t['pnl_pct']*100:.2f}%"
+		phase_color = phase_colors.get(t["phase"], "#888")
+		cols = [
+			f'<td>{t["symbol"]}</td>',
+			f'<td style="color:{phase_color};font-weight:bold">{t["phase"]}</td>',
+			f'<td>{t["indicator"]}</td>',
+			f'<td>{t["htf"]}</td>',
+			f'<td>{t["entry_time"][:16]}</td>',
+			f'<td style="text-align:right">{fmt_price(t["entry_price"])}</td>',
+		]
+		if show_exit:
+			cols.append(f'<td>{t["exit_time"][:16]}</td>')
+			cols.append(f'<td style="text-align:right">{fmt_price(t["exit_price"])}</td>')
+		else:
+			cols.append(f'<td style="text-align:right">{fmt_price(t["exit_price"])}</td>')
+		cols += [
+			f'<td style="text-align:right">{fmt_de(t["stake"])}</td>',
+			f'<td class="{pnl_class}" style="text-align:right">{fmt_de(t["pnl"])}</td>',
+			f'<td class="{pnl_class}" style="text-align:right">{pnl_pct_str}</td>',
+		]
+		if show_exit:
+			cols.append(f'<td>{t["reason"]}</td>')
+		else:
+			cols.append(f'<td>Open</td>')
+		return "<tr>" + "".join(cols) + "</tr>"
+
+	open_rows = "\n".join(trade_row(t, show_exit=False) for t in open_trades) if open_trades else '<tr><td colspan="11" style="text-align:center;color:#888">Keine offenen Positionen</td></tr>'
+	closed_rows = "\n".join(trade_row(t, show_exit=True) for t in reversed(closed_trades)) if closed_trades else '<tr><td colspan="12" style="text-align:center;color:#888">Keine Trades</td></tr>'
+
+	cap_color = "#27ae60" if final_capital >= START_EQUITY else "#e74c3c"
+	pnl_color = "#27ae60" if total_pnl >= 0 else "#e74c3c"
+	open_pnl_color = "#27ae60" if open_pnl >= 0 else "#e74c3c"
+
+	html = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"><meta http-equiv="refresh" content="60">
+<title>Phase-Based Dashboard (ab {dashboard_start})</title>
+<style>
+body {{ font-family: Arial, sans-serif; margin: 20px; background: #1a1a2e; color: #e0e0e0; }}
+h1 {{ color: #00d2ff; margin-bottom: 5px; }}
+h2 {{ color: #f39c12; margin-top: 30px; }}
+p.sub {{ color: #888; margin-top: 0; }}
+.cards {{ display: flex; gap: 15px; flex-wrap: wrap; margin: 20px 0; }}
+.card {{ background: #16213e; border-radius: 8px; padding: 15px 20px; min-width: 150px; }}
+.card .label {{ color: #888; font-size: 12px; text-transform: uppercase; }}
+.card .value {{ font-size: 22px; font-weight: bold; margin-top: 5px; }}
+table {{ border-collapse: collapse; width: 100%; font-size: 13px; margin-top: 10px; }}
+th {{ background: #16213e; color: #00d2ff; padding: 8px 10px; text-align: left; border-bottom: 2px solid #0f3460; }}
+td {{ padding: 6px 10px; border-bottom: 1px solid #333; }}
+tr:hover {{ background: #16213e; }}
+.pos {{ color: #27ae60; }}
+.neg {{ color: #e74c3c; }}
+</style>
+</head><body>
+<h1>Phase-Based Strategy Dashboard</h1>
+<p class="sub">Ab {dashboard_start} | Stand: {now} | Compound Growth (stake = equity/{max_positions})</p>
+
+<div class="cards">
+<div class="card"><div class="label">Start Kapital</div><div class="value">{fmt_de(start_capital_at_dashboard)} USDT</div></div>
+<div class="card"><div class="label">Final Kapital</div><div class="value" style="color:{cap_color}">{fmt_de(final_capital)} USDT</div></div>
+<div class="card"><div class="label">Closed Trades</div><div class="value">{len(closed_trades)}</div></div>
+<div class="card"><div class="label">Realized PnL</div><div class="value" style="color:{pnl_color}">{fmt_de(closed_pnl)} USDT</div></div>
+<div class="card"><div class="label">Open Positionen</div><div class="value">{len(open_trades)}</div></div>
+<div class="card"><div class="label">Open PnL</div><div class="value" style="color:{open_pnl_color}">{fmt_de(open_pnl)} USDT</div></div>
+<div class="card"><div class="label">Win Rate</div><div class="value">{win_rate:.1f}%</div></div>
+</div>
+
+<h2>Open Positionen</h2>
+<table>
+<tr><th>Symbol</th><th>Phase</th><th>Indikator</th><th>HTF</th><th>Entry</th><th>Entry Preis</th><th>Aktuell</th><th>Stake</th><th>PnL</th><th>PnL%</th><th>Status</th></tr>
+{open_rows}
+</table>
+
+<h2>Closed Trades ({len(closed_trades)})</h2>
+<table>
+<tr><th>Symbol</th><th>Phase</th><th>Indikator</th><th>HTF</th><th>Entry</th><th>Entry Preis</th><th>Exit</th><th>Exit Preis</th><th>Stake</th><th>PnL</th><th>PnL%</th><th>Reason</th></tr>
+{closed_rows}
+</table>
+
+</body></html>"""
+
+	# Write dashboard_Ph.html
+	dash_path = os.path.join(BASE_OUT_DIR, "dashboard_Ph.html")
+	with open(dash_path, "w", encoding="utf-8") as f:
+		f.write(html)
+	print(f"[Phase Dashboard] {dash_path} ({len(display_trades)} trades ab {dashboard_start})")
+
+	# Also write trading_summary_Ph.html (same content, different title)
+	summary_html = html.replace("Phase-Based Strategy Dashboard", "Phase-Based Trading Summary")
+	summary_html = summary_html.replace('<meta http-equiv="refresh" content="60">', '')
+	summary_path = os.path.join(BASE_OUT_DIR, "trading_summary_Ph.html")
+	with open(summary_path, "w", encoding="utf-8") as f:
+		f.write(summary_html)
+	print(f"[Phase Summary] {summary_path}")
+
+
 def _write_phase_sweep_html(df_out):
 	"""Generate phase_sweep_report.html with params table + equity comparison."""
 	now = datetime.now(BERLIN_TZ).strftime("%Y-%m-%d %H:%M:%S %Z")
@@ -3510,8 +3774,16 @@ def write_overall_phase_result_tables():
 		df_out.to_csv(PHASE_PARAMS_CSV, sep=";", decimal=",", index=False, encoding="utf-8")
 		print(f"\n[Phase Sweep] Written {len(csv_rows)} rows to {PHASE_PARAMS_CSV}")
 
-		# Generate HTML report
+		# Generate HTML reports
 		_write_phase_sweep_html(df_out)
+
+		# Generate dashboard + trading summary from phase trades
+		print("\n[Phase Dashboard] Collecting phase trades for dashboard...")
+		phase_trades = _collect_best_phase_trades()
+		if phase_trades:
+			_generate_phase_dashboard(phase_trades, dashboard_start="2025-12-01")
+		else:
+			print("[Phase Dashboard] No trades collected.")
 
 		# Console summary
 		print(f"\n{'='*80}")
