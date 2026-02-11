@@ -3301,15 +3301,16 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
     if args.sweep:
         import time as _time
         print("=" * 70)
-        print("  PARAMETER SWEEP + PORTFOLIO SIMULATION")
+        print("  PHASE-BASED PARAMETER SWEEP + PORTFOLIO SIMULATION")
         print("=" * 70)
         print(f"  Start Equity: {START_TOTAL_CAPITAL}")
         print(f"  Max Open Positions: {MAX_OPEN_POSITIONS}")
-        print(f"  Stake Divisor: {STAKE_DIVISOR}")
+        print(f"  Phase Stake Divisor: {st.PHASE_STAKE_DIVISOR}")
         print(f"  Max Hold Bars: {st.MAX_HOLD_BAR_VALUES}")
+        print(f"  Phases: Up / Down / Flat (per indicator per symbol)")
         print("=" * 70)
         sweep_start = _time.time()
-        # Run full parameter sweep across all indicators, HTFs, and HTF filter params
+        # Run phase-based sweep across all indicators, HTFs, and HTF filter params
         old_sweep = st.RUN_PARAMETER_SWEEP
         old_overall = st.RUN_OVERALL_BEST
         st.RUN_PARAMETER_SWEEP = True
@@ -3339,10 +3340,10 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
                         st.HTF_LENGTH = htf_len
                         st.HTF_FACTOR = htf_fac
                         st.clear_data_cache()  # Force recompute with new HTF params
-                        print(f"\n[Sweep {combo_num}/{total_combos}] {st.INDICATOR_DISPLAY_NAME} HTF={htf_value} HTF_Length={htf_len} HTF_Factor={htf_fac}")
-                        summary_rows = st.run_parameter_sweep()
-                        st.record_global_best(indicator_name, summary_rows)
-        st.write_overall_result_tables()
+                        print(f"\n[Phase Sweep {combo_num}/{total_combos}] {st.INDICATOR_DISPLAY_NAME} HTF={htf_value} L={htf_len} F={htf_fac}")
+                        summary_rows = st.run_phase_based_sweep()
+                        st.record_global_phase_best(indicator_name, summary_rows)
+        st.write_overall_phase_result_tables()
         st.RUN_PARAMETER_SWEEP = old_sweep
         st.RUN_OVERALL_BEST = old_overall
         sweep_elapsed = _time.time() - sweep_start

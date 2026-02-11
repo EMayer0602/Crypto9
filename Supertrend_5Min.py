@@ -221,6 +221,12 @@ OVERALL_FLAT_CSV = os.path.join(BASE_OUT_DIR, "overall_best_flat_trades.csv")
 OVERALL_FLAT_JSON = os.path.join(BASE_OUT_DIR, "overall_best_flat_trades.json")
 GLOBAL_BEST_RESULTS = {}
 
+# Phase-based sweep: optimized parameters per market phase (Up/Down/Flat)
+RUN_PHASE_BASED_SWEEP = False
+PHASE_STAKE_DIVISOR = 8  # stake = equity/8 (match paper_trader MAX_OPEN_POSITIONS=8)
+PHASE_PARAMS_CSV = os.path.join(BASE_OUT_DIR, "best_params_overall.csv")
+GLOBAL_PHASE_RESULTS = {}
+
 INDICATOR_PRESETS = {
 	"supertrend": {
 		"display_name": "Supertrend",
@@ -3116,9 +3122,318 @@ apply_indicator_type("supertrend")
 apply_higher_timeframe(HIGHER_TIMEFRAME)
 
 
+# =====================================================================
+#  PHASE-BASED SWEEP: Optimized parameters per market phase (Up/Down/Flat)
+#  Same trading strategy as trading_summary – only difference is
+#  separate best params for each phase.
+# =====================================================================
+
+def classify_market_phases(df, symbol):
+	"""
+	Classify each bar as Up/Down/Flat based on HTF Supertrend slope.
+	Uses current global HTF_LENGTH, HTF_FACTOR, HIGHER_TIMEFRAME.
+	Same algorithm as generate_reports.py classify_phase_by_slope().
+	"""
+	low_tf_minutes = timeframe_to_minutes(TIMEFRAME)
+	htf_minutes = timeframe_to_minutes(HIGHER_TIMEFRAME)
+	ratio = max(1, htf_minutes // low_tf_minutes)
+	htf_bars_needed = (len(df) // ratio) + 100
+
+	df_high = fetch_data(symbol, HIGHER_TIMEFRAME, htf_bars_needed)
+	if df_high.empty:
+		return pd.Series("Flat", index=df.index)
+
+	df_high_ind = compute_supertrend(df_high, length=HTF_LENGTH, factor=HTF_FACTOR)
+	if "supertrend" not in df_high_ind.columns:
+		return pd.Series("Flat", index=df.index)
+
+	htf_st = df_high_ind["supertrend"]
+	aligned = htf_st.reindex(df.index, method="ffill")
+
+	# Slope-based classification (identical to classify_phase_by_slope)
+	raw_slope = aligned.diff()
+	slope_pct = raw_slope / aligned.shift(1)
+	slope_pct = slope_pct.rolling(window=5, min_periods=1).mean()
+
+	phases = pd.Series("Flat", index=df.index)
+	phases[slope_pct > 0.001] = "Up"
+	phases[slope_pct < -0.001] = "Down"
+	return phases
+
+
+def score_phase_compound(trades_df, phase_labels, phase):
+	"""
+	Compound growth using only trades from the given phase.
+	stake = equity / PHASE_STAKE_DIVISOR, PnL adds to equity.
+	Returns (final_equity, trade_count, win_count, max_drawdown).
+	"""
+	equity = START_EQUITY
+	peak_equity = START_EQUITY
+	max_dd = 0.0
+	count = 0
+	wins = 0
+
+	if trades_df.empty:
+		return equity, 0, 0, 0.0
+
+	for _, trade in trades_df.iterrows():
+		entry_time = trade["Zeit"]
+
+		# Look up phase at entry time
+		if entry_time in phase_labels.index:
+			trade_phase = phase_labels.loc[entry_time]
+		else:
+			idx = phase_labels.index.get_indexer([entry_time], method="ffill")[0]
+			trade_phase = phase_labels.iloc[idx] if idx >= 0 else "Flat"
+
+		if trade_phase != phase:
+			continue
+
+		count += 1
+		stake = equity / PHASE_STAKE_DIVISOR
+		entry_price = float(trade["Entry"])
+		exit_price = float(trade["ExitPreis"])
+		direction = str(trade["Direction"]).lower()
+
+		if direction == "long":
+			gross_pnl = (exit_price - entry_price) / entry_price * stake
+		else:
+			gross_pnl = (entry_price - exit_price) / entry_price * stake
+
+		fees = stake * FEE_RATE * 2.0
+		pnl = gross_pnl - fees
+		equity += pnl
+
+		if pnl > 0:
+			wins += 1
+		if equity > peak_equity:
+			peak_equity = equity
+		dd = peak_equity - equity
+		if dd > max_dd:
+			max_dd = dd
+
+	return equity, count, wins, max_dd
+
+
+def run_phase_based_sweep():
+	"""
+	Phase-based parameter sweep for the current indicator + HTF timeframe.
+	HTF_LENGTH/HTF_FACTOR are set by caller (paper_trader --sweep loop).
+
+	1. Classifies bars into Up/Down/Flat using current HTF settings
+	2. Runs all ParamA × ParamB × ATR × MinHold × MaxHold combos
+	3. Scores compound growth per phase (same strategy as trading_summary)
+	4. Returns best params per symbol × direction × phase
+
+	Does NOT modify any existing functions.
+	"""
+	ensure_cache_populated(SYMBOLS, TIMEFRAME, LOOKBACK)
+
+	directions = get_enabled_directions()
+	hold_bar_candidates = MIN_HOLD_BAR_VALUES if USE_MIN_HOLD_FILTER else [DEFAULT_MIN_HOLD_BARS]
+	max_hold_candidates = MAX_HOLD_BAR_VALUES if MAX_HOLD_BAR_VALUES else [0]
+	phase_names = ["Up", "Down", "Flat"]
+
+	best_per_phase = {}  # {(symbol, direction, phase): row_dict}
+
+	total_params = len(PARAM_A_VALUES) * len(PARAM_B_VALUES) * len(ATR_STOP_MULTS) * len(hold_bar_candidates) * len(max_hold_candidates)
+	print(f"\n[Phase Sweep] {INDICATOR_DISPLAY_NAME} HTF={HIGHER_TIMEFRAME} L={HTF_LENGTH} F={HTF_FACTOR}")
+	print(f"[Phase Sweep] {len(SYMBOLS)} symbols × {total_params} param combos × 3 phases")
+
+	for sym_idx, symbol in enumerate(SYMBOLS, 1):
+		df_raw = prepare_symbol_dataframe(symbol)
+		if df_raw.empty:
+			continue
+
+		# Classify market phases for current HTF settings
+		phase_labels = classify_market_phases(df_raw, symbol)
+		phase_counts = phase_labels.value_counts().to_dict()
+		print(f"\n[Phase Sweep] [{sym_idx}/{len(SYMBOLS)}] {symbol}  phases={phase_counts}")
+
+		df_cache = {}
+
+		for param_a in PARAM_A_VALUES:
+			for param_b in PARAM_B_VALUES:
+				cache_key = (param_a, param_b)
+				if cache_key not in df_cache:
+					df_tmp = compute_indicator(df_raw, param_a, param_b)
+					for col in ("htf_trend", "htf_indicator", "momentum"):
+						if col in df_raw.columns:
+							df_tmp[col] = df_raw[col]
+					df_cache[cache_key] = df_tmp
+				df_st = df_cache[cache_key]
+
+				for atr_mult in ATR_STOP_MULTS:
+					for min_hold_bars in hold_bar_candidates:
+						for max_hold_bars in max_hold_candidates:
+							for direction in directions:
+								df_bt = df_st.copy()
+								for col in ("htf_trend", "htf_indicator", "momentum"):
+									if col in df_raw.columns:
+										df_bt[col] = df_raw[col]
+
+								# Run backtest (unchanged existing function)
+								if INDICATOR_TYPE == "htf_crossover":
+									trades = backtest_htf_crossover(
+										df_bt, atr_stop_mult=atr_mult,
+										direction=direction,
+										min_hold_bars=min_hold_bars,
+										max_hold_bars=max_hold_bars,
+									)
+								else:
+									trades = backtest_supertrend(
+										df_bt, atr_stop_mult=atr_mult,
+										direction=direction,
+										min_hold_bars=min_hold_bars,
+										max_hold_bars=max_hold_bars,
+									)
+
+								if trades.empty:
+									continue
+
+								# Score per phase with compound growth
+								atr_label = atr_mult if atr_mult is not None else "None"
+								for phase in phase_names:
+									final_eq, count, win_cnt, max_dd = score_phase_compound(
+										trades, phase_labels, phase
+									)
+									if count == 0:
+										continue
+
+									win_rate = win_cnt / count
+									key = (symbol, direction, phase)
+
+									candidate = {
+										"Symbol": symbol,
+										"Direction": direction.capitalize(),
+										"Indicator": INDICATOR_TYPE,
+										"IndicatorDisplay": INDICATOR_DISPLAY_NAME,
+										"Phase": phase,
+										"ParamA": param_a,
+										"ParamB": param_b,
+										PARAM_A_LABEL: param_a,
+										PARAM_B_LABEL: param_b,
+										"Length": param_a if INDICATOR_TYPE == "supertrend" else None,
+										"Factor": param_b if INDICATOR_TYPE == "supertrend" else None,
+										"ATRStopMult": atr_label,
+										"ATRStopMultValue": atr_mult,
+										"MinHoldBars": min_hold_bars,
+										"MaxHoldBars": max_hold_bars,
+										"HTF": HIGHER_TIMEFRAME,
+										"HTFLength": HTF_LENGTH,
+										"HTFFactor": HTF_FACTOR,
+										"FinalEquity": final_eq,
+										"Trades": count,
+										"WinRate": win_rate,
+										"MaxDrawdown": max_dd,
+									}
+
+									existing = best_per_phase.get(key)
+									if existing is None or final_eq > existing["FinalEquity"]:
+										best_per_phase[key] = candidate
+
+	# Print summary
+	results = list(best_per_phase.values())
+	print(f"\n[Phase Sweep] {INDICATOR_DISPLAY_NAME} HTF={HIGHER_TIMEFRAME} L={HTF_LENGTH} F={HTF_FACTOR}: {len(results)} best entries")
+	for row in sorted(results, key=lambda r: (r["Symbol"], r["Phase"])):
+		print(f"  {row['Symbol']:12s} {row['Phase']:5s} "
+			  f"{PARAM_A_LABEL}={row['ParamA']}, {PARAM_B_LABEL}={row['ParamB']}, "
+			  f"ATR={row['ATRStopMult']}, Hold={row['MinHoldBars']}/{row['MaxHoldBars']}, "
+			  f"Equity={row['FinalEquity']:.2f} ({row['Trades']} trades)")
+
+	return results
+
+
+def record_global_phase_best(indicator_key, summary_rows):
+	"""Record best phase-based results, keeping highest FinalEquity per phase."""
+	if not summary_rows:
+		return
+	indicator_store = GLOBAL_PHASE_RESULTS.setdefault(indicator_key, {})
+	for row in summary_rows:
+		symbol = row.get("Symbol")
+		direction = str(row.get("Direction", "Long")).lower()
+		phase = row.get("Phase", "Flat")
+		if not symbol:
+			continue
+		symbol_store = indicator_store.setdefault(symbol, {})
+		dir_store = symbol_store.setdefault(direction, {})
+		existing = dir_store.get(phase)
+		candidate_equity = float(row.get("FinalEquity", START_EQUITY))
+		existing_equity = float(existing.get("FinalEquity", START_EQUITY)) if existing else None
+		if existing is None or candidate_equity > existing_equity:
+			dir_store[phase] = dict(row)
+
+
+def write_overall_phase_result_tables():
+	"""Write phase-based best parameters to PHASE_PARAMS_CSV (best_params_overall.csv)."""
+	if not GLOBAL_PHASE_RESULTS:
+		print("[Phase Sweep] No results to write.")
+		return
+
+	indicator_order = list(INDICATOR_PRESETS.keys())
+	indicator_labels = {key: INDICATOR_PRESETS[key]["display_name"] for key in indicator_order}
+
+	csv_rows = []
+	for key in indicator_order:
+		indicator_store = GLOBAL_PHASE_RESULTS.get(key, {})
+		for symbol in SYMBOLS:
+			dir_dict = indicator_store.get(symbol, {})
+			for direction, phase_dict in dir_dict.items():
+				for phase, entry in phase_dict.items():
+					row = dict(entry)
+					row["Indicator"] = key
+					row["IndicatorDisplay"] = indicator_labels.get(key, key)
+					row["Direction"] = direction.capitalize()
+					row["Phase"] = phase
+					csv_rows.append(row)
+
+	if csv_rows:
+		os.makedirs(BASE_OUT_DIR, exist_ok=True)
+		df_out = pd.DataFrame(csv_rows)
+		sort_cols = [c for c in ["Symbol", "Indicator", "Phase", "Direction"] if c in df_out.columns]
+		if sort_cols:
+			df_out = df_out.sort_values(sort_cols).reset_index(drop=True)
+		df_out.to_csv(PHASE_PARAMS_CSV, sep=";", decimal=",", index=False, encoding="utf-8")
+		print(f"\n[Phase Sweep] Written {len(csv_rows)} rows to {PHASE_PARAMS_CSV}")
+
+		# Summary
+		print(f"\n{'='*80}")
+		print(f"  PHASE-BASED BEST PARAMETERS ({len(csv_rows)} entries)")
+		print(f"{'='*80}")
+		for _, row in df_out.iterrows():
+			eq = float(row.get("FinalEquity", 0))
+			print(f"  {row['Symbol']:12s} {row.get('Indicator',''):15s} {row.get('Phase',''):5s} "
+				  f"A={row.get('ParamA',''):>5} B={row.get('ParamB',''):>5} "
+				  f"HTF={row.get('HTF','')}/L={row.get('HTFLength','')}/F={row.get('HTFFactor','')} "
+				  f"Equity={eq:>12.2f}")
+	else:
+		print("[Phase Sweep] No results to write.")
+
+
 if __name__ == "__main__":
 	if RUN_OVERALL_BEST:
 		run_overall_best_params()
+	elif RUN_PHASE_BASED_SWEEP:
+		indicator_candidates = get_indicator_candidates()
+		htf_candidates = get_highertimeframe_candidates()
+		htf_length_values = HTF_LENGTH_VALUES
+		htf_factor_values = HTF_FACTOR_VALUES
+		total = len(indicator_candidates) * len(htf_candidates) * len(htf_length_values) * len(htf_factor_values)
+		combo_num = 0
+		for indicator_name in indicator_candidates:
+			apply_indicator_type(indicator_name)
+			for htf_value in htf_candidates:
+				apply_higher_timeframe(htf_value)
+				for htf_len in htf_length_values:
+					for htf_fac in htf_factor_values:
+						combo_num += 1
+						HTF_LENGTH = htf_len
+						HTF_FACTOR = htf_fac
+						clear_data_cache()
+						print(f"\n[Phase Sweep {combo_num}/{total}] {INDICATOR_DISPLAY_NAME} HTF={htf_value} L={htf_len} F={htf_fac}")
+						summary_rows = run_phase_based_sweep()
+						record_global_phase_best(indicator_name, summary_rows)
+		write_overall_phase_result_tables()
 	else:
 		indicator_candidates = get_indicator_candidates()
 		htf_candidates = get_highertimeframe_candidates()
