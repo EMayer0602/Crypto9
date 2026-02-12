@@ -45,11 +45,14 @@ for p in params_list:
     param_a = p["ParamA"]
     param_b = p["ParamB"].replace(",", ".")
     htf = p.get("HTF", "6h")
-    length = int(float(p.get("Length", param_a).replace(",", ".")))
-    factor = float(p.get("Factor", param_b).replace(",", "."))
+    length_str = p.get("Length", "").replace(",", ".").strip()
+    length = int(float(length_str)) if length_str else int(float(param_a.replace(",", ".")))
+    factor_str = p.get("Factor", "").replace(",", ".").strip()
+    factor = float(factor_str) if factor_str else float(param_b)
     atr_mult_str = p.get("ATRStopMultValue", "").replace(",", ".").strip()
     atr_mult = float(atr_mult_str) if atr_mult_str else None
-    min_hold = int(float(p.get("MinHoldBars", 0)))
+    min_hold_str = str(p.get("MinHoldBars", "0")).replace(",", ".").strip()
+    min_hold = int(float(min_hold_str)) if min_hold_str else 0
     direction = p.get("Direction", "Long").lower()
 
     st.apply_indicator_type(indicator)
