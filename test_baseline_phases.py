@@ -124,7 +124,64 @@ for p in params_list:
 
 all_trades.sort(key=lambda t: t["entry_time"])
 
-# Compound growth
+# Group by indicator
+from collections import defaultdict
+trades_by_indicator = defaultdict(list)
+for t in all_trades:
+    trades_by_indicator[t["indicator_key"]].append(t)
+
+# Process each indicator separately with its own compound growth
+for ind_key, ind_trades in trades_by_indicator.items():
+    ind_trades.sort(key=lambda t: t["entry_time"])
+    capital = st.START_EQUITY
+    for t in ind_trades:
+        stake = capital / st.PHASE_STAKE_DIVISOR
+        ep, xp = t["entry_price"], t["exit_price"]
+        pnl_pct = (xp - ep) / ep if t["direction"] == "long" else (ep - xp) / ep
+        pnl_net = pnl_pct * stake - stake * st.FEE_RATE * 2.0
+        capital += pnl_net
+        t["stake"] = stake
+        t["pnl"] = pnl_net
+        t["pnl_pct"] = pnl_pct
+        t["fees"] = stake * st.FEE_RATE * 2.0
+        t["equity_after"] = capital
+
+    total_pnl = sum(t["pnl"] for t in ind_trades)
+    winners = sum(1 for t in ind_trades if t["pnl"] > 0)
+    total = len(ind_trades)
+    ind_display = ind_trades[0]["indicator"] if ind_trades else ind_key
+
+    print(f"\n{'='*60}")
+    print(f"{ind_display}: {total} trades | PnL: {total_pnl:+,.2f} | WR: {winners/total*100:.1f}%")
+    print(f"Start: {st.START_EQUITY:,.2f} → Final: {capital:,.2f}")
+
+    for phase in ["Up", "Down", "Flat"]:
+        pt = [t for t in ind_trades if t["phase"] == phase]
+        if pt:
+            pp = sum(t["pnl"] for t in pt)
+            pw = sum(1 for t in pt if t["pnl"] > 0)
+            print(f"  {phase:5s}: {len(pt):4d}t  PnL={pp:+10,.2f}  WR={pw/len(pt)*100:.1f}%")
+
+    # Generate separate HTML per indicator
+    st._generate_phase_dashboard(ind_trades, dashboard_start="2024-01-31")
+
+    # Rename to indicator-specific filenames
+    base = st.BASE_OUT_DIR
+    for src, dst in [
+        ("dashboard_ph1.html", f"dashboard_ph1_{ind_key}.html"),
+        ("trading_summary_ph1.html", f"trading_summary_ph1_{ind_key}.html"),
+    ]:
+        src_path = os.path.join(base, src)
+        dst_path = os.path.join(base, dst)
+        if os.path.exists(src_path):
+            if os.path.exists(dst_path):
+                os.remove(dst_path)
+            os.rename(src_path, dst_path)
+            print(f"  Generated: {dst}")
+
+# Also generate combined report (all indicators)
+print(f"\n{'='*60}")
+print(f"COMBINED (all indicators)")
 capital = st.START_EQUITY
 for t in all_trades:
     stake = capital / st.PHASE_STAKE_DIVISOR
@@ -138,21 +195,10 @@ for t in all_trades:
     t["fees"] = stake * st.FEE_RATE * 2.0
     t["equity_after"] = capital
 
-# Print summary
 total_pnl = sum(t["pnl"] for t in all_trades)
 winners = sum(1 for t in all_trades if t["pnl"] > 0)
-print(f"\n{'='*60}")
 print(f"Total: {len(all_trades)} trades | PnL: {total_pnl:+,.2f} | WR: {winners/len(all_trades)*100:.1f}%")
 print(f"Start: {st.START_EQUITY:,.2f} → Final: {capital:,.2f}")
-
-for phase in ["Up", "Down", "Flat"]:
-    pt = [t for t in all_trades if t["phase"] == phase]
-    if pt:
-        pp = sum(t["pnl"] for t in pt)
-        pw = sum(1 for t in pt if t["pnl"] > 0)
-        print(f"  {phase:5s}: {len(pt):4d}t  PnL={pp:+10,.2f}  WR={pw/len(pt)*100:.1f}%")
-
-# Generate HTML (writes directly to dashboard_ph1.html + trading_summary_ph1.html)
 st._generate_phase_dashboard(all_trades, dashboard_start="2024-01-31")
 
 print("\nDone!")
