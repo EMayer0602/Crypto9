@@ -3513,15 +3513,17 @@ def _collect_best_phase_trades():
 	return all_trades
 
 
-def _generate_phase_dashboard(all_trades, dashboard_start="2025-12-01", summary_start="2024-01-31", stake_divisor=None, use_precomputed=False, indicator_label=None, output_prefix="ph1"):
+def _generate_phase_dashboard(all_trades, dashboard_start="2025-12-01", summary_start="2024-12-01", stake_divisor=None, indicator_label=None, output_prefix="ph1"):
 	"""
-	Generate dashboard_{prefix}.html and trading_summary_{prefix}.html from phase-tagged trades.
-	Dashboard shows trades ab dashboard_start (recent).
-	Trading summary shows trades ab summary_start (all).
+	Generate dashboard_{prefix}.html and trading_summary_{prefix}.html.
 
-	If use_precomputed=True, expects trades already have: pnl, stake, fees, pnl_pct, equity_after.
-	indicator_label: e.g. "JMA" – shown in HTML title.
-	output_prefix: e.g. "ph1_jma" – used for filenames.
+	One compound growth curve from START_EQUITY starting at summary_start.
+	Summary shows all trades from summary_start.
+	Dashboard shows trades from dashboard_start onwards, starting equity =
+	equity reached at dashboard_start in the summary curve.
+
+	Trades must have: entry_price, exit_price, direction, entry_time, exit_time,
+	symbol, indicator, htf, phase, reason.
 	"""
 	now = datetime.now(BERLIN_TZ).strftime("%Y-%m-%d %H:%M:%S %Z")
 	phase_colors = {"Up": "#27ae60", "Down": "#e74c3c", "Flat": "#f39c12"}
@@ -3542,37 +3544,46 @@ def _generate_phase_dashboard(all_trades, dashboard_start="2025-12-01", summary_
 			return f"{val:.4f}"
 		return fmt_de(val)
 
-	if use_precomputed:
-		processed = all_trades
-	else:
-		capital = START_EQUITY
-		processed = []
-		for t in all_trades:
-			stake = capital / max_positions
-			ep = t["entry_price"]
-			xp = t["exit_price"]
-			if t["direction"] == "long":
-				pnl_pct = (xp - ep) / ep if ep else 0
-			else:
-				pnl_pct = (ep - xp) / ep if ep else 0
-			pnl_gross = pnl_pct * stake
-			fees = stake * FEE_RATE * 2.0
-			pnl_net = pnl_gross - fees
-			capital += pnl_net
-			t["stake"] = stake
-			t["pnl"] = pnl_net
-			t["pnl_pct"] = pnl_pct
-			t["fees"] = fees
-			t["equity_after"] = capital
-			processed.append(t)
+	# ── Filter to summary period, FIXED stake = START_EQUITY / max_positions ──
+	summ_raw = sorted(
+		[t for t in all_trades if t["entry_time"][:10] >= summary_start],
+		key=lambda t: t["entry_time"]
+	)
+
+	fixed_stake = START_EQUITY / max_positions
+	capital = START_EQUITY
+	processed = []
+	for t in summ_raw:
+		ep = t["entry_price"]
+		xp = t["exit_price"]
+		if t["direction"] == "long":
+			pnl_pct = (xp - ep) / ep if ep else 0
+		else:
+			pnl_pct = (ep - xp) / ep if ep else 0
+		pnl_gross = pnl_pct * fixed_stake
+		fees = fixed_stake * FEE_RATE * 2.0
+		pnl_net = pnl_gross - fees
+		capital += pnl_net
+		tc = dict(t)
+		tc["stake"] = fixed_stake
+		tc["pnl"] = pnl_net
+		tc["pnl_pct"] = pnl_pct
+		tc["fees"] = fees
+		tc["equity_after"] = capital
+		processed.append(tc)
+
+	# ── Split into pre-dashboard and dashboard trades ──
+	trades_before_dash = [t for t in processed if t["entry_time"][:10] < dashboard_start]
+	dash_trades = [t for t in processed if t["entry_time"][:10] >= dashboard_start]
+	dash_start_cap = trades_before_dash[-1]["equity_after"] if trades_before_dash else START_EQUITY
 
 	def trade_row(t, show_exit=True):
 		pnl_class = "pos" if t["pnl"] >= 0 else "neg"
 		pnl_pct_str = f"{'+' if t['pnl_pct'] >= 0 else ''}{t['pnl_pct']*100:.2f}%"
-		phase_color = phase_colors.get(t["phase"], "#888")
+		phase_color = phase_colors.get(t.get("phase", ""), "#888")
 		cols = [
 			f'<td>{t["symbol"]}</td>',
-			f'<td style="color:{phase_color};font-weight:bold">{t["phase"]}</td>',
+			f'<td style="color:{phase_color};font-weight:bold">{t.get("phase", "")}</td>',
 			f'<td>{t["indicator"]}</td>',
 			f'<td>{t["htf"]}</td>',
 			f'<td>{t["entry_time"][:16]}</td>',
@@ -3594,13 +3605,12 @@ def _generate_phase_dashboard(all_trades, dashboard_start="2025-12-01", summary_
 			cols.append(f'<td>Open</td>')
 		return "<tr>" + "".join(cols) + "</tr>"
 
-	def _build_html(trades_filtered, title, date_label, auto_refresh=False):
+	def _build_html(trades_filtered, title, date_label, start_cap, auto_refresh=False):
 		total_trades = len(trades_filtered)
 		winners = sum(1 for t in trades_filtered if t["pnl"] > 0)
 		win_rate = (winners / total_trades * 100) if total_trades else 0
 		total_pnl = sum(t["pnl"] for t in trades_filtered)
-		final_cap = trades_filtered[-1]["equity_after"] if trades_filtered else START_EQUITY
-		start_cap = START_EQUITY  # Always 16500, regardless of date filter
+		final_cap = trades_filtered[-1]["equity_after"] if trades_filtered else start_cap
 
 		open_t = [t for t in trades_filtered if t["reason"] == "Final bar"]
 		closed_t = [t for t in trades_filtered if t["reason"] != "Final bar"]
@@ -3613,7 +3623,7 @@ def _generate_phase_dashboard(all_trades, dashboard_start="2025-12-01", summary_
 		open_rows = "\n".join(trade_row(t, show_exit=False) for t in open_t) if open_t else '<tr><td colspan="11" style="text-align:center;color:#888">Keine offenen Positionen</td></tr>'
 		closed_rows = "\n".join(trade_row(t, show_exit=True) for t in reversed(closed_t)) if closed_t else '<tr><td colspan="12" style="text-align:center;color:#888">Keine Trades</td></tr>'
 
-		cap_color = "#27ae60" if final_cap >= START_EQUITY else "#e74c3c"
+		cap_color = "#27ae60" if final_cap >= start_cap else "#e74c3c"
 		pnl_color = "#27ae60" if total_pnl >= 0 else "#e74c3c"
 		open_pnl_color = "#27ae60" if open_pnl >= 0 else "#e74c3c"
 		refresh_tag = '<meta http-equiv="refresh" content="60">' if auto_refresh else ''
@@ -3639,7 +3649,7 @@ tr:hover {{ background: #16213e; }}
 </style>
 </head><body>
 <h1>{title}</h1>
-<p class="sub">Ab {date_label} | Stand: {now} | Compound Growth (stake = equity/{max_positions})</p>
+<p class="sub">Ab {date_label} | Stand: {now} | Fester Stake = {fmt_de(START_EQUITY / max_positions)} USDT ({fmt_de(START_EQUITY)}/{max_positions})</p>
 
 <div class="cards">
 <div class="card"><div class="label">Start Kapital</div><div class="value">{fmt_de(start_cap)} USDT</div></div>
@@ -3668,21 +3678,19 @@ tr:hover {{ background: #16213e; }}
 	# Title with optional indicator label
 	label_suffix = f" — {indicator_label}" if indicator_label else ""
 
-	# Dashboard: recent trades (ab dashboard_start), auto-refresh
-	dash_trades = [t for t in processed if t["entry_time"][:10] >= dashboard_start]
-	dash_html = _build_html(dash_trades, f"Phase Dashboard{label_suffix}", dashboard_start, auto_refresh=True)
-	dash_path = os.path.join(BASE_OUT_DIR, f"dashboard_{output_prefix}.html")
-	with open(dash_path, "w", encoding="utf-8") as f:
-		f.write(dash_html)
-	print(f"[Phase Dashboard] {dash_path} ({len(dash_trades)} trades ab {dashboard_start})")
-
-	# Trading Summary: all trades (ab summary_start), no auto-refresh
-	summ_trades = [t for t in processed if t["entry_time"][:10] >= summary_start]
-	summ_html = _build_html(summ_trades, f"Phase Trading Summary{label_suffix}", summary_start, auto_refresh=False)
+	# Summary: all trades from summary_start, compound from START_EQUITY (16500)
+	summ_html = _build_html(processed, f"Phase Trading Summary{label_suffix}", summary_start, start_cap=START_EQUITY, auto_refresh=False)
 	summary_path = os.path.join(BASE_OUT_DIR, f"trading_summary_{output_prefix}.html")
 	with open(summary_path, "w", encoding="utf-8") as f:
 		f.write(summ_html)
-	print(f"[Phase Summary] {summary_path} ({len(summ_trades)} trades ab {summary_start})")
+	print(f"[Phase Summary] {summary_path} ({len(processed)} trades ab {summary_start}, start={fmt_de(START_EQUITY)})")
+
+	# Dashboard: trades from dashboard_start, start_cap = equity at dashboard_start
+	dash_html = _build_html(dash_trades, f"Phase Dashboard{label_suffix}", dashboard_start, start_cap=dash_start_cap, auto_refresh=True)
+	dash_path = os.path.join(BASE_OUT_DIR, f"dashboard_{output_prefix}.html")
+	with open(dash_path, "w", encoding="utf-8") as f:
+		f.write(dash_html)
+	print(f"[Phase Dashboard] {dash_path} ({len(dash_trades)} trades ab {dashboard_start}, start={fmt_de(dash_start_cap)})")
 
 
 def _write_phase_sweep_html(df_out):

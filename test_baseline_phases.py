@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 """
 Baseline Phase Test: Read trades from trading_summary_bck.json (same source
-as classic dashboard), apply phase classification, recalculate with
-shared equity (START=16500, MAX_POSITIONS=8).
+as classic dashboard), apply phase classification, generate per-indicator
+dashboards and summaries.
 
 Generates per indicator (supertrend, htf_crossover, jma, kama):
   - trading_summary_ph1_{indicator}.json  (filtered trades)
   - dashboard_ph1_{indicator}.html        (ab --start, default 2025-12-01)
   - trading_summary_ph1_{indicator}.html  (ab --summary-start, default 2024-12-01)
+
+Compound growth: Summary starts at 16500. Dashboard continues from
+the equity reached at dashboard_start.
 
 Usage:
     python test_baseline_phases.py
@@ -88,6 +91,19 @@ def main():
     raw_open = data.get("open_positions_data", [])
     print(f"JSON: {len(raw_trades)} closed trades, {len(raw_open)} open positions")
 
+    # ── DEBUG: Show raw indicator names in JSON ──
+    raw_indicator_names = set()
+    for t in raw_trades + raw_open:
+        name = t.get("indicator", "")
+        if name:
+            raw_indicator_names.add(name)
+    print(f"\nRaw indicator names in JSON: {sorted(raw_indicator_names)}")
+    for name in sorted(raw_indicator_names):
+        mapped = normalize_indicator(name)
+        count_closed = sum(1 for t in raw_trades if t.get("indicator") == name)
+        count_open = sum(1 for t in raw_open if t.get("indicator") == name)
+        print(f"  '{name}' -> '{mapped}' ({count_closed} closed, {count_open} open)")
+
     # Filter to Long only (shorts never enabled)
     trades_list = []
     for t in raw_trades:
@@ -98,7 +114,6 @@ def main():
         exit_price = float(t.get("exit_price", 0) or 0)
         if entry_price <= 0:
             continue
-        pnl_pct = (exit_price - entry_price) / entry_price
         trades_list.append({
             "symbol": t.get("symbol", ""),
             "indicator": t.get("indicator", ""),
@@ -107,7 +122,6 @@ def main():
             "exit_time": t.get("exit_time", ""),
             "entry_price": entry_price,
             "exit_price": exit_price,
-            "pnl_pct": pnl_pct,
             "reason": t.get("reason", ""),
             "direction": "long",
         })
@@ -122,7 +136,6 @@ def main():
         last_price = float(p.get("last_price", 0) or 0)
         if entry_price <= 0:
             continue
-        pnl_pct = (last_price - entry_price) / entry_price
         open_list.append({
             "symbol": p.get("symbol", ""),
             "indicator": p.get("indicator", ""),
@@ -131,12 +144,11 @@ def main():
             "exit_time": "",
             "entry_price": entry_price,
             "exit_price": last_price,
-            "pnl_pct": pnl_pct,
             "reason": "Final bar",
             "direction": "long",
         })
 
-    print(f"Long trades: {len(trades_list)} closed + {len(open_list)} open")
+    print(f"\nLong trades: {len(trades_list)} closed + {len(open_list)} open")
 
     # ── 2. NORMALIZE INDICATORS + BUILD PHASE LABELS ──
     symbol_indicator_pairs = set()
@@ -147,7 +159,11 @@ def main():
         if symbol and ind_key:
             symbol_indicator_pairs.add((symbol, ind_key))
 
-    print(f"\nFound indicators: {sorted(set(k for _, k in symbol_indicator_pairs))}")
+    normalized_indicators = sorted(set(k for _, k in symbol_indicator_pairs))
+    print(f"\nNormalized indicators: {normalized_indicators}")
+    for ind in normalized_indicators:
+        count = sum(1 for t in trades_list + open_list if t.get("indicator_key") == ind)
+        print(f"  {ind}: {count} trades")
     print(f"Building phase labels for {len(symbol_indicator_pairs)} symbol/indicator pairs...")
 
     # Populate cache once
@@ -202,7 +218,7 @@ def main():
     all_trades.sort(key=lambda t: t["entry_time"])
     print(f"\nTotal tagged: {len(all_trades)} trades")
 
-    # ── 4. GROUP BY INDICATOR ──
+    # ── 4. GROUP BY INDICATOR, GENERATE PER-INDICATOR OUTPUT ──
     trades_by_indicator = defaultdict(list)
     for t in all_trades:
         trades_by_indicator[t["indicator_key"]].append(t)
@@ -214,41 +230,31 @@ def main():
         total = len(ind_trades)
         ind_display = INDICATOR_DISPLAY.get(ind_key, ind_key.title())
 
-        # Shared equity compound growth: START=16500, stake=equity/8
+        print(f"\n{'='*60}")
+        print(f"{ind_display}: {total} trades total")
+
+        # Console stats: FIXED stake = 16500/8 per trade
+        fixed_stake = START_CAPITAL / MAX_POSITIONS
         capital = START_CAPITAL
         for t in ind_trades:
-            stake = capital / MAX_POSITIONS
-            pnl_net = t["pnl_pct"] * stake
+            ep = t["entry_price"]
+            xp = t["exit_price"]
+            pnl_pct = (xp - ep) / ep if ep else 0
+            pnl_gross = pnl_pct * fixed_stake
+            fees = fixed_stake * st.FEE_RATE * 2.0
+            pnl_net = pnl_gross - fees
             capital += pnl_net
-            t["stake"] = stake
-            t["pnl"] = pnl_net
-            t["fees"] = 0
-            t["equity_after"] = capital
 
-        total_pnl = sum(t["pnl"] for t in ind_trades)
-        winners = sum(1 for t in ind_trades if t["pnl"] > 0)
+        total_pnl = capital - START_CAPITAL
+        print(f"  All trades: Start {START_CAPITAL:,.2f} -> Final {capital:,.2f} | PnL: {total_pnl:+,.2f}")
+        print(f"  Fixed stake: {fixed_stake:,.2f} per trade")
 
-        print(f"\n{'='*60}")
-        print(f"{ind_display}: {total} trades | PnL: {total_pnl:+,.2f} | WR: {winners/total*100:.1f}%")
-        print(f"  Start: {START_CAPITAL:,.2f} -> Final: {capital:,.2f} (equity/{MAX_POSITIONS})")
-
-        for phase in ["Up", "Down", "Flat"]:
-            pt = [t for t in ind_trades if t["phase"] == phase]
-            if pt:
-                pp = sum(t["pnl"] for t in pt)
-                pw = sum(1 for t in pt if t["pnl"] > 0)
-                print(f"    {phase:5s}: {len(pt):4d}t  PnL={pp:+10,.2f}  WR={pw/len(pt)*100:.1f}%")
-
-        # ── Write per-indicator JSON ──
+        # ── Write per-indicator JSON (raw trades, no compound) ──
         json_out = {
             "indicator": ind_key,
             "indicator_display": ind_display,
             "start_capital": START_CAPITAL,
             "max_positions": MAX_POSITIONS,
-            "final_capital": capital,
-            "total_pnl": total_pnl,
-            "total_trades": total,
-            "win_rate": winners / total * 100 if total else 0,
             "trades": [],
             "open_positions_data": [],
         }
@@ -262,9 +268,6 @@ def main():
                 "entry_time": t["entry_time"],
                 "entry_price": t["entry_price"],
                 "exit_price": t["exit_price"],
-                "stake": t["stake"],
-                "pnl": t["pnl"],
-                "pnl_pct": t["pnl_pct"],
                 "phase": t["phase"],
                 "reason": t["reason"],
             }
@@ -281,13 +284,15 @@ def main():
         print(f"  -> {json_path}")
 
         # ── Generate dashboard + summary HTML ──
+        # _generate_phase_dashboard computes its own compound growth from 16500
+        # Summary: ab summary_start, compound from 16500
+        # Dashboard: ab dashboard_start, compound continues from summary equity
         prefix = f"ph1_{ind_key}"
         st._generate_phase_dashboard(
             ind_trades,
             dashboard_start=dashboard_start,
             summary_start=summary_start,
             stake_divisor=MAX_POSITIONS,
-            use_precomputed=True,
             indicator_label=ind_display,
             output_prefix=prefix,
         )
@@ -295,9 +300,9 @@ def main():
     print(f"\n{'='*60}")
     print("Done! Generated files:")
     for ind_key in sorted(trades_by_indicator.keys()):
-        print(f"  - dashboard_ph1_{ind_key}.html")
-        print(f"  - trading_summary_ph1_{ind_key}.html")
         print(f"  - trading_summary_ph1_{ind_key}.json")
+        print(f"  - trading_summary_ph1_{ind_key}.html  (ab {summary_start}, start=16.500)")
+        print(f"  - dashboard_ph1_{ind_key}.html        (ab {dashboard_start}, start=equity@{dashboard_start})")
 
 
 if __name__ == "__main__":
