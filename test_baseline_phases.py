@@ -1,27 +1,27 @@
 #!/usr/bin/env python3
 """
-Baseline Phase Test: Run actual backtests per indicator, classify phases,
-generate per-indicator JSON and HTML dashboards.
+Phase Test: ONE trading strategy (JMA + time-based exit), classified by
+4 different phase methods (supertrend, htf_crossover, jma, kama).
 
-For each indicator (supertrend, htf_crossover, jma, kama):
-1. Classify phases: HTF_LENGTH=10, HTF_FACTOR=3.0, HTF=6h (per indicator type)
-2. Backtest with correct params: HTF_LENGTH=20, HTF_FACTOR=3.0, HTF=6h
-   - supertrend: per-symbol optimized params from best_params_overall_bck.csv
-   - htf_crossover / jma / kama: default params from INDICATOR_PRESETS
-3. Tag trades with phases
-4. Write per-indicator JSON (raw trades, no PnL/stake)
-5. Generate HTML via _generate_phase_dashboard() (compound growth from 16500)
+Architecture:
+1. Run ONE JMA backtest per symbol with MaxHoldBars (time-based exit)
+2. Classify those SAME trades with 4 different phase methods
+3. Generate 4 output sets (same trades, different phase tags)
 
-Generates per indicator:
-  - trading_summary_ph1_{indicator}.json  (raw trades with phases)
-  - dashboard_ph1_{indicator}.html        (ab --start, default 2025-12-01)
-  - trading_summary_ph1_{indicator}.html  (ab --summary-start, default 2024-12-01)
+This isolates the phase classification question: which phase method
+gives the best basis for per-phase optimization?
+
+Generates per phase classifier:
+  - trading_summary_ph1_{classifier}.json  (JMA trades with phases)
+  - dashboard_ph1_{classifier}.html        (ab --start, default 2025-12-01)
+  - trading_summary_ph1_{classifier}.html  (ab --summary-start, default 2024-12-01)
 
 Compound growth: Summary AND Dashboard both start independently at 16500.
 
 Usage:
     python test_baseline_phases.py
-    python test_baseline_phases.py --start 2025-12-01 --summary-start 2024-12-01
+    python test_baseline_phases.py --max-hold 4
+    python test_baseline_phases.py --max-hold 8 --start 2025-12-01 --summary-start 2024-12-01
 """
 import argparse
 import json
@@ -40,32 +40,26 @@ PHASE_HTF_LENGTH = 10
 PHASE_HTF_FACTOR = 3.0
 PHASE_HTF = "6h"
 
-# Backtest HTF filter params (same as classic)
+# Backtest HTF filter params
 BACKTEST_HTF_LENGTH = 20
 BACKTEST_HTF_FACTOR = 3.0
 BACKTEST_HTF = "6h"
 
-# Classic per-symbol params from best_params_overall_bck.csv (supertrend only)
-# Symbols NOT listed here use default supertrend params (10, 3.0)
-CLASSIC_PARAMS = {
-    "BTC/USDC":  {"param_a": 7,  "param_b": 4.0, "atr_stop_mult": 1.0, "min_hold_bars": 12},
-    "ETH/USDC":  {"param_a": 10, "param_b": 3.0, "atr_stop_mult": None, "min_hold_bars": 24},
-    "SOL/USDC":  {"param_a": 14, "param_b": 4.0, "atr_stop_mult": 1.5,  "min_hold_bars": 0},
-    "XRP/USDC":  {"param_a": 14, "param_b": 3.0, "atr_stop_mult": None, "min_hold_bars": 24},
-    "LINK/USDC": {"param_a": 10, "param_b": 3.0, "atr_stop_mult": None, "min_hold_bars": 24},
-    "SUI/USDC":  {"param_a": 10, "param_b": 4.0, "atr_stop_mult": 2.0,  "min_hold_bars": 0},
-    "ADA/USDC":  {"param_a": 7,  "param_b": 4.0, "atr_stop_mult": None, "min_hold_bars": 24},
-    "ICP/USDC":  {"param_a": 14, "param_b": 2.0, "atr_stop_mult": 2.0,  "min_hold_bars": 12},
-    "TNSR/USDC": {"param_a": 7,  "param_b": 4.0, "atr_stop_mult": 2.0,  "min_hold_bars": 0},
-}
+# Trading strategy: JMA with time-based exit (like BCK)
+TRADING_INDICATOR = "jma"
+TRADING_PARAM_A = 30       # JMA Length (default)
+TRADING_PARAM_B = 0        # JMA Phase (default)
+TRADING_ATR_STOP = None    # No ATR stop (BCK uses it for <5% of trades)
+TRADING_MIN_HOLD = 0       # No minimum hold
 
-INDICATORS = ["supertrend", "htf_crossover", "jma", "kama"]
+# Phase classifiers: the 4 methods to tag the same trades
+PHASE_CLASSIFIERS = ["supertrend", "htf_crossover", "jma", "kama"]
 
-INDICATOR_DISPLAY = {
-    "supertrend": "Supertrend",
-    "htf_crossover": "HTF Crossover",
-    "jma": "JMA",
-    "kama": "KAMA",
+CLASSIFIER_DISPLAY = {
+    "supertrend": "Supertrend-Phasen",
+    "htf_crossover": "HTF-Crossover-Phasen",
+    "jma": "JMA-Phasen",
+    "kama": "KAMA-Phasen",
 }
 
 
@@ -85,17 +79,21 @@ def get_phase_at_entry(phases, entry_ts):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Generate per-indicator phase dashboards via backtests")
+    parser = argparse.ArgumentParser(description="JMA + time-based exit with 4 phase classifiers")
     parser.add_argument("--start", type=str, default="2025-12-01",
                         help="Dashboard start date (default: 2025-12-01)")
     parser.add_argument("--summary-start", type=str, default="2024-12-01",
                         help="Trading summary start date (default: 2024-12-01)")
+    parser.add_argument("--max-hold", type=int, default=4,
+                        help="MaxHoldBars for time-based exit (default: 4, like BCK)")
     args = parser.parse_args()
 
     dashboard_start = args.start
     summary_start = args.summary_start
+    max_hold_bars = args.max_hold
 
-    print(f"=== Baseline Phase Test (Backtests) ===")
+    print(f"=== JMA + Time-Based Exit (MaxHold={max_hold_bars}) ===")
+    print(f"Trading: JMA L={TRADING_PARAM_A}, Phase={TRADING_PARAM_B}, MaxHold={max_hold_bars}")
     print(f"Capital: {START_CAPITAL:,.0f} | Max Positions: {MAX_POSITIONS}")
     print(f"Phase classification: L={PHASE_HTF_LENGTH}, F={PHASE_HTF_FACTOR}, HTF={PHASE_HTF}")
     print(f"Backtest HTF filter: L={BACKTEST_HTF_LENGTH}, F={BACKTEST_HTF_FACTOR}, HTF={BACKTEST_HTF}")
@@ -103,151 +101,148 @@ def main():
 
     symbols = st.SYMBOLS
 
-    # Populate OHLCV cache once for all symbols
+    # Populate OHLCV cache once
     st.ensure_cache_populated(symbols, st.TIMEFRAME, st.LOOKBACK)
 
-    # Save original globals to restore later
+    # Save original globals
     orig_backtest_start = st.BACKTEST_START_DATE
     orig_htf_length = st.HTF_LENGTH
     orig_htf_factor = st.HTF_FACTOR
 
-    # Disable BACKTEST_START_DATE filter — we want ALL data, filtering in HTML later
+    # Disable date filter — we want ALL data, filtering in HTML later
     st.BACKTEST_START_DATE = ""
 
-    for indicator in INDICATORS:
-        ind_display = INDICATOR_DISPLAY[indicator]
-        print(f"\n{'='*60}")
-        print(f"Processing {ind_display}...")
+    # ══════════════════════════════════════════════════════════════
+    # Step 1: Run ONE JMA backtest per symbol (same for all phases)
+    # ══════════════════════════════════════════════════════════════
+    print(f"\n{'='*60}")
+    print(f"Step 1: JMA Backtest (MaxHold={max_hold_bars})...")
 
-        # ── Step 1: Phase classification ──
-        # Set indicator type + phase HTF params
-        st.apply_indicator_type(indicator)
+    st.apply_indicator_type(TRADING_INDICATOR)
+    st.apply_higher_timeframe(BACKTEST_HTF)
+    st.HTF_LENGTH = BACKTEST_HTF_LENGTH
+    st.HTF_FACTOR = BACKTEST_HTF_FACTOR
+    st.clear_data_cache()
+
+    # raw_trades: list of dicts with entry/exit info (no phase yet)
+    raw_trades = []
+
+    for symbol in symbols:
+        sym_short = symbol.replace("/USDC", "").replace("/USDT", "")
+
+        df = st.prepare_symbol_dataframe(symbol)
+        if df.empty:
+            print(f"  {sym_short}: NO DATA")
+            continue
+
+        df_ind = st.compute_indicator(df, TRADING_PARAM_A, TRADING_PARAM_B)
+
+        # JMA uses backtest_supertrend (trend-flip entry/exit)
+        trades_df = st.backtest_supertrend(
+            df_ind, atr_stop_mult=TRADING_ATR_STOP, direction="long",
+            min_hold_bars=TRADING_MIN_HOLD, max_hold_bars=max_hold_bars,
+        )
+
+        if trades_df.empty:
+            print(f"  {sym_short}: 0 trades")
+            continue
+
+        count = 0
+        for _, row in trades_df.iterrows():
+            raw_trades.append({
+                "symbol": symbol,
+                "direction": "long",
+                "indicator": "JMA",
+                "htf": BACKTEST_HTF,
+                "entry_time": str(row["Zeit"]),
+                "exit_time": str(row["ExitZeit"]),
+                "entry_price": float(row["Entry"]),
+                "exit_price": float(row["ExitPreis"]),
+                "reason": row["ExitReason"],
+            })
+            count += 1
+
+        print(f"  {sym_short}: {count} trades")
+
+    raw_trades.sort(key=lambda t: t["entry_time"])
+
+    closed = [t for t in raw_trades if t["reason"] != "Final bar"]
+    opened = [t for t in raw_trades if t["reason"] == "Final bar"]
+    print(f"\nTotal: {len(closed)} closed + {len(opened)} open = {len(raw_trades)} trades")
+
+    # Quick compound check over all trades
+    capital = START_CAPITAL
+    for t in raw_trades:
+        stake = capital / MAX_POSITIONS
+        ep, xp = t["entry_price"], t["exit_price"]
+        pnl_pct = (xp - ep) / ep if ep else 0
+        pnl_net = pnl_pct * stake - stake * st.FEE_RATE * 2.0
+        capital += pnl_net
+    print(f"Compound Growth: {START_CAPITAL:,.2f} -> {capital:,.2f} | PnL: {capital - START_CAPITAL:+,.2f}")
+
+    # Exit reasons breakdown
+    from collections import Counter
+    reasons = Counter(t["reason"] for t in raw_trades)
+    print(f"\nExit reasons:")
+    for reason, cnt in reasons.most_common():
+        print(f"  {reason}: {cnt}")
+
+    # ══════════════════════════════════════════════════════════════
+    # Step 2: Classify with 4 phase methods, generate 4 output sets
+    # ══════════════════════════════════════════════════════════════
+    for classifier in PHASE_CLASSIFIERS:
+        cls_display = CLASSIFIER_DISPLAY[classifier]
+        print(f"\n{'='*60}")
+        print(f"Step 2: Phase classification → {cls_display}")
+
+        # Set indicator type for phase classification
+        st.apply_indicator_type(classifier)
         st.apply_higher_timeframe(PHASE_HTF)
         st.HTF_LENGTH = PHASE_HTF_LENGTH
         st.HTF_FACTOR = PHASE_HTF_FACTOR
         st.clear_data_cache()
 
+        # Classify phases per symbol
         phase_cache = {}
         for symbol in symbols:
             sym_short = symbol.replace("/USDC", "").replace("/USDT", "")
-            # fetch_data gives us a df with the right index for phase alignment
             df_for_phases = st.fetch_data(symbol, st.TIMEFRAME, st.LOOKBACK)
             if df_for_phases.empty:
-                print(f"  Phase {sym_short}: NO DATA")
                 phase_cache[symbol] = pd.Series(dtype=str)
                 continue
-
             phases = st.classify_market_phases(df_for_phases, symbol)
             phase_counts = phases.value_counts().to_dict()
-            print(f"  Phase {sym_short}: {phase_counts}")
+            print(f"  {sym_short}: {phase_counts}")
             phase_cache[symbol] = phases
 
-        # ── Step 2: Backtest with correct params ──
-        # Set backtest HTF params (same as classic: L=20, F=3.0)
-        st.HTF_LENGTH = BACKTEST_HTF_LENGTH
-        st.HTF_FACTOR = BACKTEST_HTF_FACTOR
-        st.apply_higher_timeframe(BACKTEST_HTF)
-        st.clear_data_cache()
+        # Tag trades with phases
+        tagged_trades = []
+        for t in raw_trades:
+            phases = phase_cache.get(t["symbol"], pd.Series(dtype=str))
+            entry_ts = pd.Timestamp(t["entry_time"])
+            phase = get_phase_at_entry(phases, entry_ts)
+            tc = dict(t)
+            tc["phase"] = phase
+            # Label shows trading strategy + phase classifier
+            tc["indicator"] = f"JMA ({cls_display})"
+            tagged_trades.append(tc)
 
-        all_trades = []
+        # Phase distribution
+        phase_dist = Counter(t["phase"] for t in tagged_trades)
+        print(f"  Phase distribution: {dict(phase_dist)}")
 
-        for symbol in symbols:
-            sym_short = symbol.replace("/USDC", "").replace("/USDT", "")
-
-            # Get indicator/backtest params
-            if indicator == "supertrend" and symbol in CLASSIC_PARAMS:
-                p = CLASSIC_PARAMS[symbol]
-                param_a = p["param_a"]
-                param_b = p["param_b"]
-                atr_stop_mult = p["atr_stop_mult"]
-                min_hold_bars = p["min_hold_bars"]
-            else:
-                preset = st.INDICATOR_PRESETS[indicator]
-                param_a = preset["default_a"]
-                param_b = preset["default_b"]
-                atr_stop_mult = None
-                min_hold_bars = 0
-
-            max_hold_bars = 0
-
-            # Prepare dataframe: fetch data + attach HTF trend + filters
-            df = st.prepare_symbol_dataframe(symbol)
-            if df.empty:
-                print(f"  Backtest {sym_short}: NO DATA")
-                continue
-
-            # Compute main indicator (supertrend/jma/kama on main TF)
-            df_ind = st.compute_indicator(df, param_a, param_b)
-
-            # Run backtest (htf_crossover uses different entry/exit logic)
-            if indicator == "htf_crossover":
-                trades_df = st.backtest_htf_crossover(
-                    df_ind, atr_stop_mult=atr_stop_mult, direction="long",
-                    min_hold_bars=min_hold_bars, max_hold_bars=max_hold_bars,
-                )
-            else:
-                trades_df = st.backtest_supertrend(
-                    df_ind, atr_stop_mult=atr_stop_mult, direction="long",
-                    min_hold_bars=min_hold_bars, max_hold_bars=max_hold_bars,
-                )
-
-            if trades_df.empty:
-                print(f"  Backtest {sym_short}: 0 trades")
-                continue
-
-            # Tag each trade with its phase and convert to dict
-            phases = phase_cache.get(symbol, pd.Series(dtype=str))
-            symbol_trade_count = 0
-
-            for _, row in trades_df.iterrows():
-                entry_ts = row["Zeit"]
-                exit_ts = row["ExitZeit"]
-                phase = get_phase_at_entry(phases, entry_ts)
-
-                trade_dict = {
-                    "symbol": symbol,
-                    "direction": "long",
-                    "indicator": ind_display,
-                    "htf": BACKTEST_HTF,
-                    "entry_time": str(entry_ts),
-                    "exit_time": str(exit_ts),
-                    "entry_price": float(row["Entry"]),
-                    "exit_price": float(row["ExitPreis"]),
-                    "phase": phase,
-                    "reason": row["ExitReason"],
-                }
-                all_trades.append(trade_dict)
-                symbol_trade_count += 1
-
-            atr_label = "None" if atr_stop_mult is None else atr_stop_mult
-            print(f"  Backtest {sym_short}: {symbol_trade_count} trades "
-                  f"(A={param_a}, B={param_b}, ATR={atr_label}, MinHold={min_hold_bars})")
-
-        # Sort all trades by entry time
-        all_trades.sort(key=lambda t: t["entry_time"])
-
-        # Console summary: compound growth over all trades
-        capital = START_CAPITAL
-        for t in all_trades:
-            stake = capital / MAX_POSITIONS
-            ep = t["entry_price"]
-            xp = t["exit_price"]
-            pnl_pct = (xp - ep) / ep if ep else 0
-            pnl_gross = pnl_pct * stake
-            fees = stake * st.FEE_RATE * 2.0
-            pnl_net = pnl_gross - fees
-            capital += pnl_net
-
-        total_pnl = capital - START_CAPITAL
-        closed = [t for t in all_trades if t["reason"] != "Final bar"]
-        opened = [t for t in all_trades if t["reason"] == "Final bar"]
-        print(f"\n  {ind_display}: {len(closed)} closed + {len(opened)} open = {len(all_trades)} total")
-        print(f"  Compound Growth: {START_CAPITAL:,.2f} -> {capital:,.2f} | PnL: {total_pnl:+,.2f}")
-
-        # ── Step 3: Write JSON (raw trades, no PnL/stake) ──
+        # ── Write JSON ──
         json_out = {
-            "indicator": indicator,
-            "indicator_display": ind_display,
+            "trading_strategy": TRADING_INDICATOR,
+            "trading_params": {
+                "param_a": TRADING_PARAM_A,
+                "param_b": TRADING_PARAM_B,
+                "max_hold_bars": max_hold_bars,
+                "atr_stop": TRADING_ATR_STOP,
+            },
+            "phase_classifier": classifier,
+            "phase_classifier_display": cls_display,
+            "indicator_display": f"JMA + MaxHold={max_hold_bars}",
             "start_capital": START_CAPITAL,
             "max_positions": MAX_POSITIONS,
             "phase_config": {
@@ -264,7 +259,7 @@ def main():
             "open_positions_data": [],
         }
 
-        for t in all_trades:
+        for t in tagged_trades:
             entry = {
                 "symbol": t["symbol"],
                 "direction": t["direction"],
@@ -283,35 +278,36 @@ def main():
                 entry["exit_time"] = t["exit_time"]
                 json_out["trades"].append(entry)
 
-        json_path = os.path.join(st.BASE_OUT_DIR, f"trading_summary_ph1_{indicator}.json")
+        json_path = os.path.join(st.BASE_OUT_DIR, f"trading_summary_ph1_{classifier}.json")
         with open(json_path, "w", encoding="utf-8") as jf:
             json.dump(json_out, jf, indent=2, default=str)
         print(f"  -> {json_path} ({len(json_out['trades'])} closed, {len(json_out['open_positions_data'])} open)")
 
-        # ── Step 4: Generate HTML (dashboard + summary) ──
-        prefix = f"ph1_{indicator}"
+        # ── Generate HTML ──
+        prefix = f"ph1_{classifier}"
         st._generate_phase_dashboard(
-            all_trades,
+            tagged_trades,
             dashboard_start=dashboard_start,
             summary_start=summary_start,
             stake_divisor=MAX_POSITIONS,
-            indicator_label=ind_display,
+            indicator_label=f"JMA + MaxHold={max_hold_bars} ({cls_display})",
             output_prefix=prefix,
         )
 
-    # Restore original globals
+    # Restore globals
     st.BACKTEST_START_DATE = orig_backtest_start
     st.HTF_LENGTH = orig_htf_length
     st.HTF_FACTOR = orig_htf_factor
 
     print(f"\n{'='*60}")
-    print("Done! Generated files:")
-    for indicator in INDICATORS:
-        ind_display = INDICATOR_DISPLAY[indicator]
-        print(f"  {ind_display}:")
-        print(f"    - trading_summary_ph1_{indicator}.json")
-        print(f"    - trading_summary_ph1_{indicator}.html  (ab {summary_start}, start=16.500)")
-        print(f"    - dashboard_ph1_{indicator}.html        (ab {dashboard_start}, start=16.500)")
+    print(f"Done! Trading strategy: JMA L={TRADING_PARAM_A}, MaxHold={max_hold_bars}")
+    print(f"Same {len(raw_trades)} trades, tagged with 4 phase classifiers:")
+    for classifier in PHASE_CLASSIFIERS:
+        cls_display = CLASSIFIER_DISPLAY[classifier]
+        print(f"  {cls_display}:")
+        print(f"    - trading_summary_ph1_{classifier}.json")
+        print(f"    - trading_summary_ph1_{classifier}.html  (ab {summary_start}, start=16.500)")
+        print(f"    - dashboard_ph1_{classifier}.html        (ab {dashboard_start}, start=16.500)")
 
 
 if __name__ == "__main__":
