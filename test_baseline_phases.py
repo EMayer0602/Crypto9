@@ -149,18 +149,7 @@ for phase in ["Up", "Down", "Flat"]:
         pw = sum(1 for t in pt if t["pnl"] > 0)
         print(f"  {phase:5s}: {len(pt):4d}t  PnL={pp:+10,.2f}  WR={pw/len(pt)*100:.1f}%")
 
-# Generate HTML
+# Generate HTML (writes directly to dashboard_ph1.html + trading_summary_ph1.html)
 st._generate_phase_dashboard(all_trades, dashboard_start="2024-01-31")
-
-# Rename to _ph1
-base = st.BASE_OUT_DIR
-for old, new in [("dashboard_Ph.html", "dashboard_ph1.html"),
-                 ("trading_summary_Ph.html", "trading_summary_ph1.html")]:
-    old_path, new_path = os.path.join(base, old), os.path.join(base, new)
-    if os.path.exists(old_path):
-        if os.path.exists(new_path):
-            os.remove(new_path)
-        os.rename(old_path, new_path)
-        print(f"  Generated: {new_path}")
 
 print("\nDone!")

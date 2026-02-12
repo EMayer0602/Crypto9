@@ -224,7 +224,7 @@ GLOBAL_BEST_RESULTS = {}
 # Phase-based sweep: optimized parameters per market phase (Up/Down/Flat)
 RUN_PHASE_BASED_SWEEP = True
 PHASE_STAKE_DIVISOR = 8  # stake = equity/8 (match paper_trader MAX_OPEN_POSITIONS=8)
-PHASE_PARAMS_CSV = os.path.join(BASE_OUT_DIR, "best_params_overall.csv")
+PHASE_PARAMS_CSV = os.path.join(BASE_OUT_DIR, "best_params_phase.csv")
 GLOBAL_PHASE_RESULTS = {}
 
 INDICATOR_PRESETS = {
@@ -3515,7 +3515,7 @@ def _collect_best_phase_trades():
 
 def _generate_phase_dashboard(all_trades, dashboard_start="2025-12-01"):
 	"""
-	Generate dashboard_Ph.html and trading_summary_Ph.html from phase-tagged trades.
+	Generate dashboard_ph1.html and trading_summary_ph1.html from phase-tagged trades.
 	Applies compound growth (stake = capital / 8).
 	Same format as TestnetDashboard / write_summary_html.
 	"""
@@ -3661,16 +3661,16 @@ tr:hover {{ background: #16213e; }}
 
 </body></html>"""
 
-	# Write dashboard_Ph.html
-	dash_path = os.path.join(BASE_OUT_DIR, "dashboard_Ph.html")
+	# Write dashboard_ph1.html
+	dash_path = os.path.join(BASE_OUT_DIR, "dashboard_ph1.html")
 	with open(dash_path, "w", encoding="utf-8") as f:
 		f.write(html)
 	print(f"[Phase Dashboard] {dash_path} ({len(display_trades)} trades ab {dashboard_start})")
 
-	# Also write trading_summary_Ph.html (same content, different title)
+	# Also write trading_summary_ph1.html (same content, different title)
 	summary_html = html.replace("Phase-Based Strategy Dashboard", "Phase-Based Trading Summary")
 	summary_html = summary_html.replace('<meta http-equiv="refresh" content="60">', '')
-	summary_path = os.path.join(BASE_OUT_DIR, "trading_summary_Ph.html")
+	summary_path = os.path.join(BASE_OUT_DIR, "trading_summary_ph1.html")
 	with open(summary_path, "w", encoding="utf-8") as f:
 		f.write(summary_html)
 	print(f"[Phase Summary] {summary_path}")
