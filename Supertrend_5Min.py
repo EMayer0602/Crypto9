@@ -3513,13 +3513,15 @@ def _collect_best_phase_trades():
 	return all_trades
 
 
-def _generate_phase_dashboard(all_trades, dashboard_start="2025-12-01", summary_start="2024-01-31", stake_divisor=None, use_precomputed=False):
+def _generate_phase_dashboard(all_trades, dashboard_start="2025-12-01", summary_start="2024-01-31", stake_divisor=None, use_precomputed=False, indicator_label=None, output_prefix="ph1"):
 	"""
-	Generate dashboard_ph1.html and trading_summary_ph1.html from phase-tagged trades.
-	dashboard_ph1.html shows trades ab dashboard_start (recent).
-	trading_summary_ph1.html shows trades ab summary_start (all).
+	Generate dashboard_{prefix}.html and trading_summary_{prefix}.html from phase-tagged trades.
+	Dashboard shows trades ab dashboard_start (recent).
+	Trading summary shows trades ab summary_start (all).
 
 	If use_precomputed=True, expects trades already have: pnl, stake, fees, pnl_pct, equity_after.
+	indicator_label: e.g. "JMA" – shown in HTML title.
+	output_prefix: e.g. "ph1_jma" – used for filenames.
 	"""
 	now = datetime.now(BERLIN_TZ).strftime("%Y-%m-%d %H:%M:%S %Z")
 	phase_colors = {"Up": "#27ae60", "Down": "#e74c3c", "Flat": "#f39c12"}
@@ -3663,18 +3665,21 @@ tr:hover {{ background: #16213e; }}
 
 </body></html>"""
 
+	# Title with optional indicator label
+	label_suffix = f" — {indicator_label}" if indicator_label else ""
+
 	# Dashboard: recent trades (ab dashboard_start), auto-refresh
 	dash_trades = [t for t in processed if t["entry_time"][:10] >= dashboard_start]
-	dash_html = _build_html(dash_trades, "Phase-Based Strategy Dashboard", dashboard_start, auto_refresh=True)
-	dash_path = os.path.join(BASE_OUT_DIR, "dashboard_ph1.html")
+	dash_html = _build_html(dash_trades, f"Phase Dashboard{label_suffix}", dashboard_start, auto_refresh=True)
+	dash_path = os.path.join(BASE_OUT_DIR, f"dashboard_{output_prefix}.html")
 	with open(dash_path, "w", encoding="utf-8") as f:
 		f.write(dash_html)
 	print(f"[Phase Dashboard] {dash_path} ({len(dash_trades)} trades ab {dashboard_start})")
 
 	# Trading Summary: all trades (ab summary_start), no auto-refresh
 	summ_trades = [t for t in processed if t["entry_time"][:10] >= summary_start]
-	summ_html = _build_html(summ_trades, "Phase-Based Trading Summary", summary_start, auto_refresh=False)
-	summary_path = os.path.join(BASE_OUT_DIR, "trading_summary_ph1.html")
+	summ_html = _build_html(summ_trades, f"Phase Trading Summary{label_suffix}", summary_start, auto_refresh=False)
+	summary_path = os.path.join(BASE_OUT_DIR, f"trading_summary_{output_prefix}.html")
 	with open(summary_path, "w", encoding="utf-8") as f:
 		f.write(summ_html)
 	print(f"[Phase Summary] {summary_path} ({len(summ_trades)} trades ab {summary_start})")

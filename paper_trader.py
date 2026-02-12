@@ -1981,6 +1981,11 @@ def write_summary_html(summary: Dict[str, Any], path: str) -> None:
         recalc_pos["unrealized_pct"] = pnl_pct * 100
         open_positions.append(recalc_pos)
 
+    # Sort newest first, limit to MAX_OPEN_POSITIONS
+    open_positions = sorted(open_positions, key=lambda p: p.get("entry_time", "") or "", reverse=True)
+    if len(open_positions) > max_positions:
+        open_positions = open_positions[:max_positions]
+    open_count = len(open_positions)
     open_pnl = sum(float(p.get("unrealized_pnl", 0) or 0) for p in open_positions)
 
     def fmt(val):
@@ -2040,7 +2045,7 @@ def write_summary_html(summary: Dict[str, Any], path: str) -> None:
         "<h2>Statistics</h2>",
         "<table><tr><th>Metric</th><th>Value</th></tr>",
         f"<tr><td>Closed trades</td><td>{total_trades}</td></tr>",
-        f"<tr><td>Open positions</td><td>{open_count}</td></tr>",
+        f"<tr><td>Open positions (max {max_positions})</td><td>{open_count}</td></tr>",
         f"<tr><td>Total PnL (closed)</td><td class=\"{pnl_class(total_pnl)}\">{fmt(total_pnl)} USDT</td></tr>",
         f"<tr><td>Open PnL (unrealized)</td><td class=\"{pnl_class(open_pnl)}\">{fmt(open_pnl)} USDT</td></tr>",
         f"<tr><td>Winners</td><td>{winners}</td></tr>",
@@ -2050,10 +2055,9 @@ def write_summary_html(summary: Dict[str, Any], path: str) -> None:
     ]
 
     # Open Positions
-    html_parts.append(f"<h2>Open Positions ({open_count}, Equity: <span class=\"{pnl_class(open_pnl)}\">{fmt(open_pnl)}</span>)</h2>")
+    html_parts.append(f"<h2>Open Positions ({open_count}, max {max_positions}, Equity: <span class=\"{pnl_class(open_pnl)}\">{fmt(open_pnl)}</span>)</h2>")
     html_parts.append("<table><tr><th>Symbol</th><th>Direction</th><th>Indicator</th><th>HTF</th><th>Entry Time</th><th>Entry Price</th><th>Last Price</th><th>Stake</th><th>Amount</th><th>Bars</th><th>PnL %</th><th>PnL</th><th>Status</th></tr>")
-    sorted_open_positions = sorted(open_positions, key=lambda p: p.get("entry_time", "") or "", reverse=True)
-    for pos in sorted_open_positions:
+    for pos in open_positions:
         symbol = pos.get("symbol", "")
         direction = pos.get("direction", "")
         indicator = pos.get("indicator", "")
