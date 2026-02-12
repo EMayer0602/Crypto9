@@ -233,21 +233,21 @@ def main():
         print(f"\n{'='*60}")
         print(f"{ind_display}: {total} trades total")
 
-        # Console stats: FIXED stake = 16500/8 per trade
-        fixed_stake = START_CAPITAL / MAX_POSITIONS
+        # Console stats: compound growth stake = capital/8
         capital = START_CAPITAL
         for t in ind_trades:
+            stake = capital / MAX_POSITIONS
             ep = t["entry_price"]
             xp = t["exit_price"]
             pnl_pct = (xp - ep) / ep if ep else 0
-            pnl_gross = pnl_pct * fixed_stake
-            fees = fixed_stake * st.FEE_RATE * 2.0
+            pnl_gross = pnl_pct * stake
+            fees = stake * st.FEE_RATE * 2.0
             pnl_net = pnl_gross - fees
             capital += pnl_net
 
         total_pnl = capital - START_CAPITAL
         print(f"  All trades: Start {START_CAPITAL:,.2f} -> Final {capital:,.2f} | PnL: {total_pnl:+,.2f}")
-        print(f"  Fixed stake: {fixed_stake:,.2f} per trade")
+        print(f"  Compound Growth: stake = kapital/{MAX_POSITIONS}")
 
         # ── Write per-indicator JSON (raw trades, no compound) ──
         json_out = {

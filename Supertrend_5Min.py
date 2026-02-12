@@ -3544,28 +3544,28 @@ def _generate_phase_dashboard(all_trades, dashboard_start="2025-12-01", summary_
 			return f"{val:.4f}"
 		return fmt_de(val)
 
-	# ── Filter to summary period, FIXED stake = START_EQUITY / max_positions ──
+	# ── Filter to summary period, compound growth: stake = capital / max_positions ──
 	summ_raw = sorted(
 		[t for t in all_trades if t["entry_time"][:10] >= summary_start],
 		key=lambda t: t["entry_time"]
 	)
 
-	fixed_stake = START_EQUITY / max_positions
 	capital = START_EQUITY
 	processed = []
 	for t in summ_raw:
+		stake = capital / max_positions
 		ep = t["entry_price"]
 		xp = t["exit_price"]
 		if t["direction"] == "long":
 			pnl_pct = (xp - ep) / ep if ep else 0
 		else:
 			pnl_pct = (ep - xp) / ep if ep else 0
-		pnl_gross = pnl_pct * fixed_stake
-		fees = fixed_stake * FEE_RATE * 2.0
+		pnl_gross = pnl_pct * stake
+		fees = stake * FEE_RATE * 2.0
 		pnl_net = pnl_gross - fees
 		capital += pnl_net
 		tc = dict(t)
-		tc["stake"] = fixed_stake
+		tc["stake"] = stake
 		tc["pnl"] = pnl_net
 		tc["pnl_pct"] = pnl_pct
 		tc["fees"] = fees
@@ -3649,7 +3649,7 @@ tr:hover {{ background: #16213e; }}
 </style>
 </head><body>
 <h1>{title}</h1>
-<p class="sub">Ab {date_label} | Stand: {now} | Fester Stake = {fmt_de(START_EQUITY / max_positions)} USDT ({fmt_de(START_EQUITY)}/{max_positions})</p>
+<p class="sub">Ab {date_label} | Stand: {now} | Compound Growth (stake = kapital/{max_positions})</p>
 
 <div class="cards">
 <div class="card"><div class="label">Start Kapital</div><div class="value">{fmt_de(start_cap)} USDT</div></div>
