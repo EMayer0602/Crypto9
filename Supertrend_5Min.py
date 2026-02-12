@@ -3544,38 +3544,37 @@ def _generate_phase_dashboard(all_trades, dashboard_start="2025-12-01", summary_
 			return f"{val:.4f}"
 		return fmt_de(val)
 
-	# ── Filter to summary period, compound growth: stake = capital / max_positions ──
-	summ_raw = sorted(
-		[t for t in all_trades if t["entry_time"][:10] >= summary_start],
-		key=lambda t: t["entry_time"]
-	)
+	# ── Compound growth helper: start at START_EQUITY, stake = capital/max_positions ──
+	def _apply_compound(trades_raw):
+		capital = START_EQUITY
+		result = []
+		for t in trades_raw:
+			stake = capital / max_positions
+			ep = t["entry_price"]
+			xp = t["exit_price"]
+			if t["direction"] == "long":
+				pnl_pct = (xp - ep) / ep if ep else 0
+			else:
+				pnl_pct = (ep - xp) / ep if ep else 0
+			pnl_gross = pnl_pct * stake
+			fees = stake * FEE_RATE * 2.0
+			pnl_net = pnl_gross - fees
+			capital += pnl_net
+			tc = dict(t)
+			tc["stake"] = stake
+			tc["pnl"] = pnl_net
+			tc["pnl_pct"] = pnl_pct
+			tc["fees"] = fees
+			tc["equity_after"] = capital
+			result.append(tc)
+		return result
 
-	capital = START_EQUITY
-	processed = []
-	for t in summ_raw:
-		stake = capital / max_positions
-		ep = t["entry_price"]
-		xp = t["exit_price"]
-		if t["direction"] == "long":
-			pnl_pct = (xp - ep) / ep if ep else 0
-		else:
-			pnl_pct = (ep - xp) / ep if ep else 0
-		pnl_gross = pnl_pct * stake
-		fees = stake * FEE_RATE * 2.0
-		pnl_net = pnl_gross - fees
-		capital += pnl_net
-		tc = dict(t)
-		tc["stake"] = stake
-		tc["pnl"] = pnl_net
-		tc["pnl_pct"] = pnl_pct
-		tc["fees"] = fees
-		tc["equity_after"] = capital
-		processed.append(tc)
+	# ── Two independent compound curves, both from 16500 ──
+	summ_raw = sorted([t for t in all_trades if t["entry_time"][:10] >= summary_start], key=lambda t: t["entry_time"])
+	summ_processed = _apply_compound(summ_raw)
 
-	# ── Split into pre-dashboard and dashboard trades ──
-	trades_before_dash = [t for t in processed if t["entry_time"][:10] < dashboard_start]
-	dash_trades = [t for t in processed if t["entry_time"][:10] >= dashboard_start]
-	dash_start_cap = trades_before_dash[-1]["equity_after"] if trades_before_dash else START_EQUITY
+	dash_raw = sorted([t for t in all_trades if t["entry_time"][:10] >= dashboard_start], key=lambda t: t["entry_time"])
+	dash_processed = _apply_compound(dash_raw)
 
 	def trade_row(t, show_exit=True):
 		pnl_class = "pos" if t["pnl"] >= 0 else "neg"
@@ -3678,19 +3677,19 @@ tr:hover {{ background: #16213e; }}
 	# Title with optional indicator label
 	label_suffix = f" — {indicator_label}" if indicator_label else ""
 
-	# Summary: all trades from summary_start, compound from START_EQUITY (16500)
-	summ_html = _build_html(processed, f"Phase Trading Summary{label_suffix}", summary_start, start_cap=START_EQUITY, auto_refresh=False)
+	# Summary: compound from 16500, trades ab summary_start
+	summ_html = _build_html(summ_processed, f"Phase Trading Summary{label_suffix}", summary_start, start_cap=START_EQUITY, auto_refresh=False)
 	summary_path = os.path.join(BASE_OUT_DIR, f"trading_summary_{output_prefix}.html")
 	with open(summary_path, "w", encoding="utf-8") as f:
 		f.write(summ_html)
-	print(f"[Phase Summary] {summary_path} ({len(processed)} trades ab {summary_start}, start={fmt_de(START_EQUITY)})")
+	print(f"[Phase Summary] {summary_path} ({len(summ_processed)} trades ab {summary_start}, start={fmt_de(START_EQUITY)})")
 
-	# Dashboard: trades from dashboard_start, start_cap = equity at dashboard_start
-	dash_html = _build_html(dash_trades, f"Phase Dashboard{label_suffix}", dashboard_start, start_cap=dash_start_cap, auto_refresh=True)
+	# Dashboard: compound from 16500, trades ab dashboard_start
+	dash_html = _build_html(dash_processed, f"Phase Dashboard{label_suffix}", dashboard_start, start_cap=START_EQUITY, auto_refresh=True)
 	dash_path = os.path.join(BASE_OUT_DIR, f"dashboard_{output_prefix}.html")
 	with open(dash_path, "w", encoding="utf-8") as f:
 		f.write(dash_html)
-	print(f"[Phase Dashboard] {dash_path} ({len(dash_trades)} trades ab {dashboard_start}, start={fmt_de(dash_start_cap)})")
+	print(f"[Phase Dashboard] {dash_path} ({len(dash_processed)} trades ab {dashboard_start}, start={fmt_de(START_EQUITY)})")
 
 
 def _write_phase_sweep_html(df_out):
