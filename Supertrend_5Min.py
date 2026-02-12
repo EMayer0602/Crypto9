@@ -3598,10 +3598,13 @@ def _generate_phase_dashboard(all_trades, dashboard_start="2025-12-01", summary_
 		win_rate = (winners / total_trades * 100) if total_trades else 0
 		total_pnl = sum(t["pnl"] for t in trades_filtered)
 		final_cap = trades_filtered[-1]["equity_after"] if trades_filtered else START_EQUITY
-		start_cap = trades_filtered[0]["equity_after"] - trades_filtered[0]["pnl"] if trades_filtered else START_EQUITY
+		start_cap = START_EQUITY  # Always 16500, regardless of date filter
 
 		open_t = [t for t in trades_filtered if t["reason"] == "Final bar"]
 		closed_t = [t for t in trades_filtered if t["reason"] != "Final bar"]
+		# Limit open positions to max_positions (e.g. 8)
+		if len(open_t) > max_positions:
+			open_t = sorted(open_t, key=lambda t: t["entry_time"], reverse=True)[:max_positions]
 		open_pnl = sum(t["pnl"] for t in open_t)
 		closed_pnl = sum(t["pnl"] for t in closed_t)
 
@@ -3641,7 +3644,7 @@ tr:hover {{ background: #16213e; }}
 <div class="card"><div class="label">Final Kapital</div><div class="value" style="color:{cap_color}">{fmt_de(final_cap)} USDT</div></div>
 <div class="card"><div class="label">Closed Trades</div><div class="value">{len(closed_t)}</div></div>
 <div class="card"><div class="label">Realized PnL</div><div class="value" style="color:{pnl_color}">{fmt_de(closed_pnl)} USDT</div></div>
-<div class="card"><div class="label">Open Positionen</div><div class="value">{len(open_t)}</div></div>
+<div class="card"><div class="label">Open Positionen (max {max_positions})</div><div class="value">{len(open_t)}</div></div>
 <div class="card"><div class="label">Open PnL</div><div class="value" style="color:{open_pnl_color}">{fmt_de(open_pnl)} USDT</div></div>
 <div class="card"><div class="label">Win Rate</div><div class="value">{win_rate:.1f}%</div></div>
 </div>
