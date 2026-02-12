@@ -3130,9 +3130,13 @@ apply_higher_timeframe(HIGHER_TIMEFRAME)
 
 def classify_market_phases(df, symbol):
 	"""
-	Classify each bar as Up/Down/Flat based on HTF Supertrend slope.
+	Classify each bar as Up/Down/Flat based on the current INDICATOR_TYPE.
+
+	- Supertrend / htf_crossover: st_trend directly → Up(+1) / Down(-1), no Flat
+	- JMA: slope of JMA on HTF, thr1=-0.0010, thr2=+0.0010 → Up/Flat/Down
+	- KAMA: slope of KAMA on HTF, thr1=-0.0001, thr2=+0.0001 → Up/Flat/Down
+
 	Uses current global HTF_LENGTH, HTF_FACTOR, HIGHER_TIMEFRAME.
-	Same algorithm as generate_reports.py classify_phase_by_slope().
 	"""
 	low_tf_minutes = timeframe_to_minutes(TIMEFRAME)
 	htf_minutes = timeframe_to_minutes(HIGHER_TIMEFRAME)
@@ -3143,22 +3147,62 @@ def classify_market_phases(df, symbol):
 	if df_high.empty:
 		return pd.Series("Flat", index=df.index)
 
-	df_high_ind = compute_supertrend(df_high, length=HTF_LENGTH, factor=HTF_FACTOR)
-	if "supertrend" not in df_high_ind.columns:
-		return pd.Series("Flat", index=df.index)
+	if INDICATOR_TYPE in ("supertrend", "htf_crossover"):
+		# Direct st_trend: +1 = Up, -1 = Down, no Flat
+		df_high_ind = compute_supertrend(df_high, length=HTF_LENGTH, factor=HTF_FACTOR)
+		if "st_trend" not in df_high_ind.columns:
+			return pd.Series("Flat", index=df.index)
+		st_trend = df_high_ind["st_trend"]
+		aligned = st_trend.reindex(df.index, method="ffill")
+		phases = pd.Series("Flat", index=df.index)
+		phases[aligned == 1] = "Up"
+		phases[aligned == -1] = "Down"
+		return phases
 
-	htf_st = df_high_ind["supertrend"]
-	aligned = htf_st.reindex(df.index, method="ffill")
+	elif INDICATOR_TYPE == "jma":
+		# JMA slope with thresholds ±0.0010
+		df_high_ind = compute_jma(df_high, length=HTF_LENGTH, phase=0)
+		if "jma" not in df_high_ind.columns:
+			return pd.Series("Flat", index=df.index)
+		indicator_val = df_high_ind["jma"]
+		aligned = indicator_val.reindex(df.index, method="ffill")
+		raw_slope = aligned.diff()
+		slope_pct = raw_slope / aligned.shift(1)
+		slope_pct = slope_pct.rolling(window=5, min_periods=1).mean()
+		phases = pd.Series("Flat", index=df.index)
+		phases[slope_pct > 0.0010] = "Up"
+		phases[slope_pct < -0.0010] = "Down"
+		return phases
 
-	# Slope-based classification (identical to classify_phase_by_slope)
-	raw_slope = aligned.diff()
-	slope_pct = raw_slope / aligned.shift(1)
-	slope_pct = slope_pct.rolling(window=5, min_periods=1).mean()
+	elif INDICATOR_TYPE == "kama":
+		# KAMA slope with thresholds ±0.0001
+		df_high_ind = compute_kama(df_high, length=HTF_LENGTH)
+		if "kama" not in df_high_ind.columns:
+			return pd.Series("Flat", index=df.index)
+		indicator_val = df_high_ind["kama"]
+		aligned = indicator_val.reindex(df.index, method="ffill")
+		raw_slope = aligned.diff()
+		slope_pct = raw_slope / aligned.shift(1)
+		slope_pct = slope_pct.rolling(window=5, min_periods=1).mean()
+		phases = pd.Series("Flat", index=df.index)
+		phases[slope_pct > 0.0001] = "Up"
+		phases[slope_pct < -0.0001] = "Down"
+		return phases
 
-	phases = pd.Series("Flat", index=df.index)
-	phases[slope_pct > 0.0005] = "Up"
-	phases[slope_pct < -0.0005] = "Down"
-	return phases
+	else:
+		# Fallback: Supertrend slope
+		df_high_ind = compute_supertrend(df_high, length=HTF_LENGTH, factor=HTF_FACTOR)
+		if "supertrend" not in df_high_ind.columns:
+			return pd.Series("Flat", index=df.index)
+		htf_st = df_high_ind["supertrend"]
+		aligned = htf_st.reindex(df.index, method="ffill")
+		raw_slope = aligned.diff()
+		slope_pct = raw_slope / aligned.shift(1)
+		slope_pct = slope_pct.rolling(window=5, min_periods=1).mean()
+		phases = pd.Series("Flat", index=df.index)
+		phases[slope_pct > 0.0005] = "Up"
+		phases[slope_pct < -0.0005] = "Down"
+		return phases
 
 
 def score_phase_compound(trades_df, phase_labels, phase):
@@ -3232,7 +3276,11 @@ def run_phase_based_sweep():
 	directions = get_enabled_directions()
 	hold_bar_candidates = MIN_HOLD_BAR_VALUES if USE_MIN_HOLD_FILTER else [DEFAULT_MIN_HOLD_BARS]
 	max_hold_candidates = MAX_HOLD_BAR_VALUES if MAX_HOLD_BAR_VALUES else [0]
-	phase_names = ["Up", "Down", "Flat"]
+	# Supertrend/htf_crossover: only Up/Down (no Flat). JMA/KAMA: Up/Down/Flat.
+	if INDICATOR_TYPE in ("supertrend", "htf_crossover"):
+		phase_names = ["Up", "Down"]
+	else:
+		phase_names = ["Up", "Down", "Flat"]
 
 	best_per_phase = {}  # {(symbol, direction, phase): row_dict}
 
