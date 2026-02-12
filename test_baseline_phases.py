@@ -49,8 +49,20 @@ BACKTEST_HTF = "6h"
 TRADING_INDICATOR = "jma"
 TRADING_PARAM_A = 30       # JMA Length (default)
 TRADING_PARAM_B = 0        # JMA Phase (default)
-TRADING_ATR_STOP = None    # No ATR stop
-TRADING_MIN_HOLD = None    # Set to max_hold_bars at runtime (forces time-based exit)
+
+# Per-symbol exit config: exact match of BCK strategy
+# BTC/ETH/XRP: 5 bars, ETH also ATR stop x2.0
+# TNSR/ZEC: 2 bars (faster exit from analysis)
+# All others: 4 bars
+SYMBOL_EXIT_CONFIG = {
+    "BTC/USDC":  {"max_hold": 5, "atr_stop": None},
+    "ETH/USDC":  {"max_hold": 5, "atr_stop": 2.0},
+    "XRP/USDC":  {"max_hold": 5, "atr_stop": None},
+    "TNSR/USDC": {"max_hold": 2, "atr_stop": None},
+    "ZEC/USDC":  {"max_hold": 2, "atr_stop": None},
+}
+DEFAULT_MAX_HOLD = 4
+DEFAULT_ATR_STOP = None
 
 # Phase classifiers: the 4 methods to tag the same trades
 PHASE_CLASSIFIERS = ["supertrend", "htf_crossover", "jma", "kama"]
@@ -84,16 +96,15 @@ def main():
                         help="Dashboard start date (default: 2025-12-01)")
     parser.add_argument("--summary-start", type=str, default="2024-12-01",
                         help="Trading summary start date (default: 2024-12-01)")
-    parser.add_argument("--max-hold", type=int, default=4,
-                        help="MaxHoldBars for time-based exit (default: 4, like BCK)")
     args = parser.parse_args()
 
     dashboard_start = args.start
     summary_start = args.summary_start
-    max_hold_bars = args.max_hold
 
-    print(f"=== JMA + Time-Based Exit (MaxHold={max_hold_bars}) ===")
-    print(f"Trading: JMA L={TRADING_PARAM_A}, Phase={TRADING_PARAM_B}, MaxHold={max_hold_bars}")
+    print(f"=== JMA + Time-Based Exit (per-symbol, like BCK) ===")
+    print(f"Trading: JMA L={TRADING_PARAM_A}, Phase={TRADING_PARAM_B}")
+    print(f"Default: MaxHold={DEFAULT_MAX_HOLD}, ATR=None")
+    print(f"Custom: BTC/ETH/XRP=5bars, ETH+ATR2.0, TNSR/ZEC=2bars")
     print(f"Capital: {START_CAPITAL:,.0f} | Max Positions: {MAX_POSITIONS}")
     print(f"Phase classification: L={PHASE_HTF_LENGTH}, F={PHASE_HTF_FACTOR}, HTF={PHASE_HTF}")
     print(f"Backtest HTF filter: L={BACKTEST_HTF_LENGTH}, F={BACKTEST_HTF_FACTOR}, HTF={BACKTEST_HTF}")
@@ -116,7 +127,7 @@ def main():
     # Step 1: Run ONE JMA backtest per symbol (same for all phases)
     # ══════════════════════════════════════════════════════════════
     print(f"\n{'='*60}")
-    print(f"Step 1: JMA Backtest (MaxHold={max_hold_bars}, MinHold={max_hold_bars})...")
+    print(f"Step 1: JMA Backtest (per-symbol MaxHold, like BCK)...")
 
     st.apply_indicator_type(TRADING_INDICATOR)
     st.apply_higher_timeframe(BACKTEST_HTF)
@@ -124,7 +135,8 @@ def main():
     st.HTF_FACTOR = BACKTEST_HTF_FACTOR
     st.clear_data_cache()
 
-    # Disable early exits — we want pure time-based exits
+    # Disable early exits — we want time-based exits (like BCK)
+    # Only ATR stop allowed for ETH (BCK uses ATR x2.0 for ETH)
     orig_trailing_stop = st.USE_TRAILING_STOP
     orig_profit_target = st.USE_PROFIT_TARGET
     st.USE_TRAILING_STOP = False
@@ -136,6 +148,11 @@ def main():
     for symbol in symbols:
         sym_short = symbol.replace("/USDC", "").replace("/USDT", "")
 
+        # Per-symbol exit config (exact BCK match)
+        sym_cfg = SYMBOL_EXIT_CONFIG.get(symbol, {})
+        max_hold = sym_cfg.get("max_hold", DEFAULT_MAX_HOLD)
+        atr_stop = sym_cfg.get("atr_stop", DEFAULT_ATR_STOP)
+
         df = st.prepare_symbol_dataframe(symbol)
         if df.empty:
             print(f"  {sym_short}: NO DATA")
@@ -143,10 +160,11 @@ def main():
 
         df_ind = st.compute_indicator(df, TRADING_PARAM_A, TRADING_PARAM_B)
 
-        # JMA backtest: min_hold = max_hold → forces time-based exit
+        # min_hold = max_hold → forces time-based exit (no early trend flips)
+        # ATR stop only for symbols that use it (ETH)
         trades_df = st.backtest_supertrend(
-            df_ind, atr_stop_mult=TRADING_ATR_STOP, direction="long",
-            min_hold_bars=max_hold_bars, max_hold_bars=max_hold_bars,
+            df_ind, atr_stop_mult=atr_stop, direction="long",
+            min_hold_bars=max_hold, max_hold_bars=max_hold,
         )
 
         if trades_df.empty:
@@ -168,7 +186,8 @@ def main():
             })
             count += 1
 
-        print(f"  {sym_short}: {count} trades")
+        atr_label = f"ATR={atr_stop}" if atr_stop else ""
+        print(f"  {sym_short}: {count} trades (MaxHold={max_hold} {atr_label})")
 
     raw_trades.sort(key=lambda t: t["entry_time"])
 
@@ -247,12 +266,12 @@ def main():
             "trading_params": {
                 "param_a": TRADING_PARAM_A,
                 "param_b": TRADING_PARAM_B,
-                "max_hold_bars": max_hold_bars,
-                "atr_stop": TRADING_ATR_STOP,
+                "default_max_hold": DEFAULT_MAX_HOLD,
+                "symbol_exit_config": {k: v for k, v in SYMBOL_EXIT_CONFIG.items()},
             },
             "phase_classifier": classifier,
             "phase_classifier_display": cls_display,
-            "indicator_display": f"JMA + MaxHold={max_hold_bars}",
+            "indicator_display": "JMA + Time-Based Exit (BCK)",
             "start_capital": START_CAPITAL,
             "max_positions": MAX_POSITIONS,
             "phase_config": {
@@ -300,7 +319,7 @@ def main():
             dashboard_start=dashboard_start,
             summary_start=summary_start,
             stake_divisor=MAX_POSITIONS,
-            indicator_label=f"JMA + MaxHold={max_hold_bars} ({cls_display})",
+            indicator_label=f"JMA + BCK Exits ({cls_display})",
             output_prefix=prefix,
         )
 
@@ -310,7 +329,7 @@ def main():
     st.HTF_FACTOR = orig_htf_factor
 
     print(f"\n{'='*60}")
-    print(f"Done! Trading strategy: JMA L={TRADING_PARAM_A}, MaxHold={max_hold_bars}")
+    print(f"Done! Trading strategy: JMA L={TRADING_PARAM_A}, per-symbol BCK exits")
     print(f"Same {len(raw_trades)} trades, tagged with 4 phase classifiers:")
     for classifier in PHASE_CLASSIFIERS:
         cls_display = CLASSIFIER_DISPLAY[classifier]
