@@ -3156,8 +3156,8 @@ def classify_market_phases(df, symbol):
 	slope_pct = slope_pct.rolling(window=5, min_periods=1).mean()
 
 	phases = pd.Series("Flat", index=df.index)
-	phases[slope_pct > 0.001] = "Up"
-	phases[slope_pct < -0.001] = "Down"
+	phases[slope_pct > 0.0005] = "Up"
+	phases[slope_pct < -0.0005] = "Down"
 	return phases
 
 
