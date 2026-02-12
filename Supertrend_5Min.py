@@ -3513,15 +3513,15 @@ def _collect_best_phase_trades():
 	return all_trades
 
 
-def _generate_phase_dashboard(all_trades, dashboard_start="2025-12-01"):
+def _generate_phase_dashboard(all_trades, dashboard_start="2025-12-01", stake_divisor=None):
 	"""
 	Generate dashboard_ph1.html and trading_summary_ph1.html from phase-tagged trades.
-	Applies compound growth (stake = capital / 8).
+	Applies compound growth (stake = capital / stake_divisor).
 	Same format as TestnetDashboard / write_summary_html.
 	"""
 	now = datetime.now(BERLIN_TZ).strftime("%Y-%m-%d %H:%M:%S %Z")
 	phase_colors = {"Up": "#27ae60", "Down": "#e74c3c", "Flat": "#f39c12"}
-	max_positions = PHASE_STAKE_DIVISOR  # 8
+	max_positions = stake_divisor if stake_divisor else PHASE_STAKE_DIVISOR
 
 	# German number formatting
 	def fmt_de(val):
