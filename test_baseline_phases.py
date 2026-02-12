@@ -49,8 +49,8 @@ BACKTEST_HTF = "6h"
 TRADING_INDICATOR = "jma"
 TRADING_PARAM_A = 30       # JMA Length (default)
 TRADING_PARAM_B = 0        # JMA Phase (default)
-TRADING_ATR_STOP = None    # No ATR stop (BCK uses it for <5% of trades)
-TRADING_MIN_HOLD = 0       # No minimum hold
+TRADING_ATR_STOP = None    # No ATR stop
+TRADING_MIN_HOLD = None    # Set to max_hold_bars at runtime (forces time-based exit)
 
 # Phase classifiers: the 4 methods to tag the same trades
 PHASE_CLASSIFIERS = ["supertrend", "htf_crossover", "jma", "kama"]
@@ -116,13 +116,19 @@ def main():
     # Step 1: Run ONE JMA backtest per symbol (same for all phases)
     # ══════════════════════════════════════════════════════════════
     print(f"\n{'='*60}")
-    print(f"Step 1: JMA Backtest (MaxHold={max_hold_bars})...")
+    print(f"Step 1: JMA Backtest (MaxHold={max_hold_bars}, MinHold={max_hold_bars})...")
 
     st.apply_indicator_type(TRADING_INDICATOR)
     st.apply_higher_timeframe(BACKTEST_HTF)
     st.HTF_LENGTH = BACKTEST_HTF_LENGTH
     st.HTF_FACTOR = BACKTEST_HTF_FACTOR
     st.clear_data_cache()
+
+    # Disable early exits — we want pure time-based exits
+    orig_trailing_stop = st.USE_TRAILING_STOP
+    orig_profit_target = st.USE_PROFIT_TARGET
+    st.USE_TRAILING_STOP = False
+    st.USE_PROFIT_TARGET = False
 
     # raw_trades: list of dicts with entry/exit info (no phase yet)
     raw_trades = []
@@ -137,10 +143,10 @@ def main():
 
         df_ind = st.compute_indicator(df, TRADING_PARAM_A, TRADING_PARAM_B)
 
-        # JMA uses backtest_supertrend (trend-flip entry/exit)
+        # JMA backtest: min_hold = max_hold → forces time-based exit
         trades_df = st.backtest_supertrend(
             df_ind, atr_stop_mult=TRADING_ATR_STOP, direction="long",
-            min_hold_bars=TRADING_MIN_HOLD, max_hold_bars=max_hold_bars,
+            min_hold_bars=max_hold_bars, max_hold_bars=max_hold_bars,
         )
 
         if trades_df.empty:
@@ -179,6 +185,10 @@ def main():
         pnl_net = pnl_pct * stake - stake * st.FEE_RATE * 2.0
         capital += pnl_net
     print(f"Compound Growth: {START_CAPITAL:,.2f} -> {capital:,.2f} | PnL: {capital - START_CAPITAL:+,.2f}")
+
+    # Restore exit strategy globals
+    st.USE_TRAILING_STOP = orig_trailing_stop
+    st.USE_PROFIT_TARGET = orig_profit_target
 
     # Exit reasons breakdown
     from collections import Counter
