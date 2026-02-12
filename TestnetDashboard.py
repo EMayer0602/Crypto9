@@ -136,7 +136,7 @@ def update_open_positions_with_live_prices(open_positions: list) -> list:
 
 # Capital settings - same as paper_trader.py
 START_CAPITAL = 16500.0
-MAX_POSITIONS = 10
+MAX_POSITIONS = 8
 START_DATE = "2025-12-01"  # Trades before this date are ignored
 
 # Fixed paths - all in one folder
