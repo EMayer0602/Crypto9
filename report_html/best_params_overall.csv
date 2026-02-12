@@ -35,3 +35,15 @@ TNSR/USDC;Long;supertrend;Supertrend;7;4,0;7;4,0;2.0;2,0;0;6h;14298,672198640079
 TNSR/USDC;Long;supertrend;Supertrend;7;4,0;7;4,0;2.0;2,0;0;6h;14298,672198640079;53;0,6792452830188679;283,54850016804994;;;5,635324502643104;1,324419439972313;report_html/supertrend_6h/trades_TNSR_USDC_supertrend_best.csv;htf_crossover;HTF-Crossover-Phasen
 TNSR/USDC;Long;supertrend;Supertrend;7;4,0;7;4,0;2.0;2,0;0;6h;14298,672198640079;53;0,6792452830188679;283,54850016804994;;;5,635324502643104;1,324419439972313;report_html/supertrend_6h/trades_TNSR_USDC_supertrend_best.csv;jma;JMA-Phasen
 TNSR/USDC;Long;supertrend;Supertrend;7;4,0;7;4,0;2.0;2,0;0;6h;14298,672198640079;53;0,6792452830188679;283,54850016804994;;;5,635324502643104;1,324419439972313;report_html/supertrend_6h/trades_TNSR_USDC_supertrend_best.csv;kama;KAMA-Phasen
+ZEC/USDC;Long;supertrend;Supertrend;10;3,0;10;3,0;None;;0;6h;;;;;;;;;;supertrend;Supertrend-Phasen
+ZEC/USDC;Long;supertrend;Supertrend;10;3,0;10;3,0;None;;0;6h;;;;;;;;;;htf_crossover;HTF-Crossover-Phasen
+ZEC/USDC;Long;supertrend;Supertrend;10;3,0;10;3,0;None;;0;6h;;;;;;;;;;jma;JMA-Phasen
+ZEC/USDC;Long;supertrend;Supertrend;10;3,0;10;3,0;None;;0;6h;;;;;;;;;;kama;KAMA-Phasen
+BNB/USDC;Long;supertrend;Supertrend;10;3,0;10;3,0;None;;0;6h;;;;;;;;;;supertrend;Supertrend-Phasen
+BNB/USDC;Long;supertrend;Supertrend;10;3,0;10;3,0;None;;0;6h;;;;;;;;;;htf_crossover;HTF-Crossover-Phasen
+BNB/USDC;Long;supertrend;Supertrend;10;3,0;10;3,0;None;;0;6h;;;;;;;;;;jma;JMA-Phasen
+BNB/USDC;Long;supertrend;Supertrend;10;3,0;10;3,0;None;;0;6h;;;;;;;;;;kama;KAMA-Phasen
+LUNC/USDT;Long;supertrend;Supertrend;10;3,0;10;3,0;None;;0;6h;;;;;;;;;;supertrend;Supertrend-Phasen
+LUNC/USDT;Long;supertrend;Supertrend;10;3,0;10;3,0;None;;0;6h;;;;;;;;;;htf_crossover;HTF-Crossover-Phasen
+LUNC/USDT;Long;supertrend;Supertrend;10;3,0;10;3,0;None;;0;6h;;;;;;;;;;jma;JMA-Phasen
+LUNC/USDT;Long;supertrend;Supertrend;10;3,0;10;3,0;None;;0;6h;;;;;;;;;;kama;KAMA-Phasen
