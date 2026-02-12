@@ -60,6 +60,18 @@ CLASSIFIER_DISPLAY = {
     "kama": "KAMA-Phasen",
 }
 
+# BCK exit strategy: per-symbol MaxHoldBars (time-based exits dominant)
+# From trading_summary_bck.json analysis
+BCK_MAX_HOLD = {
+    "BTC/USDC": 5,
+    "ETH/USDC": 5,
+    "XRP/USDC": 5,
+    "TNSR/USDC": 2,
+    "ZEC/USDC": 2,
+    # All others: 4
+}
+BCK_DEFAULT_MAX_HOLD = 4
+
 
 def parse_german_float(s):
     """Parse German number format: '3,0' -> 3.0"""
@@ -179,12 +191,14 @@ def main():
             param_a = p["param_a"]
             param_b = p["param_b"]
             atr_stop = p["atr_stop"]
-            min_hold = p["min_hold"]
             htf = p["htf"]
+
+            # BCK exit strategy: per-symbol MaxHoldBars, min_hold = max_hold
+            max_hold = BCK_MAX_HOLD.get(symbol, BCK_DEFAULT_MAX_HOLD)
+            min_hold = max_hold  # blocks trend flips until time-based exit
 
             # Set HTF for this symbol's backtest
             st.apply_higher_timeframe(htf)
-            # HTF filter uses same Length/Factor as the indicator params
             st.HTF_LENGTH = int(param_a) if param_a else 10
             st.HTF_FACTOR = float(param_b) if param_b else 3.0
             st.clear_data_cache()
@@ -200,12 +214,12 @@ def main():
             if indicator == "htf_crossover":
                 trades_df = st.backtest_htf_crossover(
                     df_ind, atr_stop_mult=atr_stop, direction="long",
-                    min_hold_bars=min_hold, max_hold_bars=0,
+                    min_hold_bars=min_hold, max_hold_bars=max_hold,
                 )
             else:
                 trades_df = st.backtest_supertrend(
                     df_ind, atr_stop_mult=atr_stop, direction="long",
-                    min_hold_bars=min_hold, max_hold_bars=0,
+                    min_hold_bars=min_hold, max_hold_bars=max_hold,
                 )
 
             if trades_df.empty:
@@ -228,7 +242,7 @@ def main():
                 count += 1
 
             atr_label = f"ATR={atr_stop}" if atr_stop else "ATR=None"
-            print(f"  {sym_short}: {count} trades (A={param_a}, B={param_b}, {atr_label}, MinHold={min_hold}, HTF={htf})")
+            print(f"  {sym_short}: {count} trades (A={param_a}, B={param_b}, {atr_label}, MaxHold={max_hold}, HTF={htf})")
 
         raw_trades.sort(key=lambda t: t["entry_time"])
 
