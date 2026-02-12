@@ -135,7 +135,7 @@ for ind_key, ind_trades in trades_by_indicator.items():
     ind_trades.sort(key=lambda t: t["entry_time"])
     capital = st.START_EQUITY
     for t in ind_trades:
-        stake = capital / st.PHASE_STAKE_DIVISOR  # stake = equity/8
+        stake = capital / st.STAKE_DIVISOR  # equity/14, same as backtest_supertrend
         ep, xp = t["entry_price"], t["exit_price"]
         pnl_pct = (xp - ep) / ep if t["direction"] == "long" else (ep - xp) / ep
         pnl_net = pnl_pct * stake - stake * st.FEE_RATE * 2.0
@@ -163,7 +163,7 @@ for ind_key, ind_trades in trades_by_indicator.items():
             print(f"  {phase:5s}: {len(pt):4d}t  PnL={pp:+10,.2f}  WR={pw/len(pt)*100:.1f}%")
 
     # Generate separate HTML per indicator
-    st._generate_phase_dashboard(ind_trades, dashboard_start="2024-01-31", stake_divisor=st.PHASE_STAKE_DIVISOR)
+    st._generate_phase_dashboard(ind_trades, dashboard_start="2024-01-31", stake_divisor=st.STAKE_DIVISOR)
 
     # Rename to indicator-specific filenames
     base = st.BASE_OUT_DIR
@@ -184,7 +184,7 @@ print(f"\n{'='*60}")
 print(f"COMBINED (all indicators)")
 capital = st.START_EQUITY
 for t in all_trades:
-    stake = capital / st.PHASE_STAKE_DIVISOR  # stake = equity/8
+    stake = capital / st.STAKE_DIVISOR  # equity/14, same as backtest_supertrend
     ep, xp = t["entry_price"], t["exit_price"]
     pnl_pct = (xp - ep) / ep if t["direction"] == "long" else (ep - xp) / ep
     pnl_net = pnl_pct * stake - stake * st.FEE_RATE * 2.0
@@ -199,6 +199,6 @@ total_pnl = sum(t["pnl"] for t in all_trades)
 winners = sum(1 for t in all_trades if t["pnl"] > 0)
 print(f"Total: {len(all_trades)} trades | PnL: {total_pnl:+,.2f} | WR: {winners/len(all_trades)*100:.1f}%")
 print(f"Start: {st.START_EQUITY:,.2f} → Final: {capital:,.2f}")
-st._generate_phase_dashboard(all_trades, dashboard_start="2024-01-31", stake_divisor=st.PHASE_STAKE_DIVISOR)
+st._generate_phase_dashboard(all_trades, dashboard_start="2024-01-31", stake_divisor=st.STAKE_DIVISOR)
 
 print("\nDone!")
