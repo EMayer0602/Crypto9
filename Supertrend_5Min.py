@@ -3513,11 +3513,11 @@ def _collect_best_phase_trades():
 	return all_trades
 
 
-def _generate_phase_dashboard(all_trades, dashboard_start="2025-12-01", stake_divisor=None, use_precomputed=False):
+def _generate_phase_dashboard(all_trades, dashboard_start="2025-12-01", summary_start="2024-01-31", stake_divisor=None, use_precomputed=False):
 	"""
 	Generate dashboard_ph1.html and trading_summary_ph1.html from phase-tagged trades.
-	Applies compound growth (stake = capital / stake_divisor).
-	Same format as TestnetDashboard / write_summary_html.
+	dashboard_ph1.html shows trades ab dashboard_start (recent).
+	trading_summary_ph1.html shows trades ab summary_start (all).
 
 	If use_precomputed=True, expects trades already have: pnl, stake, fees, pnl_pct, equity_after.
 	"""
@@ -3541,10 +3541,8 @@ def _generate_phase_dashboard(all_trades, dashboard_start="2025-12-01", stake_di
 		return fmt_de(val)
 
 	if use_precomputed:
-		# Use pre-calculated PnL values (e.g. from backtest per-symbol compounding)
 		processed = all_trades
 	else:
-		# Apply compound growth to ALL trades (from beginning for correct equity)
 		capital = START_EQUITY
 		processed = []
 		for t in all_trades:
@@ -3566,25 +3564,6 @@ def _generate_phase_dashboard(all_trades, dashboard_start="2025-12-01", stake_di
 			t["equity_after"] = capital
 			processed.append(t)
 
-	# Filter for dashboard display (from dashboard_start)
-	display_trades = [t for t in processed if t["entry_time"][:10] >= dashboard_start]
-
-	# Stats
-	total_trades = len(display_trades)
-	winners = sum(1 for t in display_trades if t["pnl"] > 0)
-	losers = sum(1 for t in display_trades if t["pnl"] <= 0)
-	win_rate = (winners / total_trades * 100) if total_trades else 0
-	total_pnl = sum(t["pnl"] for t in display_trades)
-	final_capital = display_trades[-1]["equity_after"] if display_trades else capital
-	start_capital_at_dashboard = display_trades[0]["equity_after"] - display_trades[0]["pnl"] if display_trades else START_EQUITY
-
-	# Open positions = trades with reason "Final bar" (still open at backtest end)
-	open_trades = [t for t in display_trades if t["reason"] == "Final bar"]
-	closed_trades = [t for t in display_trades if t["reason"] != "Final bar"]
-	open_pnl = sum(t["pnl"] for t in open_trades)
-	closed_pnl = sum(t["pnl"] for t in closed_trades)
-
-	# Build trades table rows
 	def trade_row(t, show_exit=True):
 		pnl_class = "pos" if t["pnl"] >= 0 else "neg"
 		pnl_pct_str = f"{'+' if t['pnl_pct'] >= 0 else ''}{t['pnl_pct']*100:.2f}%"
@@ -3613,16 +3592,30 @@ def _generate_phase_dashboard(all_trades, dashboard_start="2025-12-01", stake_di
 			cols.append(f'<td>Open</td>')
 		return "<tr>" + "".join(cols) + "</tr>"
 
-	open_rows = "\n".join(trade_row(t, show_exit=False) for t in open_trades) if open_trades else '<tr><td colspan="11" style="text-align:center;color:#888">Keine offenen Positionen</td></tr>'
-	closed_rows = "\n".join(trade_row(t, show_exit=True) for t in reversed(closed_trades)) if closed_trades else '<tr><td colspan="12" style="text-align:center;color:#888">Keine Trades</td></tr>'
+	def _build_html(trades_filtered, title, date_label, auto_refresh=False):
+		total_trades = len(trades_filtered)
+		winners = sum(1 for t in trades_filtered if t["pnl"] > 0)
+		win_rate = (winners / total_trades * 100) if total_trades else 0
+		total_pnl = sum(t["pnl"] for t in trades_filtered)
+		final_cap = trades_filtered[-1]["equity_after"] if trades_filtered else START_EQUITY
+		start_cap = trades_filtered[0]["equity_after"] - trades_filtered[0]["pnl"] if trades_filtered else START_EQUITY
 
-	cap_color = "#27ae60" if final_capital >= START_EQUITY else "#e74c3c"
-	pnl_color = "#27ae60" if total_pnl >= 0 else "#e74c3c"
-	open_pnl_color = "#27ae60" if open_pnl >= 0 else "#e74c3c"
+		open_t = [t for t in trades_filtered if t["reason"] == "Final bar"]
+		closed_t = [t for t in trades_filtered if t["reason"] != "Final bar"]
+		open_pnl = sum(t["pnl"] for t in open_t)
+		closed_pnl = sum(t["pnl"] for t in closed_t)
 
-	html = f"""<!DOCTYPE html>
-<html><head><meta charset="utf-8"><meta http-equiv="refresh" content="60">
-<title>Phase-Based Dashboard (ab {dashboard_start})</title>
+		open_rows = "\n".join(trade_row(t, show_exit=False) for t in open_t) if open_t else '<tr><td colspan="11" style="text-align:center;color:#888">Keine offenen Positionen</td></tr>'
+		closed_rows = "\n".join(trade_row(t, show_exit=True) for t in reversed(closed_t)) if closed_t else '<tr><td colspan="12" style="text-align:center;color:#888">Keine Trades</td></tr>'
+
+		cap_color = "#27ae60" if final_cap >= START_EQUITY else "#e74c3c"
+		pnl_color = "#27ae60" if total_pnl >= 0 else "#e74c3c"
+		open_pnl_color = "#27ae60" if open_pnl >= 0 else "#e74c3c"
+		refresh_tag = '<meta http-equiv="refresh" content="60">' if auto_refresh else ''
+
+		return f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8">{refresh_tag}
+<title>{title} (ab {date_label})</title>
 <style>
 body {{ font-family: Arial, sans-serif; margin: 20px; background: #1a1a2e; color: #e0e0e0; }}
 h1 {{ color: #00d2ff; margin-bottom: 5px; }}
@@ -3640,15 +3633,15 @@ tr:hover {{ background: #16213e; }}
 .neg {{ color: #e74c3c; }}
 </style>
 </head><body>
-<h1>Phase-Based Strategy Dashboard</h1>
-<p class="sub">Ab {dashboard_start} | Stand: {now} | Compound Growth (stake = equity/{max_positions})</p>
+<h1>{title}</h1>
+<p class="sub">Ab {date_label} | Stand: {now} | Compound Growth (stake = equity/{max_positions})</p>
 
 <div class="cards">
-<div class="card"><div class="label">Start Kapital</div><div class="value">{fmt_de(start_capital_at_dashboard)} USDT</div></div>
-<div class="card"><div class="label">Final Kapital</div><div class="value" style="color:{cap_color}">{fmt_de(final_capital)} USDT</div></div>
-<div class="card"><div class="label">Closed Trades</div><div class="value">{len(closed_trades)}</div></div>
+<div class="card"><div class="label">Start Kapital</div><div class="value">{fmt_de(start_cap)} USDT</div></div>
+<div class="card"><div class="label">Final Kapital</div><div class="value" style="color:{cap_color}">{fmt_de(final_cap)} USDT</div></div>
+<div class="card"><div class="label">Closed Trades</div><div class="value">{len(closed_t)}</div></div>
 <div class="card"><div class="label">Realized PnL</div><div class="value" style="color:{pnl_color}">{fmt_de(closed_pnl)} USDT</div></div>
-<div class="card"><div class="label">Open Positionen</div><div class="value">{len(open_trades)}</div></div>
+<div class="card"><div class="label">Open Positionen</div><div class="value">{len(open_t)}</div></div>
 <div class="card"><div class="label">Open PnL</div><div class="value" style="color:{open_pnl_color}">{fmt_de(open_pnl)} USDT</div></div>
 <div class="card"><div class="label">Win Rate</div><div class="value">{win_rate:.1f}%</div></div>
 </div>
@@ -3659,7 +3652,7 @@ tr:hover {{ background: #16213e; }}
 {open_rows}
 </table>
 
-<h2>Closed Trades ({len(closed_trades)})</h2>
+<h2>Closed Trades ({len(closed_t)})</h2>
 <table>
 <tr><th>Symbol</th><th>Phase</th><th>Indikator</th><th>HTF</th><th>Entry</th><th>Entry Preis</th><th>Exit</th><th>Exit Preis</th><th>Stake</th><th>PnL</th><th>PnL%</th><th>Reason</th></tr>
 {closed_rows}
@@ -3667,19 +3660,21 @@ tr:hover {{ background: #16213e; }}
 
 </body></html>"""
 
-	# Write dashboard_ph1.html
+	# Dashboard: recent trades (ab dashboard_start), auto-refresh
+	dash_trades = [t for t in processed if t["entry_time"][:10] >= dashboard_start]
+	dash_html = _build_html(dash_trades, "Phase-Based Strategy Dashboard", dashboard_start, auto_refresh=True)
 	dash_path = os.path.join(BASE_OUT_DIR, "dashboard_ph1.html")
 	with open(dash_path, "w", encoding="utf-8") as f:
-		f.write(html)
-	print(f"[Phase Dashboard] {dash_path} ({len(display_trades)} trades ab {dashboard_start})")
+		f.write(dash_html)
+	print(f"[Phase Dashboard] {dash_path} ({len(dash_trades)} trades ab {dashboard_start})")
 
-	# Also write trading_summary_ph1.html (same content, different title)
-	summary_html = html.replace("Phase-Based Strategy Dashboard", "Phase-Based Trading Summary")
-	summary_html = summary_html.replace('<meta http-equiv="refresh" content="60">', '')
+	# Trading Summary: all trades (ab summary_start), no auto-refresh
+	summ_trades = [t for t in processed if t["entry_time"][:10] >= summary_start]
+	summ_html = _build_html(summ_trades, "Phase-Based Trading Summary", summary_start, auto_refresh=False)
 	summary_path = os.path.join(BASE_OUT_DIR, "trading_summary_ph1.html")
 	with open(summary_path, "w", encoding="utf-8") as f:
-		f.write(summary_html)
-	print(f"[Phase Summary] {summary_path}")
+		f.write(summ_html)
+	print(f"[Phase Summary] {summary_path} ({len(summ_trades)} trades ab {summary_start})")
 
 
 def _write_phase_sweep_html(df_out):
