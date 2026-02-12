@@ -378,6 +378,10 @@ def generate_dashboard(start_date: str = None, output_dir: Path = None, german: 
     recalculated_trades.sort(key=get_entry_time, reverse=True)
     recalculated_open.sort(key=get_entry_time, reverse=True)
 
+    # Limit open positions to MAX_POSITIONS (newest first)
+    if len(recalculated_open) > MAX_POSITIONS:
+        recalculated_open = recalculated_open[:MAX_POSITIONS]
+
     # Separate long and short trades
     long_trades = [t for t in recalculated_trades if t.get("direction", "").lower() == "long"]
     short_trades = [t for t in recalculated_trades if t.get("direction", "").lower() == "short"]

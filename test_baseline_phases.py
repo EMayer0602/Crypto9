@@ -101,15 +101,34 @@ for p in raw_open:
 print(f"Long trades: {len(trades_list)} closed + {len(open_list)} open")
 
 # ── 2. BUILD PHASE LABELS PER SYMBOL/INDICATOR ──
+# Normalize indicator names to match INDICATOR_PRESETS keys
+INDICATOR_NAME_MAP = {
+    "supertrend": "supertrend",
+    "htf_crossover": "htf_crossover",
+    "htf crossover": "htf_crossover",
+    "jma": "jma",
+    "jurik moving average": "jma",
+    "kama": "kama",
+    "kaufman ama": "kama",
+    "psar": "psar",
+    "parabolic sar": "psar",
+}
+
+def normalize_indicator(name):
+    """Map indicator name from JSON to INDICATOR_PRESETS key."""
+    return INDICATOR_NAME_MAP.get(name.lower().strip(), name.lower().strip())
+
 # Group trades by (symbol, indicator) to know which combos we need
 symbol_indicator_pairs = set()
 for t in trades_list + open_list:
     symbol = t["symbol"]
-    indicator = t["indicator"]
-    if symbol and indicator:
-        symbol_indicator_pairs.add((symbol, indicator))
+    ind_key = normalize_indicator(t["indicator"])
+    t["indicator_key"] = ind_key  # normalize early
+    if symbol and ind_key:
+        symbol_indicator_pairs.add((symbol, ind_key))
 
-print(f"\nBuilding phase labels for {len(symbol_indicator_pairs)} symbol/indicator pairs...")
+print(f"\nFound indicators: {sorted(set(k for _, k in symbol_indicator_pairs))}")
+print(f"Building phase labels for {len(symbol_indicator_pairs)} symbol/indicator pairs...")
 
 # Populate cache once
 symbols_needed = list(set(s for s, _ in symbol_indicator_pairs))
@@ -141,7 +160,7 @@ for symbol, indicator in sorted(symbol_indicator_pairs):
 # ── 3. TAG TRADES WITH PHASES ──
 def get_phase(trade):
     """Look up phase for a trade's entry time."""
-    key = (trade["symbol"], trade["indicator"])
+    key = (trade["symbol"], trade["indicator_key"])
     phases = phase_cache.get(key)
     if phases is None or phases.empty:
         return "Flat"
@@ -160,8 +179,7 @@ def get_phase(trade):
 all_trades = []
 for t in trades_list + open_list:
     t["phase"] = get_phase(t)
-    # Normalize indicator key (lowercase)
-    t["indicator_key"] = t["indicator"].lower().replace(" ", "_")
+    # indicator_key already set at line 126 via normalize_indicator()
     all_trades.append(t)
 
 # Sort chronologically
