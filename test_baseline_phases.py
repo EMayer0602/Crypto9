@@ -108,6 +108,13 @@ for p in params_list:
             idx = phase_labels.index.get_indexer([entry_time], method="ffill")[0]
             trade_phase = phase_labels.iloc[idx] if idx >= 0 else "Flat"
 
+        ep = float(trade["Entry"])
+        xp = float(trade["ExitPreis"])
+        if direction == "long":
+            pnl_pct = (xp - ep) / ep if ep else 0
+        else:
+            pnl_pct = (ep - xp) / ep if ep else 0
+
         all_trades.append({
             "symbol": symbol,
             "indicator": st.INDICATOR_DISPLAY_NAME,
@@ -117,9 +124,15 @@ for p in params_list:
             "phase": trade_phase,
             "entry_time": str(entry_time),
             "exit_time": str(trade["ExitZeit"]),
-            "entry_price": float(trade["Entry"]),
-            "exit_price": float(trade["ExitPreis"]),
+            "entry_price": ep,
+            "exit_price": xp,
             "reason": str(trade.get("ExitReason", "")),
+            # Use INTERNAL values from backtest (per-symbol compounding)
+            "stake": float(trade["Stake"]),
+            "pnl": float(trade["PnL (USD)"]),
+            "pnl_pct": pnl_pct,
+            "fees": float(trade["Fees"]),
+            "equity_after": 0,  # recomputed below as running sum
         })
 
 all_trades.sort(key=lambda t: t["entry_time"])
@@ -130,21 +143,16 @@ trades_by_indicator = defaultdict(list)
 for t in all_trades:
     trades_by_indicator[t["indicator_key"]].append(t)
 
-# Process each indicator separately with its own compound growth
+# Process each indicator separately – use INTERNAL PnL values from backtest
 for ind_key, ind_trades in trades_by_indicator.items():
     ind_trades.sort(key=lambda t: t["entry_time"])
-    capital = st.START_EQUITY
+
+    # Recompute running equity as START_EQUITY + cumsum of per-symbol PnLs
+    # (per-trade PnL is already correct from backtest's per-symbol compounding)
+    running_eq = st.START_EQUITY
     for t in ind_trades:
-        stake = capital / st.STAKE_DIVISOR  # equity/14, same as backtest_supertrend
-        ep, xp = t["entry_price"], t["exit_price"]
-        pnl_pct = (xp - ep) / ep if t["direction"] == "long" else (ep - xp) / ep
-        pnl_net = pnl_pct * stake - stake * st.FEE_RATE * 2.0
-        capital += pnl_net
-        t["stake"] = stake
-        t["pnl"] = pnl_net
-        t["pnl_pct"] = pnl_pct
-        t["fees"] = stake * st.FEE_RATE * 2.0
-        t["equity_after"] = capital
+        running_eq += t["pnl"]
+        t["equity_after"] = running_eq
 
     total_pnl = sum(t["pnl"] for t in ind_trades)
     winners = sum(1 for t in ind_trades if t["pnl"] > 0)
@@ -153,7 +161,7 @@ for ind_key, ind_trades in trades_by_indicator.items():
 
     print(f"\n{'='*60}")
     print(f"{ind_display}: {total} trades | PnL: {total_pnl:+,.2f} | WR: {winners/total*100:.1f}%")
-    print(f"Start: {st.START_EQUITY:,.2f} → Final: {capital:,.2f}")
+    print(f"Start: {st.START_EQUITY:,.2f} → Final: {running_eq:,.2f}")
 
     for phase in ["Up", "Down", "Flat"]:
         pt = [t for t in ind_trades if t["phase"] == phase]
@@ -162,8 +170,9 @@ for ind_key, ind_trades in trades_by_indicator.items():
             pw = sum(1 for t in pt if t["pnl"] > 0)
             print(f"  {phase:5s}: {len(pt):4d}t  PnL={pp:+10,.2f}  WR={pw/len(pt)*100:.1f}%")
 
-    # Generate separate HTML per indicator
-    st._generate_phase_dashboard(ind_trades, dashboard_start="2024-01-31", stake_divisor=st.STAKE_DIVISOR)
+    # Generate separate HTML per indicator – use precomputed PnL (identical to classic)
+    st._generate_phase_dashboard(ind_trades, dashboard_start="2024-01-31",
+                                  stake_divisor=st.STAKE_DIVISOR, use_precomputed=True)
 
     # Rename to indicator-specific filenames
     base = st.BASE_OUT_DIR
@@ -179,26 +188,21 @@ for ind_key, ind_trades in trades_by_indicator.items():
             os.rename(src_path, dst_path)
             print(f"  Generated: {dst}")
 
-# Also generate combined report (all indicators)
+# Also generate combined report (all indicators) – use internal PnL values
 print(f"\n{'='*60}")
 print(f"COMBINED (all indicators)")
-capital = st.START_EQUITY
+
+# Recompute running equity for combined view
+running_eq = st.START_EQUITY
 for t in all_trades:
-    stake = capital / st.STAKE_DIVISOR  # equity/14, same as backtest_supertrend
-    ep, xp = t["entry_price"], t["exit_price"]
-    pnl_pct = (xp - ep) / ep if t["direction"] == "long" else (ep - xp) / ep
-    pnl_net = pnl_pct * stake - stake * st.FEE_RATE * 2.0
-    capital += pnl_net
-    t["stake"] = stake
-    t["pnl"] = pnl_net
-    t["pnl_pct"] = pnl_pct
-    t["fees"] = stake * st.FEE_RATE * 2.0
-    t["equity_after"] = capital
+    running_eq += t["pnl"]
+    t["equity_after"] = running_eq
 
 total_pnl = sum(t["pnl"] for t in all_trades)
 winners = sum(1 for t in all_trades if t["pnl"] > 0)
 print(f"Total: {len(all_trades)} trades | PnL: {total_pnl:+,.2f} | WR: {winners/len(all_trades)*100:.1f}%")
-print(f"Start: {st.START_EQUITY:,.2f} → Final: {capital:,.2f}")
-st._generate_phase_dashboard(all_trades, dashboard_start="2024-01-31", stake_divisor=st.STAKE_DIVISOR)
+print(f"Start: {st.START_EQUITY:,.2f} → Final: {running_eq:,.2f}")
+st._generate_phase_dashboard(all_trades, dashboard_start="2024-01-31",
+                              stake_divisor=st.STAKE_DIVISOR, use_precomputed=True)
 
 print("\nDone!")

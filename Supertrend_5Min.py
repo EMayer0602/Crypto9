@@ -3513,11 +3513,13 @@ def _collect_best_phase_trades():
 	return all_trades
 
 
-def _generate_phase_dashboard(all_trades, dashboard_start="2025-12-01", stake_divisor=None):
+def _generate_phase_dashboard(all_trades, dashboard_start="2025-12-01", stake_divisor=None, use_precomputed=False):
 	"""
 	Generate dashboard_ph1.html and trading_summary_ph1.html from phase-tagged trades.
 	Applies compound growth (stake = capital / stake_divisor).
 	Same format as TestnetDashboard / write_summary_html.
+
+	If use_precomputed=True, expects trades already have: pnl, stake, fees, pnl_pct, equity_after.
 	"""
 	now = datetime.now(BERLIN_TZ).strftime("%Y-%m-%d %H:%M:%S %Z")
 	phase_colors = {"Up": "#27ae60", "Down": "#e74c3c", "Flat": "#f39c12"}
@@ -3538,27 +3540,31 @@ def _generate_phase_dashboard(all_trades, dashboard_start="2025-12-01", stake_di
 			return f"{val:.4f}"
 		return fmt_de(val)
 
-	# Apply compound growth to ALL trades (from beginning for correct equity)
-	capital = START_EQUITY
-	processed = []
-	for t in all_trades:
-		stake = capital / max_positions
-		ep = t["entry_price"]
-		xp = t["exit_price"]
-		if t["direction"] == "long":
-			pnl_pct = (xp - ep) / ep if ep else 0
-		else:
-			pnl_pct = (ep - xp) / ep if ep else 0
-		pnl_gross = pnl_pct * stake
-		fees = stake * FEE_RATE * 2.0
-		pnl_net = pnl_gross - fees
-		capital += pnl_net
-		t["stake"] = stake
-		t["pnl"] = pnl_net
-		t["pnl_pct"] = pnl_pct
-		t["fees"] = fees
-		t["equity_after"] = capital
-		processed.append(t)
+	if use_precomputed:
+		# Use pre-calculated PnL values (e.g. from backtest per-symbol compounding)
+		processed = all_trades
+	else:
+		# Apply compound growth to ALL trades (from beginning for correct equity)
+		capital = START_EQUITY
+		processed = []
+		for t in all_trades:
+			stake = capital / max_positions
+			ep = t["entry_price"]
+			xp = t["exit_price"]
+			if t["direction"] == "long":
+				pnl_pct = (xp - ep) / ep if ep else 0
+			else:
+				pnl_pct = (ep - xp) / ep if ep else 0
+			pnl_gross = pnl_pct * stake
+			fees = stake * FEE_RATE * 2.0
+			pnl_net = pnl_gross - fees
+			capital += pnl_net
+			t["stake"] = stake
+			t["pnl"] = pnl_net
+			t["pnl_pct"] = pnl_pct
+			t["fees"] = fees
+			t["equity_after"] = capital
+			processed.append(t)
 
 	# Filter for dashboard display (from dashboard_start)
 	display_trades = [t for t in processed if t["entry_time"][:10] >= dashboard_start]
