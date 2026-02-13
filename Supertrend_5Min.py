@@ -79,6 +79,7 @@ SYMBOLS = [
 	"ICP/USDC",
 	"BNB/USDC",
 	"LUNC/USDT",  # nur USDT verfügbar
+	"TAO/USDC",
 ]
 
 # Testnet symbols - use USDC where available, USDT otherwise
@@ -95,6 +96,7 @@ TESTNET_SYMBOLS = [
 	"ICP/USDT",
 	"BNB/USDT",
 	"LUNC/USDT",
+	"TAO/USDT",
 ]
 
 # Map testnet symbols to production USDC equivalents for parameter lookup
@@ -111,6 +113,7 @@ TESTNET_TO_USDC_MAP = {
 	"ICP/USDT": "ICP/USDC",
 	"BNB/USDT": "BNB/USDC",
 	"LUNC/USDT": "LUNC/USDT",
+	"TAO/USDT": "TAO/USDC",
 }
 
 
