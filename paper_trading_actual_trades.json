@@ -36,21 +36,21 @@
     "status":"Gewinn"
   },
   {
-    "symbol":"TAO\/USDC",
+    "symbol":"LINK\/USDC",
     "direction":"long",
     "indicator":"jma",
     "htf":"12h",
-    "entry_time":"2026-02-13T08:00:00+01:00",
-    "entry_price":154.2,
-    "stake":1650.0,
-    "param_a":20.0,
-    "param_b":0.0,
+    "entry_time":"2026-02-13T07:00:00+01:00",
+    "entry_price":8.38,
+    "stake":20181.5193855256,
+    "param_a":50.0,
+    "param_b":-50.0,
     "atr_mult":null,
     "min_hold_bars":0,
-    "last_price":157.0,
-    "bars_held":2,
-    "unrealized_pct":1.8158236057,
-    "unrealized_pnl":29.9610894942,
+    "last_price":8.46,
+    "bars_held":3,
+    "unrealized_pct":0.9546539379,
+    "unrealized_pnl":192.6636695516,
     "status":"Gewinn"
   },
   {
@@ -88,6 +88,24 @@
     "unrealized_pct":-0.8408234271,
     "unrealized_pnl":-27.2968920887,
     "status":"Verlust"
+  },
+  {
+    "symbol":"ADA\/USDC",
+    "direction":"long",
+    "indicator":"jma",
+    "htf":"12h",
+    "entry_time":"2026-02-12T06:00:00+01:00",
+    "entry_price":0.2593,
+    "stake":27355.7268825012,
+    "param_a":20.0,
+    "param_b":-50.0,
+    "atr_mult":null,
+    "min_hold_bars":0,
+    "last_price":0.263,
+    "bars_held":28,
+    "unrealized_pct":1.4269186271,
+    "unrealized_pnl":390.3439624576,
+    "status":"Gewinn"
   },
   {
     "symbol":"ICP\/USDC",
@@ -160,5 +178,23 @@
     "unrealized_pct":-3.5662087109,
     "unrealized_pnl":-610.8998215097,
     "status":"Verlust"
+  },
+  {
+    "symbol":"TAO\/USDC",
+    "direction":"long",
+    "indicator":"jma",
+    "htf":"12h",
+    "entry_time":"2026-02-13T08:00:00+01:00",
+    "entry_price":154.2,
+    "stake":1650.0,
+    "param_a":20.0,
+    "param_b":0.0,
+    "atr_mult":null,
+    "min_hold_bars":0,
+    "last_price":157.0,
+    "bars_held":2,
+    "unrealized_pct":1.8158236057,
+    "unrealized_pnl":29.9610894942,
+    "status":"Gewinn"
   }
 ]
