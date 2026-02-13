@@ -1,31 +1,20 @@
 #!/usr/bin/env python3
 """
-Phase Baseline: Read params from best_params_overall.csv, run backtests
-with EXACT per-indicator per-symbol params, classify with 4 phase methods.
+Phase Baseline: Run paper_trader simulation per indicator, tag with 4 phase classifiers.
 
-CSV has 208 rows (13 symbols × 4 indicators × 4 phase classifiers).
-Each row contains per-symbol optimized params + PhaseClassifier column.
-
-Architecture:
-1. Read params from CSV (per indicator, per symbol: ParamA, ParamB, ATR, MinHold, HTF)
-2. For each trading indicator (supertrend, htf_crossover, jma, kama):
-   Run backtests with exact per-symbol params
-3. Tag same trades with 4 phase classifiers
-4. Generate output sets
+Uses paper_trader.run_simulation() directly to get IDENTICAL trades as the BCK.
+Then tags each trade with 4 different phase classifiers.
 
 Generates per (trading indicator, phase classifier):
   - trading_summary_ph1_{indicator}_{classifier}.json
   - dashboard_ph1_{indicator}_{classifier}.html
   - trading_summary_ph1_{indicator}_{classifier}.html
 
-Compound growth: Summary AND Dashboard both start independently at 16500.
-
 Usage:
     python test_baseline_phases.py
     python test_baseline_phases.py --start 2025-12-01 --summary-start 2024-12-01
 """
 import argparse
-import csv
 import json
 import os
 from collections import Counter
@@ -33,18 +22,19 @@ from collections import Counter
 import pandas as pd
 
 import Supertrend_5Min as st
+import paper_trader as pt
 
 # ── CONFIG ──
 START_CAPITAL = 16500.0
 MAX_POSITIONS = 8
-PARAMS_CSV = os.path.join("report_html", "best_params_overall.csv")
+STAKE_DIVISOR = 10
 
 # Phase classification: FIXED params (independent of trading params)
 PHASE_HTF_LENGTH = 10
 PHASE_HTF_FACTOR = 3.0
 PHASE_HTF = "6h"
 
-TRADING_INDICATORS = ["supertrend", "htf_crossover", "jma", "kama"]
+TRADING_INDICATORS = ["jma"]  # TODO: add supertrend, htf_crossover, kama after sweep
 
 INDICATOR_DISPLAY = {
     "supertrend": "Supertrend",
@@ -59,40 +49,6 @@ CLASSIFIER_DISPLAY = {
     "jma": "JMA-Phasen",
     "kama": "KAMA-Phasen",
 }
-
-
-def parse_german_float(s):
-    """Parse German number format: '3,0' -> 3.0"""
-    if not s or s == "None" or s == "nan":
-        return None
-    return float(s.replace(",", "."))
-
-
-def read_params_csv(csv_path):
-    """Read best_params_overall.csv, return dict keyed by (symbol, indicator, classifier)."""
-    params = {}
-    with open(csv_path, "r", encoding="utf-8") as f:
-        reader = csv.DictReader(f, delimiter=";")
-        for row in reader:
-            symbol = row["Symbol"]
-            indicator = row["Indicator"]
-            classifier = row["PhaseClassifier"]
-
-            param_a = parse_german_float(row["ParamA"])
-            param_b = parse_german_float(row["ParamB"])
-            atr_str = row.get("ATRStopMult", "None")
-            atr_stop = None if atr_str in ("None", "", "nan") else parse_german_float(atr_str)
-            min_hold = int(row.get("MinHoldBars", "0") or "0")
-            htf = row.get("HTF", "6h")
-
-            params[(symbol, indicator, classifier)] = {
-                "param_a": param_a,
-                "param_b": param_b,
-                "atr_stop": atr_stop,
-                "min_hold": min_hold,
-                "htf": htf,
-            }
-    return params
 
 
 def get_phase_at_entry(phases, entry_ts):
@@ -110,51 +66,51 @@ def get_phase_at_entry(phases, entry_ts):
     return "Flat"
 
 
+def trades_to_dicts(trade_results):
+    """Convert paper_trader TradeResult objects to plain dicts."""
+    trades = []
+    for t in trade_results:
+        trades.append({
+            "symbol": t.symbol,
+            "direction": t.direction,
+            "indicator": INDICATOR_DISPLAY.get(t.indicator, t.indicator),
+            "htf": t.htf,
+            "entry_time": str(t.entry_time),
+            "exit_time": str(t.exit_time),
+            "entry_price": float(t.entry_price),
+            "exit_price": float(t.exit_price),
+            "reason": t.reason,
+        })
+    return trades
+
+
 def main():
-    parser = argparse.ArgumentParser(description="Phase baseline from CSV params")
+    parser = argparse.ArgumentParser(description="Phase baseline using paper_trader simulation")
     parser.add_argument("--start", type=str, default="2025-12-01",
                         help="Dashboard start date (default: 2025-12-01)")
     parser.add_argument("--summary-start", type=str, default="2024-12-01",
                         help="Trading summary start date (default: 2024-12-01)")
+    parser.add_argument("--sim-start", type=str, default="2024-01-31",
+                        help="Simulation start date (default: 2024-01-31)")
     args = parser.parse_args()
 
     dashboard_start = args.start
     summary_start = args.summary_start
+    sim_start = pd.Timestamp(args.sim_start, tz=st.BERLIN_TZ)
+    sim_end = pd.Timestamp.now(tz=st.BERLIN_TZ)
 
-    # ── Read CSV params ──
-    if not os.path.exists(PARAMS_CSV):
-        print(f"ERROR: {PARAMS_CSV} not found!")
-        return
-    csv_params = read_params_csv(PARAMS_CSV)
-    symbols_in_csv = sorted(set(s for s, _, _ in csv_params.keys()))
-    classifiers_in_csv = sorted(set(c for _, _, c in csv_params.keys()))
+    symbols = st.SYMBOLS
 
-    print(f"=== Phase Baseline (from {PARAMS_CSV}) ===")
-    print(f"Symbols: {len(symbols_in_csv)} | Indicators: {TRADING_INDICATORS}")
-    print(f"Phase classifiers: {classifiers_in_csv}")
-    print(f"Capital: {START_CAPITAL:,.0f} | Max Positions: {MAX_POSITIONS}")
-    print(f"Phase classification: L={PHASE_HTF_LENGTH}, F={PHASE_HTF_FACTOR}")
+    print(f"=== Phase Baseline (via paper_trader.run_simulation) ===")
+    print(f"Indicators: {TRADING_INDICATORS}")
+    print(f"Capital: {START_CAPITAL:,.0f} | Max Positions: {MAX_POSITIONS} | Stake Divisor: {STAKE_DIVISOR}")
+    print(f"Simulation: {args.sim_start} to now")
     print(f"Dashboard ab {dashboard_start} | Summary ab {summary_start}")
-
-    symbols = symbols_in_csv
-
-    # Populate OHLCV cache once
-    st.ensure_cache_populated(symbols, st.TIMEFRAME, st.LOOKBACK)
 
     # Save original globals
     orig_htf_length = st.HTF_LENGTH
     orig_htf_factor = st.HTF_FACTOR
 
-    # IMPORTANT: Keep ALL defaults exactly as the sweep uses them:
-    # - BACKTEST_START_DATE = "2025-01-01" (default, not overridden)
-    # - USE_TRAILING_STOP = True (default)
-    # - USE_PROFIT_TARGET = True (default)
-    # - USE_MA_SLOPE_FILTER = True (default)
-    # - USE_DIVERGENCE_FILTER = True (default)
-
-    # ══════════════════════════════════════════════════════════════
-    # For each trading indicator: backtest, then tag with 4 classifiers
-    # ══════════════════════════════════════════════════════════════
     for indicator in TRADING_INDICATORS:
         ind_display = INDICATOR_DISPLAY[indicator]
 
@@ -162,104 +118,42 @@ def main():
         print(f"Trading indicator: {ind_display}")
         print(f"{'='*60}")
 
-        # ── Step 1: Backtest per symbol with exact CSV params ──
-        st.apply_indicator_type(indicator)
+        # ── Step 1: Run simulation with this indicator only ──
+        trade_results, sim_state = pt.run_simulation(
+            start_ts=sim_start,
+            end_ts=sim_end,
+            use_saved_state=False,
+            allowed_indicators=[indicator],
+            use_testnet=False,
+            reset_state=True,
+        )
 
-        raw_trades = []
+        accepted_trades = trades_to_dicts(trade_results)
+        accepted_trades.sort(key=lambda t: t["entry_time"])
 
-        for symbol in symbols:
-            sym_short = symbol.replace("/USDC", "").replace("/USDT", "")
+        closed = [t for t in accepted_trades if t.get("reason") != "Final bar"]
+        opened = [t for t in accepted_trades if t.get("reason") == "Final bar"]
+        sym_counts = Counter(t["symbol"] for t in accepted_trades)
 
-            # Get params (use first classifier since trading params are same)
-            p = csv_params.get((symbol, indicator, classifiers_in_csv[0]), None)
-            if p is None:
-                print(f"  {sym_short}: no params in CSV, skipping")
-                continue
-
-            param_a = p["param_a"]
-            param_b = p["param_b"]
-            atr_stop = p["atr_stop"]
-            min_hold = p["min_hold"]  # from CSV (12 or 24)
-            htf = p["htf"]
-
-            # Set HTF for this symbol's backtest
-            st.apply_higher_timeframe(htf)
-            # HTF_LENGTH/HTF_FACTOR: use defaults (20/3.0)
-            # For JMA/KAMA: ignored (uses HTF_JMA_LENGTH=30 / HTF_KAMA_LENGTH=20)
-            # For supertrend/htf_crossover: defaults match sweep middle value
-            st.HTF_LENGTH = orig_htf_length
-            st.HTF_FACTOR = orig_htf_factor
-            st.clear_data_cache()
-
-            df = st.prepare_symbol_dataframe(symbol)
-            if df.empty:
-                print(f"  {sym_short}: NO DATA")
-                continue
-
-            df_ind = st.compute_indicator(df, param_a, param_b)
-
-            # Route to correct backtest function
-            # MaxHoldBars=0: no time-based exit (matches sweep CSV which has no MaxHoldBars column)
-            if indicator == "htf_crossover":
-                trades_df = st.backtest_htf_crossover(
-                    df_ind, atr_stop_mult=atr_stop, direction="long",
-                    min_hold_bars=min_hold, max_hold_bars=0,
-                )
-            else:
-                trades_df = st.backtest_supertrend(
-                    df_ind, atr_stop_mult=atr_stop, direction="long",
-                    min_hold_bars=min_hold, max_hold_bars=0,
-                )
-
-            if trades_df.empty:
-                print(f"  {sym_short}: 0 trades")
-                continue
-
-            count = 0
-            for _, row in trades_df.iterrows():
-                raw_trades.append({
-                    "symbol": symbol,
-                    "direction": "long",
-                    "indicator": ind_display,
-                    "htf": htf,
-                    "entry_time": str(row["Zeit"]),
-                    "exit_time": str(row["ExitZeit"]),
-                    "entry_price": float(row["Entry"]),
-                    "exit_price": float(row["ExitPreis"]),
-                    "reason": row["ExitReason"],
-                })
-                count += 1
-
-            atr_label = f"ATR={atr_stop}" if atr_stop else "ATR=None"
-            print(f"  {sym_short}: {count} trades (A={param_a}, B={param_b}, {atr_label}, MinHold={min_hold}, HTF={htf})")
-
-        raw_trades.sort(key=lambda t: t["entry_time"])
-
-        closed = [t for t in raw_trades if t["reason"] != "Final bar"]
-        opened = [t for t in raw_trades if t["reason"] == "Final bar"]
-        print(f"\n  {ind_display} total: {len(closed)} closed + {len(opened)} open = {len(raw_trades)}")
-
-        # Compound check
+        # Compound growth
         capital = START_CAPITAL
-        for t in raw_trades:
-            stake = capital / MAX_POSITIONS
+        for t in accepted_trades:
+            stake = capital / STAKE_DIVISOR
             ep, xp = t["entry_price"], t["exit_price"]
             pnl_pct = (xp - ep) / ep if ep else 0
-            pnl_net = pnl_pct * stake - stake * st.FEE_RATE * 2.0
-            capital += pnl_net
-        print(f"  Compound: {START_CAPITAL:,.2f} -> {capital:,.2f} | PnL: {capital - START_CAPITAL:+,.2f}")
+            pnl = pnl_pct * stake - stake * st.FEE_RATE * 2
+            capital += pnl
 
-        # Exit reasons
-        reasons = Counter(t["reason"] for t in raw_trades)
-        print(f"  Exits: {dict(reasons.most_common(5))}")
+        print(f"  {ind_display}: {len(closed)} closed + {len(opened)} open = {len(accepted_trades)}")
+        print(f"  Compound: {START_CAPITAL:,.2f} -> {capital:,.2f} | PnL: {capital - START_CAPITAL:+,.2f}")
+        print(f"  Symbols: {len(sym_counts)} | {dict(sym_counts.most_common())}")
 
         # ── Step 2: Tag with 4 phase classifiers ──
-        for classifier in classifiers_in_csv:
-            cls_display = CLASSIFIER_DISPLAY.get(classifier, classifier)
+        for classifier in sorted(CLASSIFIER_DISPLAY.keys()):
+            cls_display = CLASSIFIER_DISPLAY[classifier]
 
             print(f"\n  Phase: {cls_display}")
 
-            # Set phase classifier
             st.apply_indicator_type(classifier)
             st.apply_higher_timeframe(PHASE_HTF)
             st.HTF_LENGTH = PHASE_HTF_LENGTH
@@ -278,7 +172,7 @@ def main():
 
             # Tag trades
             tagged_trades = []
-            for t in raw_trades:
+            for t in accepted_trades:
                 phases = phase_cache.get(t["symbol"], pd.Series(dtype=str))
                 entry_ts = pd.Timestamp(t["entry_time"])
                 phase = get_phase_at_entry(phases, entry_ts)
@@ -297,7 +191,7 @@ def main():
                 "phase_classifier_display": cls_display,
                 "start_capital": START_CAPITAL,
                 "max_positions": MAX_POSITIONS,
-                "params_csv": PARAMS_CSV,
+                "stake_divisor": STAKE_DIVISOR,
                 "trades": [],
                 "open_positions_data": [],
             }
@@ -314,7 +208,7 @@ def main():
                     "phase": t["phase"],
                     "reason": t["reason"],
                 }
-                if t["reason"] == "Final bar":
+                if t.get("reason") == "Final bar":
                     entry["last_price"] = t["exit_price"]
                     json_out["open_positions_data"].append(entry)
                 else:
@@ -333,7 +227,7 @@ def main():
                 tagged_trades,
                 dashboard_start=dashboard_start,
                 summary_start=summary_start,
-                stake_divisor=MAX_POSITIONS,
+                stake_divisor=STAKE_DIVISOR,
                 indicator_label=label,
                 output_prefix=prefix,
             )
@@ -343,7 +237,7 @@ def main():
     st.HTF_FACTOR = orig_htf_factor
 
     print(f"\n{'='*60}")
-    print(f"Done! {len(TRADING_INDICATORS)} indicators × {len(classifiers_in_csv)} classifiers = {len(TRADING_INDICATORS) * len(classifiers_in_csv)} output sets")
+    print(f"Done! {len(TRADING_INDICATORS)} indicators × 4 classifiers = {len(TRADING_INDICATORS) * 4} output sets")
 
 
 if __name__ == "__main__":
