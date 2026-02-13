@@ -60,18 +60,6 @@ CLASSIFIER_DISPLAY = {
     "kama": "KAMA-Phasen",
 }
 
-# BCK exit strategy: per-symbol MaxHoldBars (time-based exits dominant)
-# From trading_summary_bck.json analysis
-BCK_MAX_HOLD = {
-    "BTC/USDC": 5,
-    "ETH/USDC": 5,
-    "XRP/USDC": 5,
-    "TNSR/USDC": 2,
-    "ZEC/USDC": 2,
-    # All others: 4
-}
-BCK_DEFAULT_MAX_HOLD = 4
-
 
 def parse_german_float(s):
     """Parse German number format: '3,0' -> 3.0"""
@@ -154,15 +142,15 @@ def main():
     st.ensure_cache_populated(symbols, st.TIMEFRAME, st.LOOKBACK)
 
     # Save original globals
-    orig_backtest_start = st.BACKTEST_START_DATE
     orig_htf_length = st.HTF_LENGTH
     orig_htf_factor = st.HTF_FACTOR
-    orig_trailing_stop = st.USE_TRAILING_STOP
-    orig_profit_target = st.USE_PROFIT_TARGET
 
-    st.BACKTEST_START_DATE = ""
-    st.USE_TRAILING_STOP = False
-    st.USE_PROFIT_TARGET = False
+    # IMPORTANT: Keep ALL defaults exactly as the sweep uses them:
+    # - BACKTEST_START_DATE = "2025-01-01" (default, not overridden)
+    # - USE_TRAILING_STOP = True (default)
+    # - USE_PROFIT_TARGET = True (default)
+    # - USE_MA_SLOPE_FILTER = True (default)
+    # - USE_DIVERGENCE_FILTER = True (default)
 
     # ══════════════════════════════════════════════════════════════
     # For each trading indicator: backtest, then tag with 4 classifiers
@@ -191,16 +179,16 @@ def main():
             param_a = p["param_a"]
             param_b = p["param_b"]
             atr_stop = p["atr_stop"]
+            min_hold = p["min_hold"]  # from CSV (12 or 24)
             htf = p["htf"]
-
-            # BCK exit strategy: per-symbol MaxHoldBars, min_hold = max_hold
-            max_hold = BCK_MAX_HOLD.get(symbol, BCK_DEFAULT_MAX_HOLD)
-            min_hold = max_hold  # blocks trend flips until time-based exit
 
             # Set HTF for this symbol's backtest
             st.apply_higher_timeframe(htf)
-            st.HTF_LENGTH = int(param_a) if param_a else 10
-            st.HTF_FACTOR = float(param_b) if param_b else 3.0
+            # HTF_LENGTH/HTF_FACTOR: use defaults (20/3.0)
+            # For JMA/KAMA: ignored (uses HTF_JMA_LENGTH=30 / HTF_KAMA_LENGTH=20)
+            # For supertrend/htf_crossover: defaults match sweep middle value
+            st.HTF_LENGTH = orig_htf_length
+            st.HTF_FACTOR = orig_htf_factor
             st.clear_data_cache()
 
             df = st.prepare_symbol_dataframe(symbol)
@@ -211,15 +199,16 @@ def main():
             df_ind = st.compute_indicator(df, param_a, param_b)
 
             # Route to correct backtest function
+            # MaxHoldBars=0: no time-based exit (matches sweep CSV which has no MaxHoldBars column)
             if indicator == "htf_crossover":
                 trades_df = st.backtest_htf_crossover(
                     df_ind, atr_stop_mult=atr_stop, direction="long",
-                    min_hold_bars=min_hold, max_hold_bars=max_hold,
+                    min_hold_bars=min_hold, max_hold_bars=0,
                 )
             else:
                 trades_df = st.backtest_supertrend(
                     df_ind, atr_stop_mult=atr_stop, direction="long",
-                    min_hold_bars=min_hold, max_hold_bars=max_hold,
+                    min_hold_bars=min_hold, max_hold_bars=0,
                 )
 
             if trades_df.empty:
@@ -242,7 +231,7 @@ def main():
                 count += 1
 
             atr_label = f"ATR={atr_stop}" if atr_stop else "ATR=None"
-            print(f"  {sym_short}: {count} trades (A={param_a}, B={param_b}, {atr_label}, MaxHold={max_hold}, HTF={htf})")
+            print(f"  {sym_short}: {count} trades (A={param_a}, B={param_b}, {atr_label}, MinHold={min_hold}, HTF={htf})")
 
         raw_trades.sort(key=lambda t: t["entry_time"])
 
@@ -350,11 +339,8 @@ def main():
             )
 
     # Restore globals
-    st.BACKTEST_START_DATE = orig_backtest_start
     st.HTF_LENGTH = orig_htf_length
     st.HTF_FACTOR = orig_htf_factor
-    st.USE_TRAILING_STOP = orig_trailing_stop
-    st.USE_PROFIT_TARGET = orig_profit_target
 
     print(f"\n{'='*60}")
     print(f"Done! {len(TRADING_INDICATORS)} indicators × {len(classifiers_in_csv)} classifiers = {len(TRADING_INDICATORS) * len(classifiers_in_csv)} output sets")
