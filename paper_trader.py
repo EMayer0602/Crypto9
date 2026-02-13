@@ -199,6 +199,7 @@ class Position:
     param_b: float
     atr_mult: Optional[float]
     min_hold_bars: int
+    max_hold_bars: int
     entry_price: float
     entry_time: str
     entry_atr: float
@@ -216,6 +217,7 @@ class StrategyContext:
     param_b: float
     atr_mult: Optional[float]
     min_hold_bars: int
+    max_hold_bars: int = 0
 
     @property
     def key(self) -> str:
@@ -816,8 +818,8 @@ def build_strategy_context(row: pd.Series) -> StrategyContext:
     htf_value = str(row.get("HTF", st.HIGHER_TIMEFRAME) or st.HIGHER_TIMEFRAME).strip()
     param_a, param_b = normalize_params(row, indicator_key)
     atr_mult = parse_float(row.get("ATRStopMultValue", row.get("ATRStopMult")))
-    min_hold_days = int(parse_float(row.get("MinHoldDays")) or 0)
-    min_hold_bars = int(min_hold_days * st.BARS_PER_DAY)
+    min_hold_bars = int(parse_float(row.get("MinHoldBars")) or 0)
+    max_hold_bars = int(parse_float(row.get("MaxHoldBars")) or 0)
     return StrategyContext(
         symbol=symbol,
         direction=direction,
@@ -827,6 +829,7 @@ def build_strategy_context(row: pd.Series) -> StrategyContext:
         param_b=param_b,
         atr_mult=atr_mult,
         min_hold_bars=min_hold_bars,
+        max_hold_bars=max_hold_bars,
     )
 
 
@@ -1199,7 +1202,7 @@ def find_last_signal_bar(df: pd.DataFrame, direction: str, lookback_hours: float
     return ts, price, ts >= cutoff
 
 
-def evaluate_exit(position: Dict, df: pd.DataFrame, atr_mult: Optional[float], min_hold_bars: int) -> Optional[Dict]:
+def evaluate_exit(position: Dict, df: pd.DataFrame, atr_mult: Optional[float], min_hold_bars: int, max_hold_bars: int = 0) -> Optional[Dict]:
     if len(df) < 2:
         return None
     curr = df.iloc[-1]
@@ -1224,6 +1227,11 @@ def evaluate_exit(position: Dict, df: pd.DataFrame, atr_mult: Optional[float], m
         if hit_stop:
             exit_price = stop_price
             reason = f"ATR stop x{atr_mult:.2f}"
+
+    # MaxHoldBars: Force-close after N bars regardless of profit/loss
+    if max_hold_bars > 0 and exit_price is None and bars_held >= max_hold_bars:
+        exit_price = float(curr["close"])
+        reason = f"Max hold exit ({bars_held}/{max_hold_bars} bars)"
 
     # Time-based exit: Exit after optimal hold time based on peak profit analysis
     # Analysis showed peak profit occurs at ~65% of trade duration on average
@@ -1315,7 +1323,7 @@ def process_snapshot(
     existing = find_position(state, context.key)
     if existing:
         prior_total = state["total_capital"]
-        exit_info = evaluate_exit(existing, df_slice, context.atr_mult, context.min_hold_bars)
+        exit_info = evaluate_exit(existing, df_slice, context.atr_mult, context.min_hold_bars, context.max_hold_bars)
         if exit_info:
             size_units = float(existing.get("size_units", 0.0))
             stake_val = float(existing.get("stake"))
@@ -1409,6 +1417,7 @@ def process_snapshot(
         param_b=context.param_b,
         atr_mult=context.atr_mult,
         min_hold_bars=context.min_hold_bars,
+        max_hold_bars=context.max_hold_bars,
         entry_price=entry_price,
         entry_time=latest_iso,
         entry_atr=float(df_slice.iloc[-1].get("atr", 0.0)),
@@ -1521,6 +1530,7 @@ def _context_from_position(pos: Dict) -> StrategyContext:
     if param_b_val is None:
         param_b_val = float(st.DEFAULT_PARAM_B)
     min_hold_bars = int(pos.get("min_hold_bars", 0) or 0)
+    max_hold_bars = int(pos.get("max_hold_bars", 0) or 0)
     return StrategyContext(
         symbol=str(pos.get("symbol", "")).strip(),
         direction=str(pos.get("direction", "long")).strip().lower() or "long",
@@ -1530,6 +1540,7 @@ def _context_from_position(pos: Dict) -> StrategyContext:
         param_b=float(param_b_val),
         atr_mult=parse_float(pos.get("atr_mult")),
         min_hold_bars=min_hold_bars,
+        max_hold_bars=max_hold_bars,
     )
 
 
@@ -2826,6 +2837,7 @@ def force_entry_position(
         param_b=context.param_b,
         atr_mult=context.atr_mult,
         min_hold_bars=context.min_hold_bars,
+        max_hold_bars=context.max_hold_bars,
         entry_price=entry_price,
         entry_time=entry_iso,
         entry_atr=entry_atr_val,
