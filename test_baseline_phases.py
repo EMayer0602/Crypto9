@@ -220,7 +220,8 @@ tr:hover {{ background: #16213e; }}
     print(f"[Phase HTML] {html_path}")
 
 
-def write_dark_dashboard_html(all_trades, date_from, title, html_path, max_positions):
+def write_dark_dashboard_html(all_trades, date_from, title, html_path, max_positions,
+                              open_positions_data=None):
     """Filter trades from date_from, apply fresh compound from 16500, write dark-blue HTML."""
     filtered = sorted(
         [t for t in all_trades if str(t.get("entry_time", ""))[:10] >= date_from],
@@ -236,18 +237,16 @@ def write_dark_dashboard_html(all_trades, date_from, title, html_path, max_posit
     winners = sum(1 for t in processed if t["pnl"] > 0)
     win_rate = (winners / n_closed * 100) if n_closed else 0
 
-    open_t = [t for t in processed if t.get("reason") == "Final bar"]
-    closed_t = [t for t in processed if t.get("reason") != "Final bar"]
-    if len(open_t) > max_positions:
-        open_t = sorted(open_t, key=lambda t: t["entry_time"], reverse=True)[:max_positions]
-    open_pnl = sum(t["pnl"] for t in open_t)
-    closed_pnl = sum(t["pnl"] for t in closed_t)
+    # Open positions from simulation state (not from closed trades)
+    open_t = open_positions_data or []
+    closed_pnl = total_pnl
+    open_pnl = sum(float(t.get("unrealized_pnl", 0) or 0) for t in open_t)
 
     cap_color = "#27ae60" if final_cap >= start_cap else "#e74c3c"
     pnl_color = "#27ae60" if closed_pnl >= 0 else "#e74c3c"
     open_pnl_color = "#27ae60" if open_pnl >= 0 else "#e74c3c"
 
-    def _trade_row(t, show_exit=True):
+    def _closed_row(t):
         pnl = t["pnl"]
         pnl_pct = t["pnl_pct"] * 100
         pnl_cls = "pos" if pnl >= 0 else "neg"
@@ -260,26 +259,43 @@ def write_dark_dashboard_html(all_trades, date_from, title, html_path, max_posit
             f'<td>{t.get("htf", "")}</td>',
             f'<td>{str(t.get("entry_time", ""))[:16]}</td>',
             f'<td style="text-align:right">{_fmt_price(t["entry_price"])}</td>',
-        ]
-        if show_exit:
-            cols.append(f'<td>{str(t.get("exit_time", ""))[:16]}</td>')
-            cols.append(f'<td style="text-align:right">{_fmt_price(t["exit_price"])}</td>')
-        else:
-            cols.append(f'<td style="text-align:right">{_fmt_price(t["exit_price"])}</td>')
-        cols += [
+            f'<td>{str(t.get("exit_time", ""))[:16]}</td>',
+            f'<td style="text-align:right">{_fmt_price(t["exit_price"])}</td>',
             f'<td style="text-align:right">{_fmt_de(t["stake"])}</td>',
             f'<td class="{pnl_cls}" style="text-align:right">{_fmt_de(pnl)}</td>',
             f'<td class="{pnl_cls}" style="text-align:right">{pnl_pct:+.2f}%</td>',
+            f'<td>{t.get("reason", "")}</td>',
         ]
-        if show_exit:
-            cols.append(f'<td>{t.get("reason", "")}</td>')
-        else:
-            cols.append('<td>Open</td>')
         return "<tr>" + "".join(cols) + "</tr>"
 
-    open_rows = "\n".join(_trade_row(t, False) for t in open_t) if open_t else \
+    def _open_row(t):
+        pnl = float(t.get("unrealized_pnl", 0) or 0)
+        pnl_pct = float(t.get("unrealized_pct", 0) or 0)
+        pnl_cls = "pos" if pnl >= 0 else "neg"
+        phase = t.get("phase", "")
+        phase_color = PHASE_COLORS.get(phase, "#888")
+        entry_p = float(t.get("entry_price", 0) or 0)
+        last_p = float(t.get("last_price", entry_p) or entry_p)
+        stake = float(t.get("stake", 0) or 0)
+        status = t.get("status", "Gewinn" if pnl >= 0 else "Verlust")
+        cols = [
+            f'<td>{t.get("symbol", "")}</td>',
+            f'<td style="color:{phase_color};font-weight:bold">{phase}</td>',
+            f'<td>{t.get("indicator", "")}</td>',
+            f'<td>{t.get("htf", "")}</td>',
+            f'<td>{str(t.get("entry_time", ""))[:16]}</td>',
+            f'<td style="text-align:right">{_fmt_price(entry_p)}</td>',
+            f'<td style="text-align:right">{_fmt_price(last_p)}</td>',
+            f'<td style="text-align:right">{_fmt_de(stake)}</td>',
+            f'<td class="{pnl_cls}" style="text-align:right">{_fmt_de(pnl)}</td>',
+            f'<td class="{pnl_cls}" style="text-align:right">{pnl_pct:+.2f}%</td>',
+            f'<td>{status}</td>',
+        ]
+        return "<tr>" + "".join(cols) + "</tr>"
+
+    open_rows = "\n".join(_open_row(t) for t in open_t) if open_t else \
         '<tr><td colspan="11" style="text-align:center;color:#888">Keine offenen Positionen</td></tr>'
-    closed_rows = "\n".join(_trade_row(t, True) for t in reversed(closed_t)) if closed_t else \
+    closed_rows = "\n".join(_closed_row(t) for t in reversed(processed)) if processed else \
         '<tr><td colspan="12" style="text-align:center;color:#888">Keine Trades</td></tr>'
 
     html = f"""<!DOCTYPE html>
@@ -308,7 +324,7 @@ tr:hover {{ background: #16213e; }}
 <div class="cards">
 <div class="card"><div class="label">Start Kapital</div><div class="value">{_fmt_de(start_cap)} USDT</div></div>
 <div class="card"><div class="label">Final Kapital</div><div class="value" style="color:{cap_color}">{_fmt_de(final_cap)} USDT</div></div>
-<div class="card"><div class="label">Closed Trades</div><div class="value">{len(closed_t)}</div></div>
+<div class="card"><div class="label">Closed Trades</div><div class="value">{n_closed}</div></div>
 <div class="card"><div class="label">Realized PnL</div><div class="value" style="color:{pnl_color}">{_fmt_de(closed_pnl)} USDT</div></div>
 <div class="card"><div class="label">Open Positionen (max {max_positions})</div><div class="value">{len(open_t)}</div></div>
 <div class="card"><div class="label">Open PnL</div><div class="value" style="color:{open_pnl_color}">{_fmt_de(open_pnl)} USDT</div></div>
@@ -321,7 +337,7 @@ tr:hover {{ background: #16213e; }}
 {open_rows}
 </table>
 
-<h2>Closed Trades ({len(closed_t)})</h2>
+<h2>Closed Trades ({n_closed})</h2>
 <table>
 <tr><th>Symbol</th><th>Phase</th><th>Indikator</th><th>HTF</th><th>Entry</th><th>Entry Preis</th><th>Exit</th><th>Exit Preis</th><th>Stake</th><th>PnL</th><th>PnL%</th><th>Reason</th></tr>
 {closed_rows}
@@ -464,10 +480,11 @@ def main():
             # Write dark-blue themed Dashboard HTML (trades ab dashboard_start, fresh compound)
             dash_title = f"Phase Dashboard — {ind_display} ({cls_display})"
             dash_path = os.path.join(st.BASE_OUT_DIR, f"dashboard_{prefix}.html")
-            # Build trade dicts with phase for dashboard (from exported trades)
             dash_trades = summary.get("trades", [])
+            open_pos_data = summary.get("open_positions_data", [])
             write_dark_dashboard_html(
                 dash_trades, dashboard_start, dash_title, dash_path, pt.MAX_OPEN_POSITIONS,
+                open_positions_data=open_pos_data,
             )
 
             print(f"    -> {json_path} ({summary['closed_trades']} closed, PnL: {summary['closed_pnl']:+,.2f})")
