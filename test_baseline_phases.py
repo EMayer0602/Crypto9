@@ -73,6 +73,30 @@ def _fmt_price(val):
     return _fmt_de(val)
 
 
+def _apply_compound(trades, max_positions):
+    """Apply compound growth from START_EQUITY, stake = capital/max_positions."""
+    capital = st.START_EQUITY
+    result = []
+    for t in trades:
+        stake = capital / max_positions
+        ep = float(t.get("entry_price", 0) or 0)
+        xp = float(t.get("exit_price", 0) or 0)
+        direction = str(t.get("direction", "long")).lower()
+        if direction == "long":
+            pnl_pct = (xp - ep) / ep if ep else 0
+        else:
+            pnl_pct = (ep - xp) / ep if ep else 0
+        pnl = pnl_pct * stake
+        capital += pnl
+        tc = dict(t)
+        tc["stake"] = stake
+        tc["pnl"] = pnl
+        tc["pnl_pct"] = pnl_pct
+        tc["equity_after"] = capital
+        result.append(tc)
+    return result
+
+
 def write_dark_phase_html(summary, title, html_path):
     """Write dark-blue themed HTML from a build_summary_payload() result."""
     now = datetime.now(st.BERLIN_TZ).strftime("%Y-%m-%d %H:%M:%S %Z")
@@ -196,12 +220,130 @@ tr:hover {{ background: #16213e; }}
     print(f"[Phase HTML] {html_path}")
 
 
+def write_dark_dashboard_html(all_trades, date_from, title, html_path, max_positions):
+    """Filter trades from date_from, apply fresh compound from 16500, write dark-blue HTML."""
+    filtered = sorted(
+        [t for t in all_trades if str(t.get("entry_time", ""))[:10] >= date_from],
+        key=lambda t: t.get("entry_time", ""),
+    )
+    processed = _apply_compound(filtered, max_positions)
+
+    now = datetime.now(st.BERLIN_TZ).strftime("%Y-%m-%d %H:%M:%S %Z")
+    start_cap = st.START_EQUITY
+    n_closed = len(processed)
+    total_pnl = sum(t["pnl"] for t in processed) if processed else 0
+    final_cap = processed[-1]["equity_after"] if processed else start_cap
+    winners = sum(1 for t in processed if t["pnl"] > 0)
+    win_rate = (winners / n_closed * 100) if n_closed else 0
+
+    open_t = [t for t in processed if t.get("reason") == "Final bar"]
+    closed_t = [t for t in processed if t.get("reason") != "Final bar"]
+    if len(open_t) > max_positions:
+        open_t = sorted(open_t, key=lambda t: t["entry_time"], reverse=True)[:max_positions]
+    open_pnl = sum(t["pnl"] for t in open_t)
+    closed_pnl = sum(t["pnl"] for t in closed_t)
+
+    cap_color = "#27ae60" if final_cap >= start_cap else "#e74c3c"
+    pnl_color = "#27ae60" if closed_pnl >= 0 else "#e74c3c"
+    open_pnl_color = "#27ae60" if open_pnl >= 0 else "#e74c3c"
+
+    def _trade_row(t, show_exit=True):
+        pnl = t["pnl"]
+        pnl_pct = t["pnl_pct"] * 100
+        pnl_cls = "pos" if pnl >= 0 else "neg"
+        phase = t.get("phase", "")
+        phase_color = PHASE_COLORS.get(phase, "#888")
+        cols = [
+            f'<td>{t.get("symbol", "")}</td>',
+            f'<td style="color:{phase_color};font-weight:bold">{phase}</td>',
+            f'<td>{t.get("indicator", "")}</td>',
+            f'<td>{t.get("htf", "")}</td>',
+            f'<td>{str(t.get("entry_time", ""))[:16]}</td>',
+            f'<td style="text-align:right">{_fmt_price(t["entry_price"])}</td>',
+        ]
+        if show_exit:
+            cols.append(f'<td>{str(t.get("exit_time", ""))[:16]}</td>')
+            cols.append(f'<td style="text-align:right">{_fmt_price(t["exit_price"])}</td>')
+        else:
+            cols.append(f'<td style="text-align:right">{_fmt_price(t["exit_price"])}</td>')
+        cols += [
+            f'<td style="text-align:right">{_fmt_de(t["stake"])}</td>',
+            f'<td class="{pnl_cls}" style="text-align:right">{_fmt_de(pnl)}</td>',
+            f'<td class="{pnl_cls}" style="text-align:right">{pnl_pct:+.2f}%</td>',
+        ]
+        if show_exit:
+            cols.append(f'<td>{t.get("reason", "")}</td>')
+        else:
+            cols.append('<td>Open</td>')
+        return "<tr>" + "".join(cols) + "</tr>"
+
+    open_rows = "\n".join(_trade_row(t, False) for t in open_t) if open_t else \
+        '<tr><td colspan="11" style="text-align:center;color:#888">Keine offenen Positionen</td></tr>'
+    closed_rows = "\n".join(_trade_row(t, True) for t in reversed(closed_t)) if closed_t else \
+        '<tr><td colspan="12" style="text-align:center;color:#888">Keine Trades</td></tr>'
+
+    html = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"><meta http-equiv="refresh" content="60">
+<title>{title} (ab {date_from})</title>
+<style>
+body {{ font-family: Arial, sans-serif; margin: 20px; background: #1a1a2e; color: #e0e0e0; }}
+h1 {{ color: #00d2ff; margin-bottom: 5px; }}
+h2 {{ color: #f39c12; margin-top: 30px; }}
+p.sub {{ color: #888; margin-top: 0; }}
+.cards {{ display: flex; gap: 15px; flex-wrap: wrap; margin: 20px 0; }}
+.card {{ background: #16213e; border-radius: 8px; padding: 15px 20px; min-width: 150px; }}
+.card .label {{ color: #888; font-size: 12px; text-transform: uppercase; }}
+.card .value {{ font-size: 22px; font-weight: bold; margin-top: 5px; }}
+table {{ border-collapse: collapse; width: 100%; font-size: 13px; margin-top: 10px; }}
+th {{ background: #16213e; color: #00d2ff; padding: 8px 10px; text-align: left; border-bottom: 2px solid #0f3460; }}
+td {{ padding: 6px 10px; border-bottom: 1px solid #333; }}
+tr:hover {{ background: #16213e; }}
+.pos {{ color: #27ae60; }}
+.neg {{ color: #e74c3c; }}
+</style>
+</head><body>
+<h1>{title}</h1>
+<p class="sub">Ab {date_from} | Stand: {now} | Compound Growth (stake = kapital/{max_positions})</p>
+
+<div class="cards">
+<div class="card"><div class="label">Start Kapital</div><div class="value">{_fmt_de(start_cap)} USDT</div></div>
+<div class="card"><div class="label">Final Kapital</div><div class="value" style="color:{cap_color}">{_fmt_de(final_cap)} USDT</div></div>
+<div class="card"><div class="label">Closed Trades</div><div class="value">{len(closed_t)}</div></div>
+<div class="card"><div class="label">Realized PnL</div><div class="value" style="color:{pnl_color}">{_fmt_de(closed_pnl)} USDT</div></div>
+<div class="card"><div class="label">Open Positionen (max {max_positions})</div><div class="value">{len(open_t)}</div></div>
+<div class="card"><div class="label">Open PnL</div><div class="value" style="color:{open_pnl_color}">{_fmt_de(open_pnl)} USDT</div></div>
+<div class="card"><div class="label">Win Rate</div><div class="value">{win_rate:.1f}%</div></div>
+</div>
+
+<h2>Open Positionen</h2>
+<table>
+<tr><th>Symbol</th><th>Phase</th><th>Indikator</th><th>HTF</th><th>Entry</th><th>Entry Preis</th><th>Aktuell</th><th>Stake</th><th>PnL</th><th>PnL%</th><th>Status</th></tr>
+{open_rows}
+</table>
+
+<h2>Closed Trades ({len(closed_t)})</h2>
+<table>
+<tr><th>Symbol</th><th>Phase</th><th>Indikator</th><th>HTF</th><th>Entry</th><th>Entry Preis</th><th>Exit</th><th>Exit Preis</th><th>Stake</th><th>PnL</th><th>PnL%</th><th>Reason</th></tr>
+{closed_rows}
+</table>
+
+</body></html>"""
+
+    os.makedirs(os.path.dirname(html_path), exist_ok=True)
+    with open(html_path, "w", encoding="utf-8") as f:
+        f.write(html)
+    print(f"[Dashboard] {html_path} ({n_closed} trades ab {date_from})")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Phase baseline using paper_trader simulation")
+    parser.add_argument("--start", type=str, default="2025-12-01",
+                        help="Dashboard start date (default: 2025-12-01)")
     parser.add_argument("--sim-start", type=str, default="2024-01-31",
                         help="Simulation start date (default: 2024-01-31)")
     args = parser.parse_args()
 
+    dashboard_start = args.start
     sim_start = pd.Timestamp(args.sim_start, tz=st.BERLIN_TZ)
     sim_end = pd.Timestamp.now(tz=st.BERLIN_TZ)
     symbols = st.SYMBOLS
@@ -209,7 +351,7 @@ def main():
     print(f"=== Phase Baseline (via paper_trader) ===")
     print(f"Indicators: {TRADING_INDICATORS}")
     print(f"MAX_OPEN_POSITIONS: {pt.MAX_OPEN_POSITIONS} | STAKE_DIVISOR: {pt.STAKE_DIVISOR}")
-    print(f"Simulation: {args.sim_start} to now")
+    print(f"Simulation: {args.sim_start} to now | Dashboard ab {dashboard_start}")
 
     # Save original globals
     orig_htf_length = st.HTF_LENGTH
@@ -313,11 +455,20 @@ def main():
             json_path = os.path.join(st.BASE_OUT_DIR, f"trading_summary_{prefix}.json")
             pt.write_summary_json(summary, json_path)
 
-            # Write dark-blue themed HTML with phase column
+            # Write dark-blue themed Summary HTML with phase column
             ind_display = indicator.upper()
             title = f"Phase Trading Summary — {ind_display} ({cls_display})"
             html_path = os.path.join(st.BASE_OUT_DIR, f"trading_summary_{prefix}.html")
             write_dark_phase_html(summary, title, html_path)
+
+            # Write dark-blue themed Dashboard HTML (trades ab dashboard_start, fresh compound)
+            dash_title = f"Phase Dashboard — {ind_display} ({cls_display})"
+            dash_path = os.path.join(st.BASE_OUT_DIR, f"dashboard_{prefix}.html")
+            # Build trade dicts with phase for dashboard (from exported trades)
+            dash_trades = summary.get("trades", [])
+            write_dark_dashboard_html(
+                dash_trades, dashboard_start, dash_title, dash_path, pt.MAX_OPEN_POSITIONS,
+            )
 
             print(f"    -> {json_path} ({summary['closed_trades']} closed, PnL: {summary['closed_pnl']:+,.2f})")
 
