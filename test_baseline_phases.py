@@ -4,8 +4,8 @@ Phase Baseline: Run paper_trader simulation per indicator, tag with 4 phase clas
 
 Uses paper_trader.run_simulation() directly to get IDENTICAL trades as the BCK.
 Then tags each trade with 4 different phase classifiers.
-Uses paper_trader.build_summary_payload() + write_summary_json() for output
-(same functions that generate the BCK), ensuring identical format and PnL.
+Uses paper_trader.build_summary_payload() for correct compound PnL,
+then renders dark-blue themed HTML with phase column.
 
 Generates per (trading indicator, phase classifier):
   - trading_summary_ph1_{indicator}_{classifier}.json
@@ -18,6 +18,7 @@ Usage:
 import argparse
 import os
 from collections import Counter
+from datetime import datetime
 
 import pandas as pd
 
@@ -38,6 +39,8 @@ CLASSIFIER_DISPLAY = {
     "kama": "KAMA-Phasen",
 }
 
+PHASE_COLORS = {"Up": "#27ae60", "Down": "#e74c3c", "Flat": "#f39c12"}
+
 
 def get_phase_at_entry(phases, entry_ts):
     """Look up market phase at entry timestamp using ffill."""
@@ -52,6 +55,145 @@ def get_phase_at_entry(phases, entry_ts):
     except Exception:
         pass
     return "Flat"
+
+
+def _fmt_de(val):
+    s = f"{val:,.2f}"
+    return s.replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def _fmt_price(val):
+    v = abs(val)
+    if v < 0.0001:
+        return f"{val:.8f}"
+    elif v < 1:
+        return f"{val:.6f}"
+    elif v < 100:
+        return f"{val:.4f}"
+    return _fmt_de(val)
+
+
+def write_dark_phase_html(summary, title, html_path):
+    """Write dark-blue themed HTML from a build_summary_payload() result."""
+    now = datetime.now(st.BERLIN_TZ).strftime("%Y-%m-%d %H:%M:%S %Z")
+    trades = summary.get("trades", [])
+    open_positions = summary.get("open_positions_data", [])
+
+    closed_pnl = summary.get("closed_pnl", 0)
+    final_cap = summary.get("final_capital", st.START_EQUITY)
+    start_cap = st.START_EQUITY
+    n_closed = summary.get("closed_trades", len(trades))
+    n_open = len(open_positions)
+    win_rate = summary.get("win_rate_pct", 0)
+    max_pos = pt.MAX_OPEN_POSITIONS
+
+    # Open PnL
+    open_pnl = summary.get("open_equity", 0)
+
+    cap_color = "#27ae60" if final_cap >= start_cap else "#e74c3c"
+    pnl_color = "#27ae60" if closed_pnl >= 0 else "#e74c3c"
+    open_pnl_color = "#27ae60" if open_pnl >= 0 else "#e74c3c"
+
+    # Trade rows
+    def _trade_row(t, show_exit=True):
+        pnl = float(t.get("pnl", 0) or 0)
+        entry_p = float(t.get("entry_price", 0) or 0)
+        exit_p = float(t.get("exit_price", 0) or 0)
+        pnl_pct = (exit_p / entry_p - 1) * 100 if entry_p else 0
+        pnl_cls = "pos" if pnl >= 0 else "neg"
+        phase = t.get("phase", "")
+        phase_color = PHASE_COLORS.get(phase, "#888")
+        stake = float(t.get("stake", 0) or 0)
+
+        cols = [
+            f'<td>{t.get("symbol", "")}</td>',
+            f'<td style="color:{phase_color};font-weight:bold">{phase}</td>',
+            f'<td>{t.get("indicator", "")}</td>',
+            f'<td>{t.get("htf", "")}</td>',
+            f'<td>{str(t.get("entry_time", ""))[:16]}</td>',
+            f'<td style="text-align:right">{_fmt_price(entry_p)}</td>',
+        ]
+        if show_exit:
+            cols.append(f'<td>{str(t.get("exit_time", ""))[:16]}</td>')
+            cols.append(f'<td style="text-align:right">{_fmt_price(exit_p)}</td>')
+        else:
+            cols.append(f'<td style="text-align:right">{_fmt_price(float(t.get("last_price", exit_p) or exit_p))}</td>')
+        cols += [
+            f'<td style="text-align:right">{_fmt_de(stake)}</td>',
+            f'<td class="{pnl_cls}" style="text-align:right">{_fmt_de(pnl)}</td>',
+            f'<td class="{pnl_cls}" style="text-align:right">{pnl_pct:+.2f}%</td>',
+        ]
+        if show_exit:
+            reason = t.get("exit_reason", "") or t.get("reason", "")
+            cols.append(f'<td>{reason}</td>')
+        else:
+            cols.append('<td>Open</td>')
+        return "<tr>" + "".join(cols) + "</tr>"
+
+    # Open position rows
+    if open_positions:
+        open_rows = "\n".join(_trade_row(p, show_exit=False) for p in open_positions)
+    else:
+        open_rows = '<tr><td colspan="11" style="text-align:center;color:#888">Keine offenen Positionen</td></tr>'
+
+    # Closed trade rows (newest first)
+    sorted_trades = sorted(trades, key=lambda t: t.get("entry_time", ""), reverse=True)
+    if sorted_trades:
+        closed_rows = "\n".join(_trade_row(t, show_exit=True) for t in sorted_trades)
+    else:
+        closed_rows = '<tr><td colspan="12" style="text-align:center;color:#888">Keine Trades</td></tr>'
+
+    html = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<title>{title}</title>
+<style>
+body {{ font-family: Arial, sans-serif; margin: 20px; background: #1a1a2e; color: #e0e0e0; }}
+h1 {{ color: #00d2ff; margin-bottom: 5px; }}
+h2 {{ color: #f39c12; margin-top: 30px; }}
+p.sub {{ color: #888; margin-top: 0; }}
+.cards {{ display: flex; gap: 15px; flex-wrap: wrap; margin: 20px 0; }}
+.card {{ background: #16213e; border-radius: 8px; padding: 15px 20px; min-width: 150px; }}
+.card .label {{ color: #888; font-size: 12px; text-transform: uppercase; }}
+.card .value {{ font-size: 22px; font-weight: bold; margin-top: 5px; }}
+table {{ border-collapse: collapse; width: 100%; font-size: 13px; margin-top: 10px; }}
+th {{ background: #16213e; color: #00d2ff; padding: 8px 10px; text-align: left; border-bottom: 2px solid #0f3460; }}
+td {{ padding: 6px 10px; border-bottom: 1px solid #333; }}
+tr:hover {{ background: #16213e; }}
+.pos {{ color: #27ae60; }}
+.neg {{ color: #e74c3c; }}
+</style>
+</head><body>
+<h1>{title}</h1>
+<p class="sub">Stand: {now} | Compound Growth (stake = kapital/{max_pos})</p>
+
+<div class="cards">
+<div class="card"><div class="label">Start Kapital</div><div class="value">{_fmt_de(start_cap)} USDT</div></div>
+<div class="card"><div class="label">Final Kapital</div><div class="value" style="color:{cap_color}">{_fmt_de(final_cap)} USDT</div></div>
+<div class="card"><div class="label">Closed Trades</div><div class="value">{n_closed}</div></div>
+<div class="card"><div class="label">Realized PnL</div><div class="value" style="color:{pnl_color}">{_fmt_de(closed_pnl)} USDT</div></div>
+<div class="card"><div class="label">Open Positionen (max {max_pos})</div><div class="value">{n_open}</div></div>
+<div class="card"><div class="label">Open PnL</div><div class="value" style="color:{open_pnl_color}">{_fmt_de(open_pnl)} USDT</div></div>
+<div class="card"><div class="label">Win Rate</div><div class="value">{win_rate:.1f}%</div></div>
+</div>
+
+<h2>Open Positionen</h2>
+<table>
+<tr><th>Symbol</th><th>Phase</th><th>Indikator</th><th>HTF</th><th>Entry</th><th>Entry Preis</th><th>Aktuell</th><th>Stake</th><th>PnL</th><th>PnL%</th><th>Status</th></tr>
+{open_rows}
+</table>
+
+<h2>Closed Trades ({n_closed})</h2>
+<table>
+<tr><th>Symbol</th><th>Phase</th><th>Indikator</th><th>HTF</th><th>Entry</th><th>Entry Preis</th><th>Exit</th><th>Exit Preis</th><th>Stake</th><th>PnL</th><th>PnL%</th><th>Reason</th></tr>
+{closed_rows}
+</table>
+
+</body></html>"""
+
+    os.makedirs(os.path.dirname(html_path), exist_ok=True)
+    with open(html_path, "w", encoding="utf-8") as f:
+        f.write(html)
+    print(f"[Phase HTML] {html_path}")
 
 
 def main():
@@ -166,10 +308,16 @@ def main():
                 summary["long_winners"] = summary["winners"]
                 summary["long_losers"] = summary["losers"]
 
-            # Write JSON + HTML using paper_trader's own function (same as BCK)
+            # Write JSON
             prefix = f"ph1_{indicator}_{classifier}"
             json_path = os.path.join(st.BASE_OUT_DIR, f"trading_summary_{prefix}.json")
             pt.write_summary_json(summary, json_path)
+
+            # Write dark-blue themed HTML with phase column
+            ind_display = indicator.upper()
+            title = f"Phase Trading Summary — {ind_display} ({cls_display})"
+            html_path = os.path.join(st.BASE_OUT_DIR, f"trading_summary_{prefix}.html")
+            write_dark_phase_html(summary, title, html_path)
 
             print(f"    -> {json_path} ({summary['closed_trades']} closed, PnL: {summary['closed_pnl']:+,.2f})")
 
