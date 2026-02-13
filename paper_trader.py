@@ -2960,12 +2960,11 @@ def run_simulation(
                         print(f"[Simulation] {symbol} {timeframe}: Cache starts {earliest.strftime('%Y-%m-%d')}, need {download_start.strftime('%Y-%m-%d')} - downloading...")
                         needs_download = True
 
-                    # Check if cache is outdated (older than 2 hours)
-                    elif latest < now - pd.Timedelta(hours=2):
-                        print(f"[Simulation] {symbol} {timeframe}: Cache outdated (last: {latest.strftime('%Y-%m-%d %H:%M')}), updating to now...")
-                        needs_download = True
+                    # Always update cache at start of each cycle
+                    # (incremental download - only fetches new bars since last cached bar)
                     else:
-                        print(f"[Simulation] {symbol} {timeframe}: {len(cached_df)} bars, {earliest.strftime('%Y-%m-%d')} to {latest.strftime('%Y-%m-%d %H:%M')} ✓")
+                        print(f"[Simulation] {symbol} {timeframe}: Refreshing cache (last: {latest.strftime('%Y-%m-%d %H:%M')})...")
+                        needs_download = True
 
                 if needs_download:
                     st.download_historical_ohlcv(symbol, timeframe, download_start, download_end)
