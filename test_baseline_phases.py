@@ -120,14 +120,22 @@ def write_dark_phase_html(summary, title, html_path):
 
     # Trade rows
     def _trade_row(t, show_exit=True):
-        pnl = float(t.get("pnl", 0) or 0)
         entry_p = float(t.get("entry_price", 0) or 0)
-        exit_p = float(t.get("exit_price", 0) or 0)
-        pnl_pct = (exit_p / entry_p - 1) * 100 if entry_p else 0
-        pnl_cls = "pos" if pnl >= 0 else "neg"
         phase = t.get("phase", "")
         phase_color = PHASE_COLORS.get(phase, "#888")
         stake = float(t.get("stake", 0) or 0)
+
+        if show_exit:
+            # Closed trade: calculate from exit_price
+            exit_p = float(t.get("exit_price", 0) or 0)
+            pnl = float(t.get("pnl", 0) or 0)
+            pnl_pct = (exit_p / entry_p - 1) * 100 if entry_p else 0
+        else:
+            # Open position: use unrealized fields
+            pnl = float(t.get("unrealized_pnl", 0) or 0)
+            pnl_pct = float(t.get("unrealized_pct", 0) or 0)
+
+        pnl_cls = "pos" if pnl >= 0 else "neg"
 
         cols = [
             f'<td>{t.get("symbol", "")}</td>',
@@ -138,10 +146,12 @@ def write_dark_phase_html(summary, title, html_path):
             f'<td style="text-align:right">{_fmt_price(entry_p)}</td>',
         ]
         if show_exit:
+            exit_p = float(t.get("exit_price", 0) or 0)
             cols.append(f'<td>{str(t.get("exit_time", ""))[:16]}</td>')
             cols.append(f'<td style="text-align:right">{_fmt_price(exit_p)}</td>')
         else:
-            cols.append(f'<td style="text-align:right">{_fmt_price(float(t.get("last_price", exit_p) or exit_p))}</td>')
+            last_p = float(t.get("last_price", 0) or t.get("exit_price", 0) or 0)
+            cols.append(f'<td style="text-align:right">{_fmt_price(last_p)}</td>')
         cols += [
             f'<td style="text-align:right">{_fmt_de(stake)}</td>',
             f'<td class="{pnl_cls}" style="text-align:right">{_fmt_de(pnl)}</td>',
