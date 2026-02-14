@@ -27,12 +27,14 @@ SWEEP_DASHBOARD_HTML = os.path.join(REPORT_DIR, "sweep_dashboard.html")
 MARKET_PHASE_HTML = os.path.join(REPORT_DIR, "market_phase_report.html")
 
 # Default indicator parameters (from best-params or defaults)
+# Conceptual periods in DAYS – multiplied by 24 for hourly computation
 JMA_LENGTH = 30
 JMA_PHASE = 0
 KAMA_LENGTH = 20
 KAMA_SLOW_LENGTH = 40
 SUPERTREND_LENGTH = 10
 SUPERTREND_FACTOR = 3.0
+HOURLY_MULTIPLIER = 24  # Indikatoren auf 1h berechnen für glattere Linien
 
 
 # =====================================================================
@@ -333,14 +335,25 @@ def classify_phase_by_slope(indicator_series, smooth_window=5, threshold_pct=0.0
     return phases
 
 
-def compute_indicators_daily(df_daily):
-    """Compute JMA, KAMA, and Supertrend on daily OHLCV data."""
-    # JMA
-    df_jma = st.compute_jma(df_daily.copy(), length=JMA_LENGTH, phase=JMA_PHASE)
-    # KAMA
-    df_kama = st.compute_kama(df_daily.copy(), length=KAMA_LENGTH, slow_length=KAMA_SLOW_LENGTH)
-    # Supertrend
-    df_st = st.compute_supertrend(df_daily.copy(), length=SUPERTREND_LENGTH, factor=SUPERTREND_FACTOR)
+def compute_indicators_hourly(df_hourly, daily_index):
+    """Compute JMA, KAMA, and Supertrend on hourly OHLCV data (×24 smoother), resample to daily."""
+    M = HOURLY_MULTIPLIER
+    # JMA on hourly
+    df_jma_h = st.compute_jma(df_hourly.copy(), length=JMA_LENGTH * M, phase=JMA_PHASE)
+    # KAMA on hourly
+    df_kama_h = st.compute_kama(df_hourly.copy(), length=KAMA_LENGTH * M, slow_length=KAMA_SLOW_LENGTH * M)
+    # Supertrend on hourly (factor is a multiplier, not a lookback – stays the same)
+    df_st_h = st.compute_supertrend(df_hourly.copy(), length=SUPERTREND_LENGTH * M, factor=SUPERTREND_FACTOR)
+
+    # Resample to daily: take last value of each day
+    df_jma = df_jma_h.resample("1D").last().dropna(subset=["jma"])
+    df_kama = df_kama_h.resample("1D").last().dropna(subset=["kama"])
+    df_st = df_st_h.resample("1D").last().dropna(subset=["supertrend"])
+
+    # Align with daily candlestick index
+    df_jma = df_jma.reindex(daily_index, method="ffill")
+    df_kama = df_kama.reindex(daily_index, method="ffill")
+    df_st = df_st.reindex(daily_index, method="ffill")
 
     return df_jma, df_kama, df_st
 
@@ -372,19 +385,19 @@ def build_market_phase_chart(symbol, df_daily, df_jma, df_kama, df_supertrend):
 
     fig_candle.add_trace(go.Scatter(
         x=x_dates, y=df_jma["jma"].values.tolist(),
-        mode="lines", name=f"JMA({JMA_LENGTH})",
+        mode="lines", name=f"JMA({JMA_LENGTH}d/1h)",
         line=dict(color="#f39c12", width=2),
     ))
 
     fig_candle.add_trace(go.Scatter(
         x=x_dates, y=df_kama["kama"].values.tolist(),
-        mode="lines", name=f"KAMA({KAMA_LENGTH},{KAMA_SLOW_LENGTH})",
+        mode="lines", name=f"KAMA({KAMA_LENGTH},{KAMA_SLOW_LENGTH}d/1h)",
         line=dict(color="#3498db", width=2),
     ))
 
     fig_candle.add_trace(go.Scatter(
         x=x_dates, y=df_supertrend["supertrend"].values.tolist(),
-        mode="lines", name=f"Supertrend({SUPERTREND_LENGTH},{SUPERTREND_FACTOR})",
+        mode="lines", name=f"Supertrend({SUPERTREND_LENGTH}d/{SUPERTREND_FACTOR})",
         line=dict(color="#e74c3c", width=2, dash="dot"),
     ))
 
@@ -392,7 +405,7 @@ def build_market_phase_chart(symbol, df_daily, df_jma, df_kama, df_supertrend):
     price_max = df_daily["high"].max() * 1.02
 
     fig_candle.update_layout(
-        title=f"{symbol} – 1D Candlesticks + JMA / KAMA / Supertrend",
+        title=f"{symbol} – 1D Candlesticks + Indikatoren (1h-Basis, ×24 glatter)",
         height=500,
         showlegend=True,
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
@@ -480,13 +493,19 @@ def generate_market_phase_report():
     for symbol in symbols:
         print(f"[MarketPhase] Verarbeite {symbol}...")
         try:
-            # Fetch daily data from cache or API
+            # Fetch daily data for candlesticks
             df_daily = st.fetch_data(symbol, "1d", 365)
             if df_daily is None or df_daily.empty or len(df_daily) < 30:
                 print(f"[MarketPhase] Nicht genug Daten für {symbol}, überspringe.")
                 continue
 
-            df_jma, df_kama, df_supertrend = compute_indicators_daily(df_daily)
+            # Fetch hourly data for smoother indicator computation (×24)
+            df_hourly = st.fetch_data(symbol, "1h", 365 * 24)
+            if df_hourly is None or df_hourly.empty or len(df_hourly) < 720:
+                print(f"[MarketPhase] Nicht genug 1h-Daten für {symbol}, überspringe.")
+                continue
+
+            df_jma, df_kama, df_supertrend = compute_indicators_hourly(df_hourly, df_daily.index)
             fig_candle, fig_phase = build_market_phase_chart(symbol, df_daily, df_jma, df_kama, df_supertrend)
             candle_html = pio.to_html(fig_candle, include_plotlyjs=False, full_html=False)
             phase_html = pio.to_html(fig_phase, include_plotlyjs=False, full_html=False)
@@ -542,7 +561,7 @@ def generate_market_phase_report():
 <p>Stand: {now}</p>
 
 <div class="info">
-    <strong>Oberer Chart:</strong> 1-Tages-Candlesticks mit JMA({JMA_LENGTH}), KAMA({KAMA_LENGTH},{KAMA_SLOW_LENGTH}) und Supertrend({SUPERTREND_LENGTH},{SUPERTREND_FACTOR})<br>
+    <strong>Oberer Chart:</strong> 1-Tages-Candlesticks mit Indikatoren auf 1h-Basis (×24 glatter): JMA({JMA_LENGTH}d), KAMA({KAMA_LENGTH},{KAMA_SLOW_LENGTH}d), Supertrend({SUPERTREND_LENGTH}d,{SUPERTREND_FACTOR})<br>
     <strong>Unterer Chart:</strong> Marktphasen (Up / Down / Flat) für jeden Indikator + <strong>Consensus</strong> (2 von 3 müssen übereinstimmen)
 </div>
 
