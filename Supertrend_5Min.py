@@ -152,17 +152,17 @@ MAX_HOLD_BAR_VALUES = [0, 24, 48, 60]
 USE_HIGHER_TIMEFRAME_FILTER = True
 HIGHER_TIMEFRAME = "6h"
 HTF_LOOKBACK = 1000  # Increased for longer backtests
-HTF_LENGTH = 20
-HTF_FACTOR = 3.0
+HTF_LENGTH = 10
+HTF_FACTOR = 2.0
 # Trend-Phase-Parameter zum Sweepen (3×3 = 9 Kombis pro Paar)
-HTF_LENGTH_VALUES = [10, 20, 30]
-HTF_FACTOR_VALUES = [2.0, 3.0, 4.0]
+HTF_LENGTH_VALUES = [7, 10, 15]
+HTF_FACTOR_VALUES = [1.5, 2.0, 3.0]
 HTF_PSAR_STEP = 0.02
 HTF_PSAR_MAX_STEP = 0.2
-HTF_JMA_LENGTH = 30
-HTF_JMA_PHASE = 0
-HTF_KAMA_LENGTH = 20
-HTF_KAMA_SLOW_LENGTH = 40
+HTF_JMA_LENGTH = 15
+HTF_JMA_PHASE = 50
+HTF_KAMA_LENGTH = 10
+HTF_KAMA_SLOW_LENGTH = 30
 HTF_MAMA_FAST_LIMIT = 0.5
 HTF_MAMA_SLOW_LIMIT = 0.05
 
@@ -236,20 +236,20 @@ INDICATOR_PRESETS = {
 		"slug": "supertrend",
 		"param_a_label": "Length",
 		"param_b_label": "Factor",
-		"param_a_values": [7, 10, 14],
-		"param_b_values": [2.0, 3.0, 4.0],
-		"default_a": 10,
-		"default_b": 3.0,
+		"param_a_values": [5, 7, 10],
+		"param_b_values": [1.5, 2.0, 3.0],
+		"default_a": 7,
+		"default_b": 2.0,
 	},
 	"htf_crossover": {
 		"display_name": "HTF Crossover",
 		"slug": "htf_crossover",
 		"param_a_label": "Length",
 		"param_b_label": "Factor",
-		"param_a_values": [7, 10, 14],
-		"param_b_values": [2.0, 3.0, 4.0],
-		"default_a": 10,
-		"default_b": 3.0,
+		"param_a_values": [5, 7, 10],
+		"param_b_values": [1.5, 2.0, 3.0],
+		"default_a": 7,
+		"default_b": 2.0,
 	},
 	"psar": {
 		"display_name": "Parabolic SAR",
@@ -266,20 +266,20 @@ INDICATOR_PRESETS = {
 		"slug": "jma",
 		"param_a_label": "Length",
 		"param_b_label": "Phase",
-		"param_a_values": [20, 30, 50],
-		"param_b_values": [-50, 0, 50],
-		"default_a": 30,
-		"default_b": 0,
+		"param_a_values": [10, 15, 20],
+		"param_b_values": [0, 50, 100],
+		"default_a": 15,
+		"default_b": 50,
 	},
 	"kama": {
 		"display_name": "Kaufman AMA",
 		"slug": "kama",
 		"param_a_label": "Length",
 		"param_b_label": "SlowLength",
-		"param_a_values": [10, 20, 30],
-		"param_b_values": [30, 40, 50],
-		"default_a": 20,
-		"default_b": 40,
+		"param_a_values": [5, 10, 15],
+		"param_b_values": [20, 30, 40],
+		"default_a": 10,
+		"default_b": 30,
 	},
 	"mama": {
 		"display_name": "Mesa Adaptive MA",
