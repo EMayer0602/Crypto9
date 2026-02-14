@@ -3362,8 +3362,6 @@ def run_phase_based_sweep():
 										"Phase": phase,
 										"ParamA": param_a,
 										"ParamB": param_b,
-										PARAM_A_LABEL: param_a,
-										PARAM_B_LABEL: param_b,
 										"Length": param_a if INDICATOR_TYPE == "supertrend" else None,
 										"Factor": param_b if INDICATOR_TYPE == "supertrend" else None,
 										"ATRStopMult": atr_label,
