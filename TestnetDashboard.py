@@ -423,6 +423,9 @@ def generate_dashboard(start_date: str = None, output_dir: Path = None, german: 
         .long-header {{ background: #28a745 !important; }}
         .short-header {{ background: #dc3545 !important; }}
         .open-header {{ background: #17a2b8 !important; }}
+        .phase-up {{ background: #d4edda; color: #155724; font-weight: bold; text-align: center; }}
+        .phase-down {{ background: #f8d7da; color: #721c24; font-weight: bold; text-align: center; }}
+        .phase-flat {{ background: #fff3cd; color: #856404; font-weight: bold; text-align: center; }}
         .timestamp {{ color: #666; font-size: 12px; margin-top: 20px; }}
         .section {{ margin-bottom: 30px; }}
         .source-note {{ color: #666; font-style: italic; margin-bottom: 20px; }}
@@ -477,7 +480,7 @@ def generate_dashboard(start_date: str = None, output_dir: Path = None, german: 
     <div class="section">
     <h2>Open Positions ({len(open_positions)}, Equity: <span class="{'positive' if open_equity >= 0 else 'negative'}">{fmt_de(open_equity)}</span>)</h2>
     <table>
-        <tr class="open-header"><th>Symbol</th><th>Direction</th><th>Indicator</th><th>HTF</th><th>Entry Time</th><th>Entry Price</th><th>Last Price</th><th>Amount</th><th>Stake</th><th>Bars</th><th>PnL</th><th>PnL%</th><th>Status</th></tr>
+        <tr class="open-header"><th>Symbol</th><th>Direction</th><th>Indicator</th><th>HTF</th><th>Entry Phase</th><th>Current Phase</th><th>Entry Time</th><th>Entry Price</th><th>Last Price</th><th>Amount</th><th>Stake</th><th>Bars</th><th>PnL</th><th>PnL%</th><th>Status</th></tr>
 """
     if open_positions:
         for p in open_positions:
@@ -496,11 +499,18 @@ def generate_dashboard(start_date: str = None, output_dir: Path = None, german: 
             stake = p.get("stake", 0)
             amount = stake / entry_price if entry_price > 0 else 0
 
+            entry_phase = p.get('entry_phase', '')
+            current_phase = p.get('current_phase', '')
+            ep_class = f"phase-{entry_phase.lower()}" if entry_phase in ("Up", "Down", "Flat") else ""
+            cp_class = f"phase-{current_phase.lower()}" if current_phase in ("Up", "Down", "Flat") else ""
+
             html += f"""        <tr>
             <td>{p.get('symbol', 'N/A')}</td>
             <td>{direction}</td>
             <td>{p.get('indicator', 'N/A')}</td>
             <td>{p.get('htf', 'N/A')}</td>
+            <td class="{ep_class}">{entry_phase}</td>
+            <td class="{cp_class}">{current_phase}</td>
             <td>{entry_str}</td>
             <td>{fmt_price(entry_price)}</td>
             <td>{fmt_price(p.get('last_price', 0))}</td>
@@ -512,7 +522,7 @@ def generate_dashboard(start_date: str = None, output_dir: Path = None, german: 
             <td>{p.get('status', 'N/A')}</td>
         </tr>\n"""
     else:
-        html += "        <tr><td colspan='13'>No open positions</td></tr>\n"
+        html += "        <tr><td colspan='15'>No open positions</td></tr>\n"
 
     html += "    </table>\n    </div>\n"
 

@@ -1544,11 +1544,27 @@ def _context_from_position(pos: Dict) -> StrategyContext:
     )
 
 
+def _lookup_phase(phases: pd.Series, ts) -> str:
+    """Look up market phase at a given timestamp using forward-fill."""
+    if phases is None or phases.empty:
+        return "Flat"
+    try:
+        if ts in phases.index:
+            return str(phases.loc[ts])
+        idx = phases.index.get_indexer([ts], method="ffill")[0]
+        if idx >= 0:
+            return str(phases.iloc[idx])
+    except Exception:
+        pass
+    return "Flat"
+
+
 def enrich_open_positions(positions: List[Dict]) -> pd.DataFrame:
     if not positions:
         return pd.DataFrame()
     enriched = []
     df_cache: Dict[Tuple[str, str, str, float, float], pd.DataFrame] = {}
+    phase_cache: Dict[Tuple[str, str, str, float, float], pd.Series] = {}
     ticker_cache: Dict[str, float] = {}
     now_ts = pd.Timestamp.now(tz=st.BERLIN_TZ)
     for pos in positions:
@@ -1567,6 +1583,19 @@ def enrich_open_positions(positions: List[Dict]) -> pd.DataFrame:
                 print(f"[OpenPositions] Datenabruf für {cache_key} fehlgeschlagen: {exc}")
                 df_cache[cache_key] = pd.DataFrame()
         df = df_cache[cache_key]
+
+        # Phase classification (cached per indicator/htf combo)
+        if cache_key not in phase_cache:
+            try:
+                if not df.empty:
+                    phase_cache[cache_key] = st.classify_market_phases(df, context.symbol)
+                else:
+                    phase_cache[cache_key] = pd.Series(dtype=str)
+            except Exception as exc:
+                print(f"[OpenPositions] Phase-Klassifikation für {cache_key} fehlgeschlagen: {exc}")
+                phase_cache[cache_key] = pd.Series(dtype=str)
+        phases = phase_cache[cache_key]
+
         latest_price = None
         latest_ts = now_ts
         if not df.empty:
@@ -1598,6 +1627,21 @@ def enrich_open_positions(positions: List[Dict]) -> pd.DataFrame:
         status = "Gewinn" if unrealized_pnl > 0 else "Verlust" if unrealized_pnl < 0 else "Flat"
         entry_time = pos.get("entry_time")
         bars_held = bars_in_position(entry_time, latest_ts) if entry_time else 0
+
+        # Phase lookup: entry phase + current phase
+        entry_phase = "Flat"
+        current_phase = "Flat"
+        if not phases.empty:
+            if entry_time:
+                try:
+                    entry_ts = pd.Timestamp(entry_time)
+                    if entry_ts.tzinfo is None:
+                        entry_ts = entry_ts.tz_localize(st.BERLIN_TZ)
+                    entry_phase = _lookup_phase(phases, entry_ts)
+                except Exception:
+                    pass
+            current_phase = str(phases.iloc[-1]) if len(phases) > 0 else "Flat"
+
         enriched.append({
             "symbol": context.symbol,
             "direction": context.direction,
@@ -1615,6 +1659,8 @@ def enrich_open_positions(positions: List[Dict]) -> pd.DataFrame:
             "unrealized_pct": unrealized_pct * 100.0,
             "unrealized_pnl": unrealized_pnl,
             "status": status,
+            "entry_phase": entry_phase,
+            "current_phase": current_phase,
         })
     return pd.DataFrame(enriched)
 
