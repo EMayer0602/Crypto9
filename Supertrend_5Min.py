@@ -68,18 +68,18 @@ OHLCV_CACHE_DIR = "ohlcv_cache"  # Directory for persistent OHLCV data storage
 # USDx symbols for optimization sweep
 SYMBOLS = [
 	"BTC/USDC",
-	# "ETH/USDC",
-	# "SOL/USDC",
-	# "XRP/USDC",
-	# "LINK/USDC",
-	# "SUI/USDC",
-	# "ZEC/USDC",
-	# "TNSR/USDC",
-	# "ADA/USDC",
-	# "ICP/USDC",
-	# "BNB/USDC",
-	# "LUNC/USDT",  # nur USDT verfügbar
-	# "TAO/USDC",
+	"ETH/USDC",
+	"SOL/USDC",
+	"XRP/USDC",
+	"LINK/USDC",
+	"SUI/USDC",
+	"ZEC/USDC",
+	"TNSR/USDC",
+	"ADA/USDC",
+	"ICP/USDC",
+	"BNB/USDC",
+	"LUNC/USDT",  # nur USDT verfügbar
+	"TAO/USDC",
 ]
 
 # Testnet symbols - use USDC where available, USDT otherwise
