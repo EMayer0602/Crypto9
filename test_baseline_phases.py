@@ -30,7 +30,7 @@ PHASE_HTF_LENGTH = 10
 PHASE_HTF_FACTOR = 3.0
 PHASE_HTF = "6h"
 
-TRADING_INDICATORS = ["jma"]  # TODO: add supertrend, htf_crossover, kama after sweep
+TRADING_INDICATORS = ["jma"]
 
 CLASSIFIER_DISPLAY = {
     "supertrend": "ST-Phasen",

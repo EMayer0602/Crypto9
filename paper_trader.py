@@ -3318,7 +3318,7 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
         import time as _time
         print("=" * 70)
         print("  PHASE-BASED PARAMETER SWEEP (neue Strategie)")
-        print("  Output: best_params_phase.csv, dashboard_ph1.html, trading_summary_ph1.html")
+        print("  Output: best_params_phase.csv, dashboard_ph1_jma_*.html, trading_summary_ph1_jma_*.html")
         print("=" * 70)
         print(f"  Start Equity: {st.START_EQUITY}")
         print(f"  Phase Stake Divisor: {st.PHASE_STAKE_DIVISOR}")
