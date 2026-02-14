@@ -1383,6 +1383,16 @@ def process_snapshot(
     if existing is not None:
         return trades
 
+    # Phase blocking: skip entry if symbol+phase is in BLOCKED_SYMBOL_PHASES
+    if st.BLOCKED_SYMBOL_PHASES:
+        blocked_phases = st.BLOCKED_SYMBOL_PHASES.get(context.symbol, [])
+        if blocked_phases and "htf_trend" in df_slice.columns:
+            htf_val = int(df_slice.iloc[-1].get("htf_trend", 0))
+            current_phase = "Up" if htf_val >= 1 else ("Down" if htf_val <= -1 else "Flat")
+            if current_phase in blocked_phases:
+                _signal_log(f"{context.symbol} {context.direction} blocked: phase {current_phase} is blocked for this symbol")
+                return trades
+
     entry_allowed, entry_reason = evaluate_entry(df_slice, context.direction)
 
     # Debug: Count entry attempts for BTC/ETH

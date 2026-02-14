@@ -230,6 +230,18 @@ PHASE_STAKE_DIVISOR = 8  # stake = equity/8 (match paper_trader MAX_OPEN_POSITIO
 PHASE_PARAMS_CSV = os.path.join(BASE_OUT_DIR, "best_params_phase.csv")
 GLOBAL_PHASE_RESULTS = {}
 
+# Phase-based trade blocking: Don't enter trades in these phases for these symbols.
+# Based on sweep analysis showing negative PnL in these symbol+phase combinations.
+BLOCKED_SYMBOL_PHASES = {
+	"BNB/USDC": ["Down"],
+	"SOL/USDC": ["Down"],
+	"TNSR/USDC": ["Down"],
+	"XRP/USDC": ["Down"],
+	"ZEC/USDC": ["Down"],
+	"ICP/USDC": ["Flat"],
+	"SUI/USDC": ["Flat"],
+}
+
 INDICATOR_PRESETS = {
 	"supertrend": {
 		"display_name": "Supertrend",
@@ -1620,7 +1632,7 @@ def calculate_dynamic_min_min_hold_bars(
 		return min_days
 
 
-def backtest_supertrend(df, atr_stop_mult=None, direction="long", min_hold_bars=0, max_hold_bars=0):
+def backtest_supertrend(df, atr_stop_mult=None, direction="long", min_hold_bars=0, max_hold_bars=0, symbol=""):
 	direction = direction.lower()
 	if direction not in {"long", "short"}:
 		raise ValueError("direction must be 'long' or 'short'")
@@ -1709,9 +1721,19 @@ def backtest_supertrend(df, atr_stop_mult=None, direction="long", min_hold_bars=
 					# Don't enter short if bullish divergence (bear trap signal)
 					divergence_allows = not df["bullish_divergence"].iloc[i]
 
-			if long_mode and enter_long and htf_allows and momentum_allows and breakout_allows and jma_trend_allows and ma_slope_allows and pattern_allows and divergence_allows:
+			# Phase blocking: skip entry if symbol+phase is in BLOCKED_SYMBOL_PHASES
+			phase_allows = True
+			if BLOCKED_SYMBOL_PHASES and symbol:
+				blocked_phases = BLOCKED_SYMBOL_PHASES.get(symbol, [])
+				if blocked_phases and "htf_trend" in df.columns:
+					htf_val = int(df["htf_trend"].iloc[i])
+					current_phase = "Up" if htf_val >= 1 else ("Down" if htf_val <= -1 else "Flat")
+					if current_phase in blocked_phases:
+						phase_allows = False
+
+			if long_mode and enter_long and htf_allows and momentum_allows and breakout_allows and jma_trend_allows and ma_slope_allows and pattern_allows and divergence_allows and phase_allows:
 				in_position = True
-			elif (not long_mode) and enter_short and htf_allows and momentum_allows and breakout_allows and jma_trend_allows and ma_slope_allows and pattern_allows and divergence_allows:
+			elif (not long_mode) and enter_short and htf_allows and momentum_allows and breakout_allows and jma_trend_allows and ma_slope_allows and pattern_allows and divergence_allows and phase_allows:
 				in_position = True
 
 			if in_position:
@@ -1892,7 +1914,7 @@ def backtest_supertrend(df, atr_stop_mult=None, direction="long", min_hold_bars=
 	return pd.DataFrame(trades)
 
 
-def backtest_htf_crossover(df, atr_stop_mult=None, direction="long", min_hold_bars=0, max_hold_bars=0):
+def backtest_htf_crossover(df, atr_stop_mult=None, direction="long", min_hold_bars=0, max_hold_bars=0, symbol=""):
 	"""
 	Backtest HTF Crossover Strategy
 	Entry: Close crosses HTF indicator (upward for long, downward for short)
@@ -2009,7 +2031,17 @@ def backtest_htf_crossover(df, atr_stop_mult=None, direction="long", min_hold_ba
 					elif not long_mode and "bullish_divergence" in df.columns:
 						divergence_allows = not curr["bullish_divergence"]
 
-				if htf_allows and momentum_allows and breakout_allows and jma_trend_allows and ma_slope_allows and pattern_allows and divergence_allows:
+				# Phase blocking: skip entry if symbol+phase is in BLOCKED_SYMBOL_PHASES
+				phase_allows = True
+				if BLOCKED_SYMBOL_PHASES and symbol:
+					blocked_phases = BLOCKED_SYMBOL_PHASES.get(symbol, [])
+					if blocked_phases and "htf_trend" in df.columns:
+						htf_val = int(curr["htf_trend"])
+						current_phase = "Up" if htf_val >= 1 else ("Down" if htf_val <= -1 else "Flat")
+						if current_phase in blocked_phases:
+							phase_allows = False
+
+				if htf_allows and momentum_allows and breakout_allows and jma_trend_allows and ma_slope_allows and pattern_allows and divergence_allows and phase_allows:
 					in_position = True
 					entry_price = close_curr
 					entry_ts = ts
@@ -2481,6 +2513,9 @@ def write_overall_result_tables():
 				row["Indicator"] = key
 				row["IndicatorDisplay"] = indicator_labels[key]
 				row["Direction"] = direction.capitalize()
+				# Add BlockedPhases column from BLOCKED_SYMBOL_PHASES config
+				blocked = BLOCKED_SYMBOL_PHASES.get(symbol, [])
+				row["BlockedPhases"] = ",".join(blocked) if blocked else ""
 				csv_rows.append(row)
 	if csv_rows:
 		# Backup existing best_params_overall.csv before overwriting
@@ -2700,6 +2735,7 @@ def _run_saved_rows(rows_df, table_title, save_path=None, aggregate_sections=Non
 				atr_stop_mult=atr_mult,
 				direction=direction,
 				min_hold_bars=min_hold_bars,
+				symbol=symbol,
 			)
 		else:  # Default: trend_flip for all other indicators
 			trades = backtest_supertrend(
@@ -2707,6 +2743,7 @@ def _run_saved_rows(rows_df, table_title, save_path=None, aggregate_sections=Non
 				atr_stop_mult=atr_mult,
 				direction=direction,
 				min_hold_bars=min_hold_bars,
+				symbol=symbol,
 			)
 		direction_title = direction.capitalize()
 		atr_label = "None" if atr_mult is None else atr_mult
@@ -2721,6 +2758,8 @@ def _run_saved_rows(rows_df, table_title, save_path=None, aggregate_sections=Non
 			min_hold_bars,
 		)
 		updated_row = dict(row_dict)
+		# Refresh BlockedPhases from current config
+		blocked = BLOCKED_SYMBOL_PHASES.get(symbol, [])
 		updated_row.update({
 			"ParamA": param_a,
 			"ParamB": param_b,
@@ -2736,6 +2775,7 @@ def _run_saved_rows(rows_df, table_title, save_path=None, aggregate_sections=Non
 			"ProfitFactor": stats["ProfitFactor"],
 			"MaxDrawdown": stats["MaxDrawdown"],
 			"FinalEquity": stats["FinalEquity"],
+			"BlockedPhases": ",".join(blocked) if blocked else "",
 		})
 		updated_rows.append(updated_row)
 		fig = build_two_panel_figure(
@@ -2892,6 +2932,7 @@ def run_parameter_sweep():
 										direction=direction,
 										min_hold_bars=min_hold_bars,
 										max_hold_bars=max_hold_bars,
+										symbol=symbol,
 									)
 								else:  # Default: trend_flip for all other indicators
 									trades = backtest_supertrend(
@@ -2900,6 +2941,7 @@ def run_parameter_sweep():
 										direction=direction,
 										min_hold_bars=min_hold_bars,
 										max_hold_bars=max_hold_bars,
+										symbol=symbol,
 									)
 								stats = performance_report(
 									trades,
@@ -3330,6 +3372,7 @@ def run_phase_based_sweep():
 										direction=direction,
 										min_hold_bars=min_hold_bars,
 										max_hold_bars=max_hold_bars,
+										symbol=symbol,
 									)
 								else:
 									trades = backtest_supertrend(
@@ -3337,6 +3380,7 @@ def run_phase_based_sweep():
 										direction=direction,
 										min_hold_bars=min_hold_bars,
 										max_hold_bars=max_hold_bars,
+										symbol=symbol,
 									)
 
 								if trades.empty:
@@ -3472,10 +3516,10 @@ def _collect_best_phase_trades():
 
 		if indicator == "htf_crossover":
 			trades = backtest_htf_crossover(df_ind, atr_stop_mult=atr_mult, direction=direction,
-				min_hold_bars=min_hold, max_hold_bars=max_hold)
+				min_hold_bars=min_hold, max_hold_bars=max_hold, symbol=symbol)
 		else:
 			trades = backtest_supertrend(df_ind, atr_stop_mult=atr_mult, direction=direction,
-				min_hold_bars=min_hold, max_hold_bars=max_hold)
+				min_hold_bars=min_hold, max_hold_bars=max_hold, symbol=symbol)
 
 		if trades.empty:
 			continue
