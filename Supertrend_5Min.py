@@ -62,8 +62,8 @@ def timeframe_to_minutes(tf_str: str) -> int:
 
 EXCHANGE_ID = "binance"
 TIMEFRAME = "1h"
-LOOKBACK = 15000  # ~20 months of hourly bars (back to May 2024)
-BACKTEST_START_DATE = "2025-01-01"  # Backtest beginnt ab diesem Datum
+LOOKBACK = 20000  # ~27 months of hourly bars (back to Jan 2024)
+BACKTEST_START_DATE = "2024-01-01"  # Backtest beginnt ab diesem Datum
 OHLCV_CACHE_DIR = "ohlcv_cache"  # Directory for persistent OHLCV data storage
 # USDx symbols for optimization sweep
 SYMBOLS = [
