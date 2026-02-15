@@ -3411,8 +3411,10 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
         sweep_start = _time.time()
         old_sweep = st.RUN_PARAMETER_SWEEP
         old_overall = st.RUN_OVERALL_BEST
+        old_blocked = dict(st.BLOCKED_SYMBOL_PHASES)
         st.RUN_PARAMETER_SWEEP = True
         st.RUN_OVERALL_BEST = False
+        st.BLOCKED_SYMBOL_PHASES = {}  # Alle Phasen testen, Blocking wird danach neu bestimmt
         indicator_candidates = st.get_indicator_candidates()
         htf_candidates = st.get_highertimeframe_candidates()
         htf_length_values = st.HTF_LENGTH_VALUES
@@ -3443,6 +3445,7 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
         st.write_overall_phase_result_tables()
         st.RUN_PARAMETER_SWEEP = old_sweep
         st.RUN_OVERALL_BEST = old_overall
+        st.BLOCKED_SYMBOL_PHASES = old_blocked
         sweep_elapsed = _time.time() - sweep_start
         print(f"\n[Phase Sweep] Complete in {sweep_elapsed:.0f}s ({sweep_elapsed/60:.1f} min)")
         return

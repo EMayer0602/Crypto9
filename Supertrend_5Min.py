@@ -3879,6 +3879,86 @@ p.info {{ color: #888; }}
 	print(f"[Phase Sweep] HTML report: {report_path}")
 
 
+def _print_phase_pivot_table(df_out):
+	"""
+	Pivot Table: Symbol (Zeilen) × Phase (Spalten) → PnL.
+	Bester Indikator pro Symbol+Phase (höchste FinalEquity).
+	Identifiziert Symbol+Phase Kombis mit Verlust → BLOCKED_SYMBOL_PHASES.
+	"""
+	# Besten Indikator pro (Symbol, Phase) finden
+	pivot = {}
+	for _, row in df_out.iterrows():
+		symbol = row["Symbol"]
+		phase = row.get("Phase", "")
+		equity = float(row.get("FinalEquity", START_EQUITY))
+		indicator = row.get("IndicatorDisplay", row.get("Indicator", ""))
+		key = (symbol, phase)
+		if key not in pivot or equity > pivot[key]["equity"]:
+			pivot[key] = {"equity": equity, "pnl": equity - START_EQUITY, "indicator": indicator}
+
+	# Pivot Table drucken
+	phases_header = ["Up", "Down", "Flat"]
+	print(f"\n{'='*80}")
+	print(f"  PIVOT TABLE: Symbol × Phase → PnL (Bester Indikator)")
+	print(f"  Start-Kapital: {START_EQUITY:,.0f} USDT")
+	print(f"{'='*80}")
+	print(f"  {'Symbol':>12s}  {'Up':>14s}  {'Down':>14s}  {'Flat':>14s}")
+	print(f"  {'-'*60}")
+
+	blocked_new = {}
+	for symbol in SYMBOLS:
+		row_parts = []
+		for phase in phases_header:
+			key = (symbol, phase)
+			if key in pivot:
+				pnl = pivot[key]["pnl"]
+				marker = " *" if pnl < 0 else ""
+				row_parts.append(f"{pnl:>12.2f}{marker}")
+				if pnl < 0:
+					blocked_new.setdefault(symbol, []).append(phase)
+			else:
+				row_parts.append(f"{'N/A':>14s}")
+		print(f"  {symbol:>12s}  {'  '.join(row_parts)}")
+
+	# Blocked Phases ausgeben
+	print(f"\n  * = Verlust → wird geblockt")
+	print(f"\n  Empfohlene BLOCKED_SYMBOL_PHASES:")
+	if blocked_new:
+		print(f"  BLOCKED_SYMBOL_PHASES = {{")
+		for symbol in SYMBOLS:
+			if symbol in blocked_new:
+				phases_str = ", ".join(f'"{p}"' for p in blocked_new[symbol])
+				print(f'      "{symbol}": [{phases_str}],')
+		print(f"  }}")
+	else:
+		print(f"  BLOCKED_SYMBOL_PHASES = {{}}  # Keine Verlust-Kombis!")
+	print(f"{'='*80}")
+
+	# Pivot-Tabelle auch als CSV speichern
+	pivot_rows = []
+	for symbol in SYMBOLS:
+		row_data = {"Symbol": symbol}
+		for phase in phases_header:
+			key = (symbol, phase)
+			if key in pivot:
+				row_data[f"PnL_{phase}"] = pivot[key]["pnl"]
+				row_data[f"Indicator_{phase}"] = pivot[key]["indicator"]
+				row_data[f"Equity_{phase}"] = pivot[key]["equity"]
+			else:
+				row_data[f"PnL_{phase}"] = None
+				row_data[f"Indicator_{phase}"] = None
+				row_data[f"Equity_{phase}"] = None
+		pivot_rows.append(row_data)
+
+	if pivot_rows:
+		pivot_df = pd.DataFrame(pivot_rows)
+		pivot_path = os.path.join(BASE_OUT_DIR, "phase_pivot_table.csv")
+		pivot_df.to_csv(pivot_path, sep=";", decimal=",", index=False, encoding="utf-8")
+		print(f"\n  Pivot Table gespeichert: {pivot_path}")
+
+	return blocked_new
+
+
 def write_overall_phase_result_tables():
 	"""Write phase-based best parameters to PHASE_PARAMS_CSV (best_params_overall.csv)."""
 	if not GLOBAL_PHASE_RESULTS:
@@ -3932,6 +4012,9 @@ def write_overall_phase_result_tables():
 				  f"A={row.get('ParamA',''):>5} B={row.get('ParamB',''):>5} "
 				  f"HTF={row.get('HTF','')}/L={row.get('HTFLength','')}/F={row.get('HTFFactor','')} "
 				  f"Equity={eq:>12.2f}")
+
+		# ── Pivot Table: Symbol × Phase → PnL (bester Indikator je Kombi) ──
+		_print_phase_pivot_table(df_out)
 	else:
 		print("[Phase Sweep] No results to write.")
 
