@@ -3959,7 +3959,7 @@ def _print_phase_pivot_table(df_out):
 	return blocked_new
 
 
-def write_overall_phase_result_tables():
+def write_overall_phase_result_tables(dashboard_start="2025-12-01"):
 	"""Write phase-based best parameters to PHASE_PARAMS_CSV (best_params_overall.csv)."""
 	if not GLOBAL_PHASE_RESULTS:
 		print("[Phase Sweep] No results to write.")
@@ -3998,7 +3998,7 @@ def write_overall_phase_result_tables():
 		print("\n[Phase Dashboard] Collecting phase trades for dashboard...")
 		phase_trades = _collect_best_phase_trades()
 		if phase_trades:
-			_generate_phase_dashboard(phase_trades, dashboard_start="2025-12-01")
+			_generate_phase_dashboard(phase_trades, dashboard_start=dashboard_start)
 		else:
 			print("[Phase Dashboard] No trades collected.")
 

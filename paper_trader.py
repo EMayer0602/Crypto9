@@ -3442,7 +3442,7 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
                         print(f"\n[Phase Sweep {combo_num}/{total_combos}] {st.INDICATOR_DISPLAY_NAME} HTF={htf_value} L={htf_len} F={htf_fac}")
                         summary_rows = st.run_phase_based_sweep()
                         st.record_global_phase_best(indicator_name, summary_rows)
-        st.write_overall_phase_result_tables()
+        st.write_overall_phase_result_tables(dashboard_start=args.dashboard_start)
         st.RUN_PARAMETER_SWEEP = old_sweep
         st.RUN_OVERALL_BEST = old_overall
         st.BLOCKED_SYMBOL_PHASES = old_blocked
