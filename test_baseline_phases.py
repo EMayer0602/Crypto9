@@ -103,16 +103,35 @@ def write_dark_phase_html(summary, title, html_path):
     trades = summary.get("trades", [])
     open_positions = summary.get("open_positions_data", [])
 
-    closed_pnl = summary.get("closed_pnl", 0)
-    final_cap = summary.get("final_capital", st.START_EQUITY)
     start_cap = st.START_EQUITY
     n_closed = summary.get("closed_trades", len(trades))
-    n_open = len(open_positions)
     win_rate = summary.get("win_rate_pct", 0)
     max_pos = pt.MAX_OPEN_POSITIONS
 
-    # Open PnL
-    open_pnl = summary.get("open_equity", 0)
+    # Compound-recalculate: final closed capital from compound trades
+    compound_closed_pnl = sum(float(t.get("pnl", 0) or 0) for t in trades)
+    final_closed_capital = start_cap + compound_closed_pnl
+    closed_pnl = compound_closed_pnl
+
+    # Recalculate open position stakes: uniform stake = final_closed_capital / max_pos
+    uniform_stake = final_closed_capital / max_pos
+    for op in open_positions:
+        ep = float(op.get("entry_price", 0) or 0)
+        lp = float(op.get("last_price", 0) or op.get("exit_price", 0) or 0)
+        direction = str(op.get("direction", "long")).lower()
+        if direction == "long":
+            pnl_pct = (lp - ep) / ep if ep else 0
+        else:
+            pnl_pct = (ep - lp) / ep if ep else 0
+        op["stake"] = uniform_stake
+        op["unrealized_pnl"] = pnl_pct * uniform_stake
+        op["unrealized_pct"] = pnl_pct * 100
+
+    n_open = len(open_positions)
+
+    # Open PnL (recalculated)
+    open_pnl = sum(float(op.get("unrealized_pnl", 0) or 0) for op in open_positions)
+    final_cap = final_closed_capital + open_pnl
 
     cap_color = "#27ae60" if final_cap >= start_cap else "#e74c3c"
     pnl_color = "#27ae60" if closed_pnl >= 0 else "#e74c3c"
@@ -242,15 +261,30 @@ def write_dark_dashboard_html(all_trades, date_from, title, html_path, max_posit
     now = datetime.now(st.BERLIN_TZ).strftime("%Y-%m-%d %H:%M:%S %Z")
     start_cap = st.START_EQUITY
     n_closed = len(processed)
-    total_pnl = sum(t["pnl"] for t in processed) if processed else 0
-    final_cap = processed[-1]["equity_after"] if processed else start_cap
+    closed_pnl = sum(t["pnl"] for t in processed) if processed else 0
+    final_closed_cap = processed[-1]["equity_after"] if processed else start_cap
     winners = sum(1 for t in processed if t["pnl"] > 0)
     win_rate = (winners / n_closed * 100) if n_closed else 0
 
-    # Open positions from simulation state (not from closed trades)
-    open_t = open_positions_data or []
-    closed_pnl = total_pnl
+    # Open positions: recalculate stakes from dashboard compound equity
+    open_t = []
+    for op in (open_positions_data or []):
+        op = dict(op)  # copy
+        uniform_stake = final_closed_cap / max_positions
+        ep = float(op.get("entry_price", 0) or 0)
+        lp = float(op.get("last_price", 0) or op.get("exit_price", 0) or 0)
+        direction = str(op.get("direction", "long")).lower()
+        if direction == "long":
+            pnl_pct = (lp - ep) / ep if ep else 0
+        else:
+            pnl_pct = (ep - lp) / ep if ep else 0
+        op["stake"] = uniform_stake
+        op["unrealized_pnl"] = pnl_pct * uniform_stake
+        op["unrealized_pct"] = pnl_pct * 100
+        open_t.append(op)
+
     open_pnl = sum(float(t.get("unrealized_pnl", 0) or 0) for t in open_t)
+    final_cap = final_closed_cap + open_pnl
 
     cap_color = "#27ae60" if final_cap >= start_cap else "#e74c3c"
     pnl_color = "#27ae60" if closed_pnl >= 0 else "#e74c3c"
@@ -363,21 +397,21 @@ tr:hover {{ background: #16213e; }}
 
 def main():
     parser = argparse.ArgumentParser(description="Phase baseline using paper_trader simulation")
-    parser.add_argument("--start", type=str, default="2025-12-01",
-                        help="Dashboard start date (default: 2025-12-01)")
-    parser.add_argument("--sim-start", type=str, default="2024-01-31",
+    parser.add_argument("--start", type=str, default="2024-01-31",
                         help="Simulation start date (default: 2024-01-31)")
+    parser.add_argument("--dashboard-start", type=str, default="2025-01-01",
+                        help="Dashboard start date (default: 2025-01-01)")
     args = parser.parse_args()
 
-    dashboard_start = args.start
-    sim_start = pd.Timestamp(args.sim_start, tz=st.BERLIN_TZ)
+    dashboard_start = args.dashboard_start
+    sim_start = pd.Timestamp(args.start, tz=st.BERLIN_TZ)
     sim_end = pd.Timestamp.now(tz=st.BERLIN_TZ)
     symbols = st.SYMBOLS
 
     print(f"=== Phase Baseline (via paper_trader) ===")
     print(f"Indicators: {TRADING_INDICATORS}")
     print(f"MAX_OPEN_POSITIONS: {pt.MAX_OPEN_POSITIONS} | STAKE_DIVISOR: {pt.STAKE_DIVISOR}")
-    print(f"Simulation: {args.sim_start} to now | Dashboard ab {dashboard_start}")
+    print(f"Simulation: {args.start} to now | Dashboard ab {dashboard_start}")
 
     # Save original globals
     orig_htf_length = st.HTF_LENGTH
