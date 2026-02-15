@@ -1978,7 +1978,7 @@ def merge_trades(existing_trades: list, new_trades: list) -> list:
     return merged
 
 
-def write_summary_json(summary: Dict[str, Any], path: str) -> None:
+def write_summary_json(summary: Dict[str, Any], path: str, summary_start: str = "2024-01-31") -> None:
     import re as _re
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(summary, fh, ensure_ascii=False, indent=2)
@@ -2005,13 +2005,36 @@ def write_summary_json(summary: Dict[str, Any], path: str) -> None:
 
     # Also generate trading_summary.html
     html_path = path.replace(".json", ".html")
-    write_summary_html(summary, html_path)
+    write_summary_html(summary, html_path, summary_start=summary_start)
 
 
-def write_summary_html(summary: Dict[str, Any], path: str) -> None:
+def write_summary_html(summary: Dict[str, Any], path: str, summary_start: str = "2024-01-31") -> None:
     """Generate trading_summary.html from summary data."""
     trades = summary.get("trades", [])
     open_positions_raw = summary.get("open_positions_data", [])
+
+    # Filter trades by summary_start date and recalculate compound growth from START_TOTAL_CAPITAL
+    if summary_start:
+        trades = [dict(t) for t in trades if (t.get("entry_time", "") or "")[:10] >= summary_start]
+        trades_asc = sorted(trades, key=lambda t: t.get("entry_time", "") or "")
+        capital = float(START_TOTAL_CAPITAL)
+        for t in trades_asc:
+            entry_price = float(t.get("entry_price", 0) or 0)
+            exit_price = float(t.get("exit_price", 0) or 0)
+            direction = str(t.get("direction", "long")).lower()
+            stake = capital / MAX_OPEN_POSITIONS
+            if entry_price > 0:
+                if direction == "long":
+                    pnl_pct = (exit_price - entry_price) / entry_price
+                else:
+                    pnl_pct = (entry_price - exit_price) / entry_price
+                pnl = pnl_pct * stake
+            else:
+                pnl = 0.0
+            t["stake"] = stake
+            t["pnl"] = pnl
+            capital += pnl
+        trades = trades_asc
 
     total_trades = len(trades)
     open_count = len(open_positions_raw)
@@ -3261,6 +3284,8 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         help="Run simulation continuously, refreshing every --signal-interval minutes")
     parser.add_argument("--dashboard-start", type=str, default="2025-12-01",
         help="Start date for dashboard filtering (default: 2025-12-01)")
+    parser.add_argument("--summary-start", type=str, default="2024-01-31",
+        help="Start date for summary HTML filtering (default: 2024-01-31)")
     return parser.parse_args(argv)
 
 
@@ -3498,7 +3523,7 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
         open_df = open_positions_to_dataframe(open_positions)
         summary_data = build_summary_payload(trades_df, open_df, final_state, start_ts, end_ts)
         summary_json_path = args.summary_json or SIMULATION_SUMMARY_JSON
-        write_summary_json(summary_data, summary_json_path)
+        write_summary_json(summary_data, summary_json_path, summary_start=args.summary_start)
 
         # Regenerate dashboards
         try:
@@ -3735,7 +3760,7 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
         open_df = open_positions_to_dataframe(open_positions)
         summary_data = build_summary_payload(all_trades_df, open_df, final_state, start_ts, end_ts)
         summary_json_path = args.summary_json or SIMULATION_SUMMARY_JSON
-        write_summary_json(summary_data, summary_json_path)
+        write_summary_json(summary_data, summary_json_path, summary_start=args.summary_start)
 
         # Regenerate dashboards
         try:
