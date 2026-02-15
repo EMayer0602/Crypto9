@@ -112,10 +112,10 @@ def set_dashboard_start(start_date) -> None:
     _DASHBOARD_START = start_date
 
 
-def get_dashboard_start_str() -> str | None:
+def get_dashboard_start_str() -> str:
     """Get dashboard start date as YYYY-MM-DD string for generate_dashboard()."""
     if _DASHBOARD_START is None:
-        return None
+        return "2025-12-01"
     return _DASHBOARD_START.strftime("%Y-%m-%d")
 
 
@@ -2020,7 +2020,9 @@ def write_summary_html(summary: Dict[str, Any], path: str) -> None:
     losers = sum(1 for t in trades if float(t.get("pnl", 0) or 0) < 0)
     win_rate = (winners / total_trades * 100) if total_trades > 0 else 0
 
-    final_capital = summary.get("final_capital", 16500.0)
+    # Use compound-recalculated final capital (trades already have compound PnL from build_summary_payload)
+    compound_closed_pnl = sum(float(t.get("pnl", 0) or 0) for t in trades)
+    final_capital = START_TOTAL_CAPITAL + compound_closed_pnl
     max_positions = MAX_OPEN_POSITIONS
     dynamic_stake = final_capital / max_positions
 

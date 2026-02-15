@@ -3591,9 +3591,14 @@ def _generate_phase_dashboard(all_trades, dashboard_start="2025-12-01", summary_
 
 	# ── Compound growth helper: start at START_EQUITY, stake = capital/max_positions ──
 	def _apply_compound(trades_raw):
+		# Separate closed and open ("Final bar") trades
+		closed_raw = [t for t in trades_raw if t.get("reason", "") != "Final bar"]
+		open_raw = [t for t in trades_raw if t.get("reason", "") == "Final bar"]
+
+		# Apply compound growth to closed trades only
 		capital = START_EQUITY
 		result = []
-		for t in trades_raw:
+		for t in closed_raw:
 			stake = capital / max_positions
 			ep = t["entry_price"]
 			xp = t["exit_price"]
@@ -3611,6 +3616,27 @@ def _generate_phase_dashboard(all_trades, dashboard_start="2025-12-01", summary_
 			tc["pnl_pct"] = pnl_pct
 			tc["fees"] = fees
 			tc["equity_after"] = capital
+			result.append(tc)
+
+		# Open positions: uniform stake = final closed capital / max_positions
+		final_closed_capital = capital
+		open_stake = final_closed_capital / max_positions
+		for t in open_raw:
+			ep = t["entry_price"]
+			xp = t["exit_price"]
+			if t["direction"] == "long":
+				pnl_pct = (xp - ep) / ep if ep else 0
+			else:
+				pnl_pct = (ep - xp) / ep if ep else 0
+			pnl_gross = pnl_pct * open_stake
+			fees = open_stake * FEE_RATE * 2.0
+			pnl_net = pnl_gross - fees
+			tc = dict(t)
+			tc["stake"] = open_stake
+			tc["pnl"] = pnl_net
+			tc["pnl_pct"] = pnl_pct
+			tc["fees"] = fees
+			tc["equity_after"] = final_closed_capital
 			result.append(tc)
 		return result
 
@@ -3650,19 +3676,21 @@ def _generate_phase_dashboard(all_trades, dashboard_start="2025-12-01", summary_
 		return "<tr>" + "".join(cols) + "</tr>"
 
 	def _build_html(trades_filtered, title, date_label, start_cap, auto_refresh=False):
+		open_t = [t for t in trades_filtered if t["reason"] == "Final bar"]
+		closed_t = [t for t in trades_filtered if t["reason"] != "Final bar"]
+
 		total_trades = len(trades_filtered)
 		winners = sum(1 for t in trades_filtered if t["pnl"] > 0)
 		win_rate = (winners / total_trades * 100) if total_trades else 0
-		total_pnl = sum(t["pnl"] for t in trades_filtered)
-		final_cap = trades_filtered[-1]["equity_after"] if trades_filtered else start_cap
-
-		open_t = [t for t in trades_filtered if t["reason"] == "Final bar"]
-		closed_t = [t for t in trades_filtered if t["reason"] != "Final bar"]
 		# Limit open positions to max_positions (e.g. 8)
 		if len(open_t) > max_positions:
 			open_t = sorted(open_t, key=lambda t: t["entry_time"], reverse=True)[:max_positions]
 		open_pnl = sum(t["pnl"] for t in open_t)
 		closed_pnl = sum(t["pnl"] for t in closed_t)
+		total_pnl = closed_pnl + open_pnl
+		# Final capital = closed equity + unrealized open PnL
+		closed_capital = closed_t[-1]["equity_after"] if closed_t else start_cap
+		final_cap = closed_capital + open_pnl
 
 		open_rows = "\n".join(trade_row(t, show_exit=False) for t in open_t) if open_t else '<tr><td colspan="11" style="text-align:center;color:#888">Keine offenen Positionen</td></tr>'
 		closed_rows = "\n".join(trade_row(t, show_exit=True) for t in reversed(closed_t)) if closed_t else '<tr><td colspan="12" style="text-align:center;color:#888">Keine Trades</td></tr>'
