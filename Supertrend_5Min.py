@@ -599,6 +599,30 @@ def _maybe_append_synthetic_bar(df, symbol, timeframe):
 	return df
 
 
+def _update_cache_end_gap(symbol, timeframe, cached_df):
+	"""If cached data is stale, download only the missing recent bars and merge."""
+	if cached_df.empty:
+		return cached_df
+	now = pd.Timestamp.now(tz=BERLIN_TZ)
+	latest = cached_df.index.max()
+	tf_minutes = timeframe_to_minutes(timeframe)
+	# Only fetch if cache is more than 2 bars behind
+	if latest >= now - pd.Timedelta(minutes=tf_minutes * 2):
+		return cached_df
+	try:
+		new_df = download_historical_ohlcv(symbol, timeframe, latest, now)
+		if new_df is not None and not new_df.empty:
+			save_ohlcv_to_cache(symbol, timeframe, new_df)
+			combined = pd.concat([cached_df, new_df])
+			combined = combined[~combined.index.duplicated(keep='last')]
+			combined = combined.sort_index()
+			print(f"[Cache] Gap-filled {len(new_df)} new bars for {symbol} {timeframe}")
+			return combined
+	except Exception as exc:
+		print(f"[Cache] Gap-fill failed for {symbol} {timeframe}: {exc}")
+	return cached_df
+
+
 def fetch_data(symbol, timeframe, limit):
 	key = (symbol, timeframe, limit)
 	if key in DATA_CACHE:
@@ -610,17 +634,20 @@ def fetch_data(symbol, timeframe, limit):
 		# If limit is None or 0, return ALL cached data (for simulations)
 		if limit is None or limit == 0:
 			if not persistent_df.empty:
+				# Gap-fill: download only missing recent bars
+				persistent_df = _update_cache_end_gap(symbol, timeframe, persistent_df)
 				cache_df = persistent_df
 				print(f"[Cache] Loaded {len(cache_df)} bars for {symbol} {timeframe} from {cache_df.index[0].strftime('%Y-%m-%d')} to {cache_df.index[-1].strftime('%Y-%m-%d')}")
 			else:
-				# Fall back to API with large limit
+				# No cache at all — fall back to API with large limit
 				cache_df = _fetch_direct_ohlcv(symbol, timeframe, 10000)
 				if not cache_df.empty:
 					print(f"[API] Fetched {len(cache_df)} bars for {symbol} {timeframe} from {cache_df.index[0].strftime('%Y-%m-%d')} to {cache_df.index[-1].strftime('%Y-%m-%d')}")
 					save_ohlcv_to_cache(symbol, timeframe, cache_df)
 		# If we have data in persistent cache, use it (prefer cache over API)
 		elif not persistent_df.empty:
-			# Use cached data - even if less than requested (API can't give more anyway)
+			# Gap-fill: download only missing recent bars
+			persistent_df = _update_cache_end_gap(symbol, timeframe, persistent_df)
 			cache_df = persistent_df.tail(limit) if len(persistent_df) >= limit else persistent_df
 			print(f"[Cache] Loaded {len(cache_df)} bars for {symbol} {timeframe}")
 		else:
@@ -2831,10 +2858,57 @@ def _run_saved_rows(rows_df, table_title, save_path=None, aggregate_sections=Non
 	return updated_df.to_dict("records") if updated_df is not None else []
 
 
-def ensure_cache_populated(symbols, timeframe, min_bars):
-	"""Ensure OHLCV cache has enough data for all symbols before running sweep."""
-	import time
+def _fill_cache_gaps(symbol, timeframe, start_date, now):
+	"""Download only missing gaps for a symbol/timeframe pair. Returns bars downloaded."""
+	import time as _time
 
+	cached = load_ohlcv_from_cache(symbol, timeframe)
+
+	if cached.empty:
+		# No cache at all — full download from start_date
+		print(f"[Cache Init] {symbol} {timeframe}: No cache — downloading from {start_date.strftime('%Y-%m-%d')}...")
+		df = download_historical_ohlcv(symbol, timeframe, start_date, now)
+		if not df.empty:
+			save_ohlcv_to_cache(symbol, timeframe, df)
+		_time.sleep(0.3)
+		return len(df) if not df.empty else 0
+
+	earliest = cached.index.min()
+	latest = cached.index.max()
+	tf_minutes = timeframe_to_minutes(timeframe)
+	downloads_needed = []
+
+	# Gap at the beginning?
+	if earliest > start_date + pd.Timedelta(days=1):
+		downloads_needed.append(("start", start_date, earliest))
+
+	# Gap at the end? (more than 2 bars behind)
+	if latest < now - pd.Timedelta(minutes=tf_minutes * 2):
+		downloads_needed.append(("end", latest, now))
+
+	if not downloads_needed:
+		print(f"[Cache Init] {symbol} {timeframe}: {len(cached)} bars, up to {latest.strftime('%Y-%m-%d %H:%M')} — OK")
+		return 0
+
+	gaps_desc = ", ".join(f"{g[0]}: {g[1].strftime('%Y-%m-%d %H:%M')}..{g[2].strftime('%Y-%m-%d %H:%M')}" for g in downloads_needed)
+	print(f"[Cache Init] {symbol} {timeframe}: {len(cached)} bars, filling gaps ({gaps_desc})")
+
+	total_new = 0
+	for _, dl_start, dl_end in downloads_needed:
+		try:
+			df = download_historical_ohlcv(symbol, timeframe, dl_start, dl_end)
+			if not df.empty:
+				save_ohlcv_to_cache(symbol, timeframe, df)
+				total_new += len(df)
+		except Exception as exc:
+			print(f"[Cache Init] ERROR filling gap for {symbol} {timeframe}: {exc}")
+	_time.sleep(0.3)
+	return total_new
+
+
+def ensure_cache_populated(symbols, timeframe, min_bars):
+	"""Ensure OHLCV cache has enough data for all symbols before running sweep.
+	Uses gap-filling: only downloads missing date ranges instead of re-downloading everything."""
 	# Quick API connectivity check - skip downloads if unreachable
 	try:
 		ex = get_data_exchange()
@@ -2845,51 +2919,27 @@ def ensure_cache_populated(symbols, timeframe, min_bars):
 
 	# Fixed start date: 2024-05-01 for historical sweep data
 	start_date = pd.Timestamp("2024-05-01", tz=BERLIN_TZ)
+	now = pd.Timestamp.now(tz=BERLIN_TZ)
 
 	# Only download Binance-supported timeframes
 	# Unsupported timeframes (3h, 5h, 7h, etc.) will be synthesized from 1h data by fetch_data()
 	binance_supported_tf = ["1h", "2h", "4h", "6h", "8h", "12h", "1d"]
 
-	print(f"\n[Cache Init] Checking cache for {len(symbols)} symbols")
+	print(f"\n[Cache Init] Checking cache for {len(symbols)} symbols (gap-fill mode)")
 	print(f"[Cache Init] Main TF: {timeframe} needs {min_bars} bars")
 	print(f"[Cache Init] Downloading Binance-supported TFs: {binance_supported_tf}")
 	print(f"[Cache Init] (Other TFs like 3h, 5h, etc. will be synthesized from 1h data)")
-	print(f"[Cache Init] Will download from {start_date.strftime('%Y-%m-%d')} if needed\n")
+	print(f"[Cache Init] Range: {start_date.strftime('%Y-%m-%d')} to {now.strftime('%Y-%m-%d %H:%M')}\n")
 
 	for symbol in symbols:
-		# Check and populate main timeframe cache
-		cached_df = load_ohlcv_from_cache(symbol, timeframe)
-		cached_bars = len(cached_df) if cached_df is not None else 0
+		# Fill gaps for main timeframe
+		_fill_cache_gaps(symbol, timeframe, start_date, now)
 
-		if cached_bars >= min_bars:
-			print(f"[Cache Init] {symbol} {timeframe}: OK ({cached_bars} bars)")
-		else:
-			print(f"[Cache Init] {symbol} {timeframe}: Need data (only {cached_bars} bars, need {min_bars})")
-			df = download_historical_ohlcv(symbol, timeframe, start_date)
-			if not df.empty:
-				save_ohlcv_to_cache(symbol, timeframe, df)
-				print(f"[Cache Init] {symbol} {timeframe}: Downloaded {len(df)} bars")
-			else:
-				print(f"[Cache Init] {symbol} {timeframe}: WARNING - No data!")
-			time.sleep(0.5)
-
-		# Also cache Binance-supported HTF data for this symbol
+		# Fill gaps for Binance-supported HTF timeframes
 		for htf in binance_supported_tf:
 			if htf == timeframe:
 				continue  # Already handled above
-
-			htf_cached = load_ohlcv_from_cache(symbol, htf)
-			htf_bars = len(htf_cached) if htf_cached is not None else 0
-
-			if htf_bars >= HTF_LOOKBACK:
-				continue  # HTF cache OK, skip silently
-
-			print(f"[Cache Init] {symbol} {htf}: Downloading HTF data...")
-			df = download_historical_ohlcv(symbol, htf, start_date)
-			if not df.empty:
-				save_ohlcv_to_cache(symbol, htf, df)
-				print(f"[Cache Init] {symbol} {htf}: Downloaded {len(df)} bars")
-			time.sleep(0.3)
+			_fill_cache_gaps(symbol, htf, start_date, now)
 
 	print("\n[Cache Init] Cache check complete\n")
 
