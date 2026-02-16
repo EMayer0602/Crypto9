@@ -92,7 +92,7 @@ DEFAULT_DIRECTION_CAPITAL = 2_800.0
 BASE_BAR_MINUTES = st.timeframe_to_minutes(st.TIMEFRAME)
 DEFAULT_SYMBOL_ALLOWLIST = [sym.strip() for sym in st.SYMBOLS if sym and sym.strip()]
 DEFAULT_FIXED_STAKE = 2000.0  # Fixed stake per trade
-DEFAULT_ALLOWED_DIRECTIONS = ["long", "short"]  # Enable both long and short trades
+DEFAULT_ALLOWED_DIRECTIONS = ["long"]  # Long-only trading
 DEFAULT_USE_TESTNET = False  # Testnet should be opt-in with --testnet flag
 USE_TIME_BASED_EXIT = True  # Enable time-based exits based on optimal hold times
 SIGNAL_DEBUG = False
@@ -678,7 +678,7 @@ def append_trade_log(trade: TradeResult) -> None:
         param_desc_quoted = f'"{trade.param_desc}"' if "," in trade.param_desc else trade.param_desc
         reason_quoted = f'"{trade.reason}"' if "," in trade.reason else trade.reason
         fh.write(
-            f"{datetime.utcnow().isoformat()},"
+            f"{datetime.now(timezone.utc).isoformat()},"
             f"{trade.symbol},{trade.direction},{trade.indicator},{trade.htf},{param_desc_quoted},"
             f"{trade.entry_time},{trade.entry_price:.8f},{trade.exit_time},{trade.exit_price:.8f},"
             f"{trade.stake:.2f},{trade.fees:.2f},{trade.pnl:.2f},{trade.equity_after:.2f},{reason_quoted}\n"
@@ -1064,7 +1064,7 @@ def bars_in_position(entry_iso: str, latest_ts: pd.Timestamp, htf_timeframe: Opt
     if htf_timeframe:
         try:
             bar_minutes = st.timeframe_to_minutes(htf_timeframe)
-        except:
+        except (ValueError, TypeError):
             bar_minutes = BASE_BAR_MINUTES
     else:
         bar_minutes = BASE_BAR_MINUTES
@@ -1085,7 +1085,7 @@ def filters_allow_entry(direction: str, df: pd.DataFrame) -> tuple[bool, str]:
             return False, f"HTF filter blocked (value={htf_value})"
     if st.USE_MOMENTUM_FILTER and "momentum" in df.columns:
         mom_value = curr.get("momentum")
-        if np.isnan(mom_value):
+        if mom_value is None or (isinstance(mom_value, (int, float)) and np.isnan(mom_value)):
             return False, "Momentum unavailable"
         if direction == "long" and mom_value < st.RSI_LONG_THRESHOLD:
             return False, f"Momentum below threshold ({mom_value:.2f})"

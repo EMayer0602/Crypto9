@@ -129,7 +129,7 @@ RUN_PARAMETER_SWEEP = False  # ← Deaktiviert, Parameter bereits berechnet
 RUN_SAVED_PARAMS = False
 RUN_OVERALL_BEST = True  # ← AKTIVIERT für Portfolio-Simulation
 ENABLE_LONGS = True
-ENABLE_SHORTS = True  # Enabled for both long and short trading
+ENABLE_SHORTS = False  # Long-only trading
 
 # === PERFORMANCE OPTIMIZATIONS ===
 SKIP_SYNTHETIC_BARS = True  # Skip synthetic bar creation for backtesting (big speedup!)
@@ -299,17 +299,16 @@ _exchange = None
 _data_exchange = None
 DATA_CACHE = {}
 
+# Global futures exchange (unauthenticated, for public OHLCV data)
+_futures_exchange = None
+FUTURES_DATA_CACHE = {}
+
 
 def clear_data_cache():
 	"""Clear the data cache to force fresh data fetch including updated synthetic bars."""
 	global DATA_CACHE, FUTURES_DATA_CACHE
 	DATA_CACHE = {}
 	FUTURES_DATA_CACHE = {}
-
-
-# Global futures exchange (unauthenticated, for public OHLCV data)
-_futures_exchange = None
-FUTURES_DATA_CACHE = {}
 
 
 def get_futures_exchange():
@@ -1701,8 +1700,8 @@ def backtest_supertrend(df, atr_stop_mult=None, direction="long", min_hold_bars=
 				entry_atr = float(atr_val) if not np.isnan(atr_val) else 0.0
 				bars_in_position = 0
 				# Initialize exit strategy tracking
-				highest_price = entry_price if long_mode else entry_price
-				lowest_price = entry_price if not long_mode else entry_price
+				highest_price = entry_price
+				lowest_price = entry_price
 				remaining_position = 1.0  # 100% of position
 				partial_exits_taken = []  # Track which partial exit levels hit
 			continue
@@ -1992,8 +1991,8 @@ def backtest_htf_crossover(df, atr_stop_mult=None, direction="long", min_hold_ba
 					entry_atr = float(atr_val) if not np.isnan(atr_val) else 0.0
 					bars_in_position = 0
 					# Initialize exit strategy tracking
-					highest_price = entry_price if long_mode else entry_price
-					lowest_price = entry_price if not long_mode else entry_price
+					highest_price = entry_price
+					lowest_price = entry_price
 					remaining_position = 1.0
 					partial_exits_taken = []
 			continue
@@ -2458,9 +2457,10 @@ def write_overall_result_tables():
 def write_combined_overall_best_report(sections):
 	if not sections:
 		return
-	best_per_symbol = {}
+	best_per_symbol_dir = {}
 	for item in sections:
 		symbol = item.get("symbol")
+		direction = item.get("direction", "").lower()
 		if not symbol:
 			continue
 		value = item.get("final_equity")
@@ -2468,10 +2468,11 @@ def write_combined_overall_best_report(sections):
 			value = float(value)
 		except (TypeError, ValueError):
 			value = float("-inf")
-		current = best_per_symbol.get(symbol)
+		key = (symbol, direction)
+		current = best_per_symbol_dir.get(key)
 		if current is None or value > current[0]:
-			best_per_symbol[symbol] = (value, item)
-	sections = [entry for (_, entry) in best_per_symbol.values()]
+			best_per_symbol_dir[key] = (value, item)
+	sections = [entry for (_, entry) in best_per_symbol_dir.values()]
 	sections.sort(key=lambda item: item.get("symbol", ""))
 	long_entries = [s for s in sections if s.get("direction", "").lower() == "long"]
 	short_entries = [s for s in sections if s.get("direction", "").lower() == "short"]
@@ -2592,7 +2593,7 @@ def _normalize_param_values(param_a, param_b):
 		param_a = int(round(float(param_a)))
 	else:
 		param_a = float(param_a)
-	if INDICATOR_TYPE in {}:
+	if INDICATOR_TYPE in {"jma"}:
 		param_b = int(round(float(param_b)))
 	else:
 		param_b = float(param_b)

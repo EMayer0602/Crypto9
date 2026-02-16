@@ -127,7 +127,7 @@ def compute_htf_indicator_cached(symbol, df_htf):
         return _htf_cache[cache_key]
 
     # Compute indicator
-    if st.INDICATOR_TYPE == "supertrend" or st.INDICATOR_TYPE == "htf_crossover":
+    if st.INDICATOR_TYPE in ("supertrend", "htf_crossover"):
         df_ind = st.compute_supertrend(df_htf, length=st.HTF_LENGTH, factor=st.HTF_FACTOR)
         indicator_col = "supertrend"
         trend_col = "st_trend"
@@ -135,6 +135,18 @@ def compute_htf_indicator_cached(symbol, df_htf):
         df_ind = st.compute_psar(df_htf, step=st.HTF_PSAR_STEP, max_step=st.HTF_PSAR_MAX_STEP)
         indicator_col = "psar"
         trend_col = "psar_trend"
+    elif st.INDICATOR_TYPE == "jma":
+        df_ind = st.compute_jma(df_htf, length=st.HTF_JMA_LENGTH, phase=st.HTF_JMA_PHASE)
+        indicator_col = "jma"
+        trend_col = "jma_trend"
+    elif st.INDICATOR_TYPE == "kama":
+        df_ind = st.compute_kama(df_htf, length=st.HTF_KAMA_LENGTH, slow_length=st.HTF_KAMA_SLOW_LENGTH)
+        indicator_col = "kama"
+        trend_col = "kama_trend"
+    elif st.INDICATOR_TYPE == "mama":
+        df_ind = st.compute_mama(df_htf, fast_limit=st.HTF_MAMA_FAST_LIMIT, slow_limit=st.HTF_MAMA_SLOW_LIMIT)
+        indicator_col = "mama"
+        trend_col = "mama_trend"
     else:
         df_ind = st.compute_supertrend(df_htf, length=st.HTF_LENGTH, factor=st.HTF_FACTOR)
         indicator_col = "supertrend"
