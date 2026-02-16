@@ -3414,6 +3414,7 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
         old_blocked = dict(st.BLOCKED_SYMBOL_PHASES)
         st.RUN_PARAMETER_SWEEP = True
         st.RUN_OVERALL_BEST = False
+        st.SKIP_SYNTHETIC_BARS = True  # Sweep braucht keine Live-Daten
         st.BLOCKED_SYMBOL_PHASES = {}  # Alle Phasen testen, Blocking wird danach neu bestimmt
         indicator_candidates = st.get_indicator_candidates()
         htf_candidates = st.get_highertimeframe_candidates()

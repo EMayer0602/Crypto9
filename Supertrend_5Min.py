@@ -1648,88 +1648,96 @@ def backtest_supertrend(df, atr_stop_mult=None, direction="long", min_hold_bars=
 	entry_atr = None
 	bars_in_position = 0
 
-	for i in range(1, len(df)):
-		ts = df.index[i]
-		trend = int(df["trend_flag"].iloc[i])
-		prev_trend = int(df["trend_flag"].iloc[i - 1])
+	# Pre-extract columns as numpy arrays for performance (avoids pandas iloc overhead)
+	n = len(df)
+	idx_arr = df.index  # keep pandas DatetimeIndex (preserves timezone)
+	arr_trend = df["trend_flag"].values.astype(int)
+	arr_close = df["close"].values.astype(float)
+	arr_high = df["high"].values.astype(float)
+	arr_low = df["low"].values.astype(float)
+	arr_atr = df["atr"].values.astype(float) if "atr" in df.columns else np.full(n, np.nan)
+	has_htf = "htf_trend" in df.columns
+	arr_htf = df["htf_trend"].values.astype(int) if has_htf else np.zeros(n, dtype=int)
+	has_momentum = "momentum" in df.columns
+	arr_momentum = df["momentum"].values.astype(float) if has_momentum else None
+	has_jma_trend = "jma_trend_direction" in df.columns
+	arr_jma_trend = df["jma_trend_direction"].values if has_jma_trend else None
+	has_ma_slope = "ma_slope_direction" in df.columns
+	arr_ma_slope = df["ma_slope_direction"].values if has_ma_slope else None
+	has_bearish_rev = "bearish_reversal" in df.columns
+	arr_bearish_rev = df["bearish_reversal"].values if has_bearish_rev else None
+	has_bullish_rev = "bullish_reversal" in df.columns
+	arr_bullish_rev = df["bullish_reversal"].values if has_bullish_rev else None
+	has_bearish_div = "bearish_divergence" in df.columns
+	arr_bearish_div = df["bearish_divergence"].values if has_bearish_div else None
+	has_bullish_div = "bullish_divergence" in df.columns
+	arr_bullish_div = df["bullish_divergence"].values if has_bullish_div else None
+
+	blocked_phases_list = BLOCKED_SYMBOL_PHASES.get(symbol, []) if BLOCKED_SYMBOL_PHASES and symbol else []
+
+	for i in range(1, n):
+		ts = idx_arr[i]
+		trend = arr_trend[i]
+		prev_trend = arr_trend[i - 1]
 
 		enter_long = prev_trend == -1 and trend == 1
 		enter_short = prev_trend == 1 and trend == -1
 
 		if not in_position:
-			htf_value = int(df["htf_trend"].iloc[i]) if "htf_trend" in df.columns else 0
+			htf_value = int(arr_htf[i]) if has_htf else 0
 			htf_allows = True
 			if USE_HIGHER_TIMEFRAME_FILTER:
 				htf_allows = htf_value >= 1 if long_mode else htf_value <= -1
 
 			momentum_allows = True
-			if USE_MOMENTUM_FILTER and "momentum" in df.columns:
-				mom_value = df["momentum"].iloc[i]
-				if pd.isna(mom_value):
+			if USE_MOMENTUM_FILTER and has_momentum:
+				mom_value = arr_momentum[i]
+				if np.isnan(mom_value):
 					momentum_allows = False
 				else:
 					momentum_allows = mom_value >= RSI_LONG_THRESHOLD if long_mode else mom_value <= RSI_SHORT_THRESHOLD
 
 			breakout_allows = True
 			if USE_BREAKOUT_FILTER:
-				atr_curr = df["atr"].iloc[i]
-				if atr_curr is None or np.isnan(atr_curr) or atr_curr <= 0:
+				atr_curr = arr_atr[i]
+				if np.isnan(atr_curr) or atr_curr <= 0:
 					breakout_allows = False
 				else:
-					candle_range = float(df["high"].iloc[i] - df["low"].iloc[i])
-					breakout_allows = candle_range >= BREAKOUT_ATR_MULT * float(atr_curr)
+					candle_range = arr_high[i] - arr_low[i]
+					breakout_allows = candle_range >= BREAKOUT_ATR_MULT * atr_curr
 					if breakout_allows and BREAKOUT_REQUIRE_DIRECTION:
-						prev_high = float(df["high"].iloc[i - 1]) if i > 0 else float(df["high"].iloc[i])
-						prev_low = float(df["low"].iloc[i - 1]) if i > 0 else float(df["low"].iloc[i])
-						close_curr = float(df["close"].iloc[i])
-						breakout_allows = close_curr > prev_high if long_mode else close_curr < prev_low
+						breakout_allows = arr_close[i] > arr_high[i - 1] if long_mode else arr_close[i] < arr_low[i - 1]
 
 			jma_trend_allows = True
-			if USE_JMA_TREND_FILTER and "jma_trend_direction" in df.columns:
-				trend_direction = df["jma_trend_direction"].iloc[i]
-				if long_mode:
-					jma_trend_allows = trend_direction == "UP"
-				else:
-					jma_trend_allows = trend_direction == "DOWN"
+			if USE_JMA_TREND_FILTER and has_jma_trend:
+				trend_direction = arr_jma_trend[i]
+				jma_trend_allows = trend_direction == "UP" if long_mode else trend_direction == "DOWN"
 
-			# MA Slope Filter: Require MA to be trending in entry direction
 			ma_slope_allows = True
-			if USE_MA_SLOPE_FILTER and "ma_slope_direction" in df.columns:
-				slope_dir = df["ma_slope_direction"].iloc[i]
-				if long_mode:
-					ma_slope_allows = slope_dir == "UP"
-				else:
-					ma_slope_allows = slope_dir == "DOWN"
+			if USE_MA_SLOPE_FILTER and has_ma_slope:
+				slope_dir = arr_ma_slope[i]
+				ma_slope_allows = slope_dir == "UP" if long_mode else slope_dir == "DOWN"
 
-			# Candlestick Pattern Filter: Avoid reversal patterns
 			pattern_allows = True
 			if USE_CANDLESTICK_PATTERN_FILTER:
-				if long_mode and "bearish_reversal" in df.columns:
-					# Don't enter long if bearish reversal detected
-					pattern_allows = not df["bearish_reversal"].iloc[i]
-				elif not long_mode and "bullish_reversal" in df.columns:
-					# Don't enter short if bullish reversal detected
-					pattern_allows = not df["bullish_reversal"].iloc[i]
+				if long_mode and has_bearish_rev:
+					pattern_allows = not arr_bearish_rev[i]
+				elif not long_mode and has_bullish_rev:
+					pattern_allows = not arr_bullish_rev[i]
 
-			# Divergence Filter: Avoid entries during divergence
 			divergence_allows = True
 			if USE_DIVERGENCE_FILTER:
-				if long_mode and "bearish_divergence" in df.columns:
-					# Don't enter long if bearish divergence (bull trap signal)
-					divergence_allows = not df["bearish_divergence"].iloc[i]
-				elif not long_mode and "bullish_divergence" in df.columns:
-					# Don't enter short if bullish divergence (bear trap signal)
-					divergence_allows = not df["bullish_divergence"].iloc[i]
+				if long_mode and has_bearish_div:
+					divergence_allows = not arr_bearish_div[i]
+				elif not long_mode and has_bullish_div:
+					divergence_allows = not arr_bullish_div[i]
 
-			# Phase blocking: skip entry if symbol+phase is in BLOCKED_SYMBOL_PHASES
 			phase_allows = True
-			if BLOCKED_SYMBOL_PHASES and symbol:
-				blocked_phases = BLOCKED_SYMBOL_PHASES.get(symbol, [])
-				if blocked_phases and "htf_trend" in df.columns:
-					htf_val = int(df["htf_trend"].iloc[i])
-					current_phase = "Up" if htf_val >= 1 else ("Down" if htf_val <= -1 else "Flat")
-					if current_phase in blocked_phases:
-						phase_allows = False
+			if blocked_phases_list and has_htf:
+				htf_val = int(arr_htf[i])
+				current_phase = "Up" if htf_val >= 1 else ("Down" if htf_val <= -1 else "Flat")
+				if current_phase in blocked_phases_list:
+					phase_allows = False
 
 			if long_mode and enter_long and htf_allows and momentum_allows and breakout_allows and jma_trend_allows and ma_slope_allows and pattern_allows and divergence_allows and phase_allows:
 				in_position = True
@@ -1737,17 +1745,16 @@ def backtest_supertrend(df, atr_stop_mult=None, direction="long", min_hold_bars=
 				in_position = True
 
 			if in_position:
-				entry_price = float(df["close"].iloc[i])
+				entry_price = arr_close[i]
 				entry_ts = ts
 				entry_capital = equity / STAKE_DIVISOR
-				atr_val = df["atr"].iloc[i]
+				atr_val = arr_atr[i]
 				entry_atr = float(atr_val) if not np.isnan(atr_val) else 0.0
 				bars_in_position = 0
-				# Initialize exit strategy tracking
-				highest_price = entry_price if long_mode else entry_price
-				lowest_price = entry_price if not long_mode else entry_price
-				remaining_position = 1.0  # 100% of position
-				partial_exits_taken = []  # Track which partial exit levels hit
+				highest_price = entry_price
+				lowest_price = entry_price
+				remaining_position = 1.0
+				partial_exits_taken = []
 			continue
 
 		bars_in_position += 1
@@ -1758,10 +1765,9 @@ def backtest_supertrend(df, atr_stop_mult=None, direction="long", min_hold_bars=
 		if atr_stop_mult is not None and atr_buffer and atr_buffer > 0:
 			stop_price = entry_price - atr_stop_mult * atr_buffer if long_mode else entry_price + atr_stop_mult * atr_buffer
 
-		# Track peak price for trailing stop
-		current_price = float(df["close"].iloc[i])
-		current_high = float(df["high"].iloc[i])
-		current_low = float(df["low"].iloc[i])
+		current_price = arr_close[i]
+		current_high = arr_high[i]
+		current_low = arr_low[i]
 
 		if long_mode:
 			highest_price = max(highest_price, current_high)
@@ -1771,8 +1777,6 @@ def backtest_supertrend(df, atr_stop_mult=None, direction="long", min_hold_bars=
 		exit_price = None
 		exit_reason = None
 		partial_exit_amount = 0.0
-
-		# Advanced Exit Strategies (checked BEFORE traditional exits)
 
 		# 0. MAX HOLD BARS - Time-based forced exit
 		if max_hold_bars > 0 and bars_in_position >= max_hold_bars and exit_price is None:
@@ -1791,12 +1795,10 @@ def backtest_supertrend(df, atr_stop_mult=None, direction="long", min_hold_bars=
 			profit_pct = (current_price - entry_price) / entry_price if long_mode else (entry_price - current_price) / entry_price
 			for level_idx, level in enumerate(PARTIAL_EXIT_LEVELS):
 				if level_idx not in partial_exits_taken and profit_pct >= level["profit_pct"]:
-					# Take partial exit
 					exit_amount = level["exit_pct"]
 					partial_exit_amount = exit_amount
 					remaining_position -= exit_amount
 					partial_exits_taken.append(level_idx)
-					# Record partial exit as separate trade
 					price_diff = current_price - entry_price if long_mode else entry_price - current_price
 					partial_stake = stake * exit_amount
 					gross_pnl = price_diff / entry_price * partial_stake
@@ -1816,7 +1818,7 @@ def backtest_supertrend(df, atr_stop_mult=None, direction="long", min_hold_bars=
 						"Direction": direction.capitalize(),
 						"MinHoldBars": min_hold_bars
 					})
-					if remaining_position <= 0.01:  # Essentially fully exited
+					if remaining_position <= 0.01:
 						in_position = False
 						entry_capital = None
 						entry_atr = None
@@ -1828,36 +1830,33 @@ def backtest_supertrend(df, atr_stop_mult=None, direction="long", min_hold_bars=
 		if USE_TRAILING_STOP and exit_price is None:
 			profit_pct = (current_price - entry_price) / entry_price if long_mode else (entry_price - current_price) / entry_price
 
-			# Only activate trailing stop after minimum profit reached
 			if profit_pct >= TRAILING_STOP_ACTIVATION_PCT:
 				if long_mode:
-					# Check drawdown from highest price
 					drawdown_from_peak = (highest_price - current_low) / highest_price
 					if drawdown_from_peak >= TRAILING_STOP_PCT:
 						exit_price = current_price
 						exit_reason = f"Trailing stop {TRAILING_STOP_PCT*100:.1f}%"
 				else:
-					# Short: check rise from lowest price
 					rise_from_trough = (current_high - lowest_price) / lowest_price
 					if rise_from_trough >= TRAILING_STOP_PCT:
 						exit_price = current_price
 						exit_reason = f"Trailing stop {TRAILING_STOP_PCT*100:.1f}%"
 
-		# Traditional exits (ATR stop, Trend flip) - only if no advanced exit triggered
+		# Traditional exits (ATR stop, Trend flip)
 		if stop_price is not None and exit_price is None:
-			if long_mode and float(df["low"].iloc[i]) <= stop_price:
+			if long_mode and current_low <= stop_price:
 				exit_price = stop_price
 				exit_reason = "ATR stop"
-			elif (not long_mode) and float(df["high"].iloc[i]) >= stop_price:
+			elif (not long_mode) and current_high >= stop_price:
 				exit_price = stop_price
 				exit_reason = "ATR stop"
 
 		if exit_price is None:
 			if long_mode and prev_trend == 1 and trend == -1 and bars_in_position >= min_hold_bars:
-				exit_price = float(df["close"].iloc[i])
+				exit_price = current_price
 				exit_reason = "Trend flip"
 			elif (not long_mode) and prev_trend == -1 and trend == 1 and bars_in_position >= min_hold_bars:
-				exit_price = float(df["close"].iloc[i])
+				exit_price = current_price
 				exit_reason = "Trend flip"
 
 		if exit_price is None:
@@ -1888,9 +1887,8 @@ def backtest_supertrend(df, atr_stop_mult=None, direction="long", min_hold_bars=
 		bars_in_position = 0
 
 	if in_position:
-		last = df.iloc[-1]
-		exit_ts = last.name
-		exit_price = float(last["close"])
+		exit_ts = idx_arr[-1]
+		exit_price = arr_close[-1]
 		stake = entry_capital if entry_capital is not None else equity / STAKE_DIVISOR
 		price_diff = exit_price - entry_price if long_mode else entry_price - exit_price
 		gross_pnl = price_diff / entry_price * stake
@@ -2834,6 +2832,14 @@ def _run_saved_rows(rows_df, table_title, save_path=None, aggregate_sections=Non
 def ensure_cache_populated(symbols, timeframe, min_bars):
 	"""Ensure OHLCV cache has enough data for all symbols before running sweep."""
 	import time
+
+	# Quick API connectivity check - skip downloads if unreachable
+	try:
+		ex = get_data_exchange()
+		ex.fetch_ticker("BTC/USDT")
+	except Exception:
+		print("\n[Cache Init] API not reachable - using cached data only\n")
+		return
 
 	# Fixed start date: 2024-05-01 for historical sweep data
 	start_date = pd.Timestamp("2024-05-01", tz=BERLIN_TZ)
