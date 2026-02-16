@@ -62,7 +62,8 @@ def timeframe_to_minutes(tf_str: str) -> int:
 
 EXCHANGE_ID = "binance"
 TIMEFRAME = "1h"
-LOOKBACK = 8760  # ~1 year of hourly bars (365 days × 24 hours)
+LOOKBACK = 20000  # ~27 months of hourly bars (back to Jan 2024)
+BACKTEST_START_DATE = "2024-01-01"  # Backtest beginnt ab diesem Datum
 OHLCV_CACHE_DIR = "ohlcv_cache"  # Directory for persistent OHLCV data storage
 # USDx symbols for optimization sweep
 SYMBOLS = [
@@ -78,6 +79,7 @@ SYMBOLS = [
 	"ICP/USDC",
 	"BNB/USDC",
 	"LUNC/USDT",  # nur USDT verfügbar
+	"TAO/USDC",
 ]
 
 # Testnet symbols - use USDC where available, USDT otherwise
@@ -94,6 +96,7 @@ TESTNET_SYMBOLS = [
 	"ICP/USDT",
 	"BNB/USDT",
 	"LUNC/USDT",
+	"TAO/USDT",
 ]
 
 # Map testnet symbols to production USDC equivalents for parameter lookup
@@ -110,6 +113,7 @@ TESTNET_TO_USDC_MAP = {
 	"ICP/USDT": "ICP/USDC",
 	"BNB/USDT": "BNB/USDC",
 	"LUNC/USDT": "LUNC/USDT",
+	"TAO/USDT": "TAO/USDC",
 }
 
 
@@ -125,14 +129,14 @@ def map_symbol_for_params(symbol: str) -> str:
 	return TESTNET_TO_USDC_MAP.get(symbol, symbol)
 
 
-RUN_PARAMETER_SWEEP = False  # ← Deaktiviert, Parameter bereits berechnet
+RUN_PARAMETER_SWEEP = False  # Sweep wird über paper_trader.py --sweep gestartet
 RUN_SAVED_PARAMS = False
-RUN_OVERALL_BEST = True  # ← AKTIVIERT für Portfolio-Simulation
+RUN_OVERALL_BEST = True  # Portfolio-Simulation mit gespeicherten Parametern
 ENABLE_LONGS = True
 ENABLE_SHORTS = False  # Long-only trading
 
 # === PERFORMANCE OPTIMIZATIONS ===
-SKIP_SYNTHETIC_BARS = True  # Skip synthetic bar creation for backtesting (big speedup!)
+SKIP_SYNTHETIC_BARS = False  # Paper Trader braucht synthetic bars für aktuelle Daten
 PARALLEL_DATA_FETCH = True  # Fetch multiple symbols in parallel
 MAX_PARALLEL_WORKERS = 8    # Number of parallel workers for data fetching
 
@@ -141,17 +145,24 @@ DEFAULT_MIN_HOLD_BARS = 0
 # Min hold bar values - examples for 1h timeframe: [0, 12, 24, 48] = [0h, 12h, 1d, 2d]
 MIN_HOLD_BAR_VALUES = [0, 12, 24]
 
+# Max hold bars (time-based exit): Force-close after N bars. 0 = kein Limit.
+# 24 = 1 Tag, 48 = 2 Tage, 60 = 2.5 Tage (bei 1h Bars)
+MAX_HOLD_BAR_VALUES = [0, 24, 48, 60]
+
 USE_HIGHER_TIMEFRAME_FILTER = True
 HIGHER_TIMEFRAME = "6h"
 HTF_LOOKBACK = 1000  # Increased for longer backtests
-HTF_LENGTH = 20
-HTF_FACTOR = 3.0
+HTF_LENGTH = 10
+HTF_FACTOR = 2.0
+# Trend-Phase-Parameter zum Sweepen (3×3 = 9 Kombis pro Paar)
+HTF_LENGTH_VALUES = [7, 10, 15]
+HTF_FACTOR_VALUES = [1.5, 2.0, 3.0]
 HTF_PSAR_STEP = 0.02
 HTF_PSAR_MAX_STEP = 0.2
-HTF_JMA_LENGTH = 30
-HTF_JMA_PHASE = 0
-HTF_KAMA_LENGTH = 20
-HTF_KAMA_SLOW_LENGTH = 40
+HTF_JMA_LENGTH = 15
+HTF_JMA_PHASE = 50
+HTF_KAMA_LENGTH = 10
+HTF_KAMA_SLOW_LENGTH = 30
 HTF_MAMA_FAST_LIMIT = 0.5
 HTF_MAMA_SLOW_LIMIT = 0.05
 
@@ -183,9 +194,9 @@ USE_DIVERGENCE_FILTER = True  # Detect price/RSI divergence (bull traps)
 DIVERGENCE_LOOKBACK = 10  # How many bars to look back for divergence
 DIVERGENCE_RSI_PERIOD = 14  # RSI period for divergence detection
 
-START_EQUITY = 14000.0
+START_EQUITY = 16500.0  # Gemeinsames Konto, alle Paare
 RISK_FRACTION = 1
-STAKE_DIVISOR = 8  # Kapital / 8 pro Trade
+STAKE_DIVISOR = 14  # 16500/14 ≈ 1178 pro Trade, max 12 offene Positionen
 FEE_RATE = 0.001
 ATR_WINDOW = 14
 ATR_STOP_MULTS = [None, 1.0, 1.5, 2.0]
@@ -195,11 +206,8 @@ USE_TRAILING_STOP = True  # Enable trailing stop after peak
 TRAILING_STOP_PCT = 0.05  # 5% drawdown from peak triggers exit
 TRAILING_STOP_ACTIVATION_PCT = 0.02  # Activate after 2% profit
 
-USE_PARTIAL_EXIT = True  # Take partial profits at targets
-PARTIAL_EXIT_LEVELS = [
-    {"profit_pct": 0.03, "exit_pct": 0.30},  # At +3%, sell 30%
-    {"profit_pct": 0.05, "exit_pct": 0.30},  # At +5%, sell another 30%
-]
+USE_PARTIAL_EXIT = False  # Partial exits deaktiviert
+PARTIAL_EXIT_LEVELS = []
 
 USE_PROFIT_TARGET = True  # Full exit at profit target
 PROFIT_TARGET_PCT = 0.10  # 10% profit = full exit
@@ -210,11 +218,29 @@ CLEAR_BASE_OUTPUT_ON_SWEEP = True
 
 # Output file paths
 OVERALL_SUMMARY_HTML = os.path.join(BASE_OUT_DIR, "overall_best_results.html")
-OVERALL_PARAMS_CSV = os.path.join(BASE_OUT_DIR, "best_params_overall.csv")
+OVERALL_PARAMS_CSV = os.path.join(BASE_OUT_DIR, "best_params_overall_bck.csv")
 OVERALL_DETAILED_HTML = os.path.join(BASE_OUT_DIR, "overall_best_detailed.html")
 OVERALL_FLAT_CSV = os.path.join(BASE_OUT_DIR, "overall_best_flat_trades.csv")
 OVERALL_FLAT_JSON = os.path.join(BASE_OUT_DIR, "overall_best_flat_trades.json")
 GLOBAL_BEST_RESULTS = {}
+
+# Phase-based sweep: optimized parameters per market phase (Up/Down/Flat)
+RUN_PHASE_BASED_SWEEP = True
+PHASE_STAKE_DIVISOR = 8  # stake = equity/8 (match paper_trader MAX_OPEN_POSITIONS=8)
+PHASE_PARAMS_CSV = os.path.join(BASE_OUT_DIR, "best_params_phase.csv")
+GLOBAL_PHASE_RESULTS = {}
+
+# Phase-based trade blocking: Don't enter trades in these phases for these symbols.
+# Based on sweep analysis showing negative PnL in these symbol+phase combinations.
+BLOCKED_SYMBOL_PHASES = {
+	"BNB/USDC": ["Down"],
+	"SOL/USDC": ["Down"],
+	"TNSR/USDC": ["Down"],
+	"XRP/USDC": ["Down"],
+	"ZEC/USDC": ["Down"],
+	"ICP/USDC": ["Flat"],
+	"SUI/USDC": ["Flat"],
+}
 
 INDICATOR_PRESETS = {
 	"supertrend": {
@@ -222,20 +248,20 @@ INDICATOR_PRESETS = {
 		"slug": "supertrend",
 		"param_a_label": "Length",
 		"param_b_label": "Factor",
-		"param_a_values": [7, 10, 14],
-		"param_b_values": [2.0, 3.0, 4.0],
-		"default_a": 10,
-		"default_b": 3.0,
+		"param_a_values": [5, 7, 10],
+		"param_b_values": [1.5, 2.0, 3.0],
+		"default_a": 7,
+		"default_b": 2.0,
 	},
 	"htf_crossover": {
 		"display_name": "HTF Crossover",
 		"slug": "htf_crossover",
 		"param_a_label": "Length",
 		"param_b_label": "Factor",
-		"param_a_values": [7, 10, 14],
-		"param_b_values": [2.0, 3.0, 4.0],
-		"default_a": 10,
-		"default_b": 3.0,
+		"param_a_values": [5, 7, 10],
+		"param_b_values": [1.5, 2.0, 3.0],
+		"default_a": 7,
+		"default_b": 2.0,
 	},
 	"psar": {
 		"display_name": "Parabolic SAR",
@@ -252,20 +278,20 @@ INDICATOR_PRESETS = {
 		"slug": "jma",
 		"param_a_label": "Length",
 		"param_b_label": "Phase",
-		"param_a_values": [20, 30, 50],
-		"param_b_values": [-50, 0, 50],
-		"default_a": 30,
-		"default_b": 0,
+		"param_a_values": [10, 15, 20],
+		"param_b_values": [0, 50, 100],
+		"default_a": 15,
+		"default_b": 50,
 	},
 	"kama": {
 		"display_name": "Kaufman AMA",
 		"slug": "kama",
 		"param_a_label": "Length",
 		"param_b_label": "SlowLength",
-		"param_a_values": [10, 20, 30],
-		"param_b_values": [30, 40, 50],
-		"default_a": 20,
-		"default_b": 40,
+		"param_a_values": [5, 10, 15],
+		"param_b_values": [20, 30, 40],
+		"default_a": 10,
+		"default_b": 30,
 	},
 	"mama": {
 		"display_name": "Mesa Adaptive MA",
@@ -279,7 +305,7 @@ INDICATOR_PRESETS = {
 	},
 }
 
-ACTIVE_INDICATORS = ["htf_crossover", "jma", "kama", "supertrend"]
+ACTIVE_INDICATORS = ["jma"]
 
 INDICATOR_TYPE = ""
 INDICATOR_DISPLAY_NAME = ""
@@ -859,8 +885,8 @@ def get_enabled_directions():
 
 
 def get_highertimeframe_candidates():
-	# Include shorter timeframes (1h, 2h) plus standard range (3h-24h)
-	return ["1h", "2h"] + [f"{hours}h" for hours in range(3, 25)]
+	# Praxistaugliche HTF-Werte für den Sweep (4h, 6h, 8h, 12h)
+	return ["4h", "6h", "8h", "12h"]
 
 
 def compute_supertrend(df, length=10, factor=3.0):
@@ -1500,6 +1526,13 @@ def prepare_symbol_dataframe(symbol, use_all_cached_data=False):
 	"""
 	limit = None if use_all_cached_data else LOOKBACK
 	df = fetch_data(symbol, TIMEFRAME, limit)
+	# Backtest-Start-Datum nur anwenden wenn NICHT im Paper-Trading-Modus
+	if BACKTEST_START_DATE and not use_all_cached_data:
+		start_ts = pd.Timestamp(BACKTEST_START_DATE, tz=BERLIN_TZ)
+		before = len(df)
+		df = df[df.index >= start_ts]
+		if len(df) < before:
+			print(f"[Date Filter] {symbol}: {before} → {len(df)} Bars (ab {BACKTEST_START_DATE})")
 	df = attach_higher_timeframe_trend(df, symbol)
 	# Debug: Check htf_indicator
 	htf_valid = df["htf_indicator"].notna().sum() if "htf_indicator" in df.columns else 0
@@ -1598,7 +1631,7 @@ def calculate_dynamic_min_min_hold_bars(
 		return min_days
 
 
-def backtest_supertrend(df, atr_stop_mult=None, direction="long", min_hold_bars=0):
+def backtest_supertrend(df, atr_stop_mult=None, direction="long", min_hold_bars=0, max_hold_bars=0, symbol=""):
 	direction = direction.lower()
 	if direction not in {"long", "short"}:
 		raise ValueError("direction must be 'long' or 'short'")
@@ -1614,89 +1647,107 @@ def backtest_supertrend(df, atr_stop_mult=None, direction="long", min_hold_bars=
 	entry_atr = None
 	bars_in_position = 0
 
-	for i in range(1, len(df)):
-		ts = df.index[i]
-		trend = int(df["trend_flag"].iloc[i])
-		prev_trend = int(df["trend_flag"].iloc[i - 1])
+	# Pre-extract columns as numpy arrays for performance (avoids pandas iloc overhead)
+	n = len(df)
+	idx_arr = df.index  # keep pandas DatetimeIndex (preserves timezone)
+	arr_trend = df["trend_flag"].values.astype(int)
+	arr_close = df["close"].values.astype(float)
+	arr_high = df["high"].values.astype(float)
+	arr_low = df["low"].values.astype(float)
+	arr_atr = df["atr"].values.astype(float) if "atr" in df.columns else np.full(n, np.nan)
+	has_htf = "htf_trend" in df.columns
+	arr_htf = df["htf_trend"].values.astype(int) if has_htf else np.zeros(n, dtype=int)
+	has_momentum = "momentum" in df.columns
+	arr_momentum = df["momentum"].values.astype(float) if has_momentum else None
+	has_jma_trend = "jma_trend_direction" in df.columns
+	arr_jma_trend = df["jma_trend_direction"].values if has_jma_trend else None
+	has_ma_slope = "ma_slope_direction" in df.columns
+	arr_ma_slope = df["ma_slope_direction"].values if has_ma_slope else None
+	has_bearish_rev = "bearish_reversal" in df.columns
+	arr_bearish_rev = df["bearish_reversal"].values if has_bearish_rev else None
+	has_bullish_rev = "bullish_reversal" in df.columns
+	arr_bullish_rev = df["bullish_reversal"].values if has_bullish_rev else None
+	has_bearish_div = "bearish_divergence" in df.columns
+	arr_bearish_div = df["bearish_divergence"].values if has_bearish_div else None
+	has_bullish_div = "bullish_divergence" in df.columns
+	arr_bullish_div = df["bullish_divergence"].values if has_bullish_div else None
+
+	blocked_phases_list = BLOCKED_SYMBOL_PHASES.get(symbol, []) if BLOCKED_SYMBOL_PHASES and symbol else []
+
+	for i in range(1, n):
+		ts = idx_arr[i]
+		trend = arr_trend[i]
+		prev_trend = arr_trend[i - 1]
 
 		enter_long = prev_trend == -1 and trend == 1
 		enter_short = prev_trend == 1 and trend == -1
 
 		if not in_position:
-			htf_value = int(df["htf_trend"].iloc[i]) if "htf_trend" in df.columns else 0
+			htf_value = int(arr_htf[i]) if has_htf else 0
 			htf_allows = True
 			if USE_HIGHER_TIMEFRAME_FILTER:
 				htf_allows = htf_value >= 1 if long_mode else htf_value <= -1
 
 			momentum_allows = True
-			if USE_MOMENTUM_FILTER and "momentum" in df.columns:
-				mom_value = df["momentum"].iloc[i]
-				if pd.isna(mom_value):
+			if USE_MOMENTUM_FILTER and has_momentum:
+				mom_value = arr_momentum[i]
+				if np.isnan(mom_value):
 					momentum_allows = False
 				else:
 					momentum_allows = mom_value >= RSI_LONG_THRESHOLD if long_mode else mom_value <= RSI_SHORT_THRESHOLD
 
 			breakout_allows = True
 			if USE_BREAKOUT_FILTER:
-				atr_curr = df["atr"].iloc[i]
-				if atr_curr is None or np.isnan(atr_curr) or atr_curr <= 0:
+				atr_curr = arr_atr[i]
+				if np.isnan(atr_curr) or atr_curr <= 0:
 					breakout_allows = False
 				else:
-					candle_range = float(df["high"].iloc[i] - df["low"].iloc[i])
-					breakout_allows = candle_range >= BREAKOUT_ATR_MULT * float(atr_curr)
+					candle_range = arr_high[i] - arr_low[i]
+					breakout_allows = candle_range >= BREAKOUT_ATR_MULT * atr_curr
 					if breakout_allows and BREAKOUT_REQUIRE_DIRECTION:
-						prev_high = float(df["high"].iloc[i - 1]) if i > 0 else float(df["high"].iloc[i])
-						prev_low = float(df["low"].iloc[i - 1]) if i > 0 else float(df["low"].iloc[i])
-						close_curr = float(df["close"].iloc[i])
-						breakout_allows = close_curr > prev_high if long_mode else close_curr < prev_low
+						breakout_allows = arr_close[i] > arr_high[i - 1] if long_mode else arr_close[i] < arr_low[i - 1]
 
 			jma_trend_allows = True
-			if USE_JMA_TREND_FILTER and "jma_trend_direction" in df.columns:
-				trend_direction = df["jma_trend_direction"].iloc[i]
-				if long_mode:
-					jma_trend_allows = trend_direction == "UP"
-				else:
-					jma_trend_allows = trend_direction == "DOWN"
+			if USE_JMA_TREND_FILTER and has_jma_trend:
+				trend_direction = arr_jma_trend[i]
+				jma_trend_allows = trend_direction == "UP" if long_mode else trend_direction == "DOWN"
 
-			# MA Slope Filter: Require MA to be trending in entry direction
 			ma_slope_allows = True
-			if USE_MA_SLOPE_FILTER and "ma_slope_direction" in df.columns:
-				slope_dir = df["ma_slope_direction"].iloc[i]
-				if long_mode:
-					ma_slope_allows = slope_dir == "UP"
-				else:
-					ma_slope_allows = slope_dir == "DOWN"
+			if USE_MA_SLOPE_FILTER and has_ma_slope:
+				slope_dir = arr_ma_slope[i]
+				ma_slope_allows = slope_dir == "UP" if long_mode else slope_dir == "DOWN"
 
-			# Candlestick Pattern Filter: Avoid reversal patterns
 			pattern_allows = True
 			if USE_CANDLESTICK_PATTERN_FILTER:
-				if long_mode and "bearish_reversal" in df.columns:
-					# Don't enter long if bearish reversal detected
-					pattern_allows = not df["bearish_reversal"].iloc[i]
-				elif not long_mode and "bullish_reversal" in df.columns:
-					# Don't enter short if bullish reversal detected
-					pattern_allows = not df["bullish_reversal"].iloc[i]
+				if long_mode and has_bearish_rev:
+					pattern_allows = not arr_bearish_rev[i]
+				elif not long_mode and has_bullish_rev:
+					pattern_allows = not arr_bullish_rev[i]
 
-			# Divergence Filter: Avoid entries during divergence
 			divergence_allows = True
 			if USE_DIVERGENCE_FILTER:
-				if long_mode and "bearish_divergence" in df.columns:
-					# Don't enter long if bearish divergence (bull trap signal)
-					divergence_allows = not df["bearish_divergence"].iloc[i]
-				elif not long_mode and "bullish_divergence" in df.columns:
-					# Don't enter short if bullish divergence (bear trap signal)
-					divergence_allows = not df["bullish_divergence"].iloc[i]
+				if long_mode and has_bearish_div:
+					divergence_allows = not arr_bearish_div[i]
+				elif not long_mode and has_bullish_div:
+					divergence_allows = not arr_bullish_div[i]
 
-			if long_mode and enter_long and htf_allows and momentum_allows and breakout_allows and jma_trend_allows and ma_slope_allows and pattern_allows and divergence_allows:
+			phase_allows = True
+			if blocked_phases_list and has_htf:
+				htf_val = int(arr_htf[i])
+				current_phase = "Up" if htf_val >= 1 else ("Down" if htf_val <= -1 else "Flat")
+				if current_phase in blocked_phases_list:
+					phase_allows = False
+
+			if long_mode and enter_long and htf_allows and momentum_allows and breakout_allows and jma_trend_allows and ma_slope_allows and pattern_allows and divergence_allows and phase_allows:
 				in_position = True
-			elif (not long_mode) and enter_short and htf_allows and momentum_allows and breakout_allows and jma_trend_allows and ma_slope_allows and pattern_allows and divergence_allows:
+			elif (not long_mode) and enter_short and htf_allows and momentum_allows and breakout_allows and jma_trend_allows and ma_slope_allows and pattern_allows and divergence_allows and phase_allows:
 				in_position = True
 
 			if in_position:
-				entry_price = float(df["close"].iloc[i])
+				entry_price = arr_close[i]
 				entry_ts = ts
 				entry_capital = equity / STAKE_DIVISOR
-				atr_val = df["atr"].iloc[i]
+				atr_val = arr_atr[i]
 				entry_atr = float(atr_val) if not np.isnan(atr_val) else 0.0
 				bars_in_position = 0
 				# Initialize exit strategy tracking
@@ -1714,10 +1765,9 @@ def backtest_supertrend(df, atr_stop_mult=None, direction="long", min_hold_bars=
 		if atr_stop_mult is not None and atr_buffer and atr_buffer > 0:
 			stop_price = entry_price - atr_stop_mult * atr_buffer if long_mode else entry_price + atr_stop_mult * atr_buffer
 
-		# Track peak price for trailing stop
-		current_price = float(df["close"].iloc[i])
-		current_high = float(df["high"].iloc[i])
-		current_low = float(df["low"].iloc[i])
+		current_price = arr_close[i]
+		current_high = arr_high[i]
+		current_low = arr_low[i]
 
 		if long_mode:
 			highest_price = max(highest_price, current_high)
@@ -1728,7 +1778,10 @@ def backtest_supertrend(df, atr_stop_mult=None, direction="long", min_hold_bars=
 		exit_reason = None
 		partial_exit_amount = 0.0
 
-		# Advanced Exit Strategies (checked BEFORE traditional exits)
+		# 0. MAX HOLD BARS - Time-based forced exit
+		if max_hold_bars > 0 and bars_in_position >= max_hold_bars and exit_price is None:
+			exit_price = current_price
+			exit_reason = f"Max hold {max_hold_bars} bars"
 
 		# 1. PROFIT TARGET - Full exit at target
 		if USE_PROFIT_TARGET and exit_price is None:
@@ -1742,12 +1795,10 @@ def backtest_supertrend(df, atr_stop_mult=None, direction="long", min_hold_bars=
 			profit_pct = (current_price - entry_price) / entry_price if long_mode else (entry_price - current_price) / entry_price
 			for level_idx, level in enumerate(PARTIAL_EXIT_LEVELS):
 				if level_idx not in partial_exits_taken and profit_pct >= level["profit_pct"]:
-					# Take partial exit
 					exit_amount = level["exit_pct"]
 					partial_exit_amount = exit_amount
 					remaining_position -= exit_amount
 					partial_exits_taken.append(level_idx)
-					# Record partial exit as separate trade
 					price_diff = current_price - entry_price if long_mode else entry_price - current_price
 					partial_stake = stake * exit_amount
 					gross_pnl = price_diff / entry_price * partial_stake
@@ -1767,7 +1818,7 @@ def backtest_supertrend(df, atr_stop_mult=None, direction="long", min_hold_bars=
 						"Direction": direction.capitalize(),
 						"MinHoldBars": min_hold_bars
 					})
-					if remaining_position <= 0.01:  # Essentially fully exited
+					if remaining_position <= 0.01:
 						in_position = False
 						entry_capital = None
 						entry_atr = None
@@ -1779,36 +1830,33 @@ def backtest_supertrend(df, atr_stop_mult=None, direction="long", min_hold_bars=
 		if USE_TRAILING_STOP and exit_price is None:
 			profit_pct = (current_price - entry_price) / entry_price if long_mode else (entry_price - current_price) / entry_price
 
-			# Only activate trailing stop after minimum profit reached
 			if profit_pct >= TRAILING_STOP_ACTIVATION_PCT:
 				if long_mode:
-					# Check drawdown from highest price
 					drawdown_from_peak = (highest_price - current_low) / highest_price
 					if drawdown_from_peak >= TRAILING_STOP_PCT:
 						exit_price = current_price
 						exit_reason = f"Trailing stop {TRAILING_STOP_PCT*100:.1f}%"
 				else:
-					# Short: check rise from lowest price
 					rise_from_trough = (current_high - lowest_price) / lowest_price
 					if rise_from_trough >= TRAILING_STOP_PCT:
 						exit_price = current_price
 						exit_reason = f"Trailing stop {TRAILING_STOP_PCT*100:.1f}%"
 
-		# Traditional exits (ATR stop, Trend flip) - only if no advanced exit triggered
+		# Traditional exits (ATR stop, Trend flip)
 		if stop_price is not None and exit_price is None:
-			if long_mode and float(df["low"].iloc[i]) <= stop_price:
+			if long_mode and current_low <= stop_price:
 				exit_price = stop_price
 				exit_reason = "ATR stop"
-			elif (not long_mode) and float(df["high"].iloc[i]) >= stop_price:
+			elif (not long_mode) and current_high >= stop_price:
 				exit_price = stop_price
 				exit_reason = "ATR stop"
 
 		if exit_price is None:
 			if long_mode and prev_trend == 1 and trend == -1 and bars_in_position >= min_hold_bars:
-				exit_price = float(df["close"].iloc[i])
+				exit_price = current_price
 				exit_reason = "Trend flip"
 			elif (not long_mode) and prev_trend == -1 and trend == 1 and bars_in_position >= min_hold_bars:
-				exit_price = float(df["close"].iloc[i])
+				exit_price = current_price
 				exit_reason = "Trend flip"
 
 		if exit_price is None:
@@ -1839,9 +1887,8 @@ def backtest_supertrend(df, atr_stop_mult=None, direction="long", min_hold_bars=
 		bars_in_position = 0
 
 	if in_position:
-		last = df.iloc[-1]
-		exit_ts = last.name
-		exit_price = float(last["close"])
+		exit_ts = idx_arr[-1]
+		exit_price = arr_close[-1]
 		stake = entry_capital if entry_capital is not None else equity / STAKE_DIVISOR
 		price_diff = exit_price - entry_price if long_mode else entry_price - exit_price
 		gross_pnl = price_diff / entry_price * stake
@@ -1865,7 +1912,7 @@ def backtest_supertrend(df, atr_stop_mult=None, direction="long", min_hold_bars=
 	return pd.DataFrame(trades)
 
 
-def backtest_htf_crossover(df, atr_stop_mult=None, direction="long", min_hold_bars=0):
+def backtest_htf_crossover(df, atr_stop_mult=None, direction="long", min_hold_bars=0, max_hold_bars=0, symbol=""):
 	"""
 	Backtest HTF Crossover Strategy
 	Entry: Close crosses HTF indicator (upward for long, downward for short)
@@ -1982,7 +2029,17 @@ def backtest_htf_crossover(df, atr_stop_mult=None, direction="long", min_hold_ba
 					elif not long_mode and "bullish_divergence" in df.columns:
 						divergence_allows = not curr["bullish_divergence"]
 
-				if htf_allows and momentum_allows and breakout_allows and jma_trend_allows and ma_slope_allows and pattern_allows and divergence_allows:
+				# Phase blocking: skip entry if symbol+phase is in BLOCKED_SYMBOL_PHASES
+				phase_allows = True
+				if BLOCKED_SYMBOL_PHASES and symbol:
+					blocked_phases = BLOCKED_SYMBOL_PHASES.get(symbol, [])
+					if blocked_phases and "htf_trend" in df.columns:
+						htf_val = int(curr["htf_trend"])
+						current_phase = "Up" if htf_val >= 1 else ("Down" if htf_val <= -1 else "Flat")
+						if current_phase in blocked_phases:
+							phase_allows = False
+
+				if htf_allows and momentum_allows and breakout_allows and jma_trend_allows and ma_slope_allows and pattern_allows and divergence_allows and phase_allows:
 					in_position = True
 					entry_price = close_curr
 					entry_ts = ts
@@ -2016,6 +2073,11 @@ def backtest_htf_crossover(df, atr_stop_mult=None, direction="long", min_hold_ba
 		partial_exit_amount = 0.0
 
 		# Advanced Exit Strategies
+		# 0. MAX HOLD BARS - Time-based forced exit
+		if max_hold_bars > 0 and bars_in_position >= max_hold_bars and exit_price is None:
+			exit_price = close_curr
+			exit_reason = f"Max hold {max_hold_bars} bars"
+
 		# 1. PROFIT TARGET
 		if USE_PROFIT_TARGET and exit_price is None:
 			profit_pct = (close_curr - entry_price) / entry_price if long_mode else (entry_price - close_curr) / entry_price
@@ -2449,8 +2511,17 @@ def write_overall_result_tables():
 				row["Indicator"] = key
 				row["IndicatorDisplay"] = indicator_labels[key]
 				row["Direction"] = direction.capitalize()
+				# Add BlockedPhases column from BLOCKED_SYMBOL_PHASES config
+				blocked = BLOCKED_SYMBOL_PHASES.get(symbol, [])
+				row["BlockedPhases"] = ",".join(blocked) if blocked else ""
 				csv_rows.append(row)
 	if csv_rows:
+		# Backup existing best_params_overall.csv before overwriting
+		if os.path.exists(OVERALL_PARAMS_CSV):
+			bck_path = OVERALL_PARAMS_CSV.replace(".csv", "_bck.csv")
+			import shutil
+			shutil.copy2(OVERALL_PARAMS_CSV, bck_path)
+			print(f"[Sweep] Backed up existing {OVERALL_PARAMS_CSV} → {bck_path}")
 		pd.DataFrame(csv_rows).to_csv(OVERALL_PARAMS_CSV, sep=";", decimal=",", index=False, encoding="utf-8")
 
 
@@ -2664,6 +2735,7 @@ def _run_saved_rows(rows_df, table_title, save_path=None, aggregate_sections=Non
 				atr_stop_mult=atr_mult,
 				direction=direction,
 				min_hold_bars=min_hold_bars,
+				symbol=symbol,
 			)
 		else:  # Default: trend_flip for all other indicators
 			trades = backtest_supertrend(
@@ -2671,6 +2743,7 @@ def _run_saved_rows(rows_df, table_title, save_path=None, aggregate_sections=Non
 				atr_stop_mult=atr_mult,
 				direction=direction,
 				min_hold_bars=min_hold_bars,
+				symbol=symbol,
 			)
 		direction_title = direction.capitalize()
 		atr_label = "None" if atr_mult is None else atr_mult
@@ -2685,6 +2758,8 @@ def _run_saved_rows(rows_df, table_title, save_path=None, aggregate_sections=Non
 			min_hold_bars,
 		)
 		updated_row = dict(row_dict)
+		# Refresh BlockedPhases from current config
+		blocked = BLOCKED_SYMBOL_PHASES.get(symbol, [])
 		updated_row.update({
 			"ParamA": param_a,
 			"ParamB": param_b,
@@ -2700,6 +2775,7 @@ def _run_saved_rows(rows_df, table_title, save_path=None, aggregate_sections=Non
 			"ProfitFactor": stats["ProfitFactor"],
 			"MaxDrawdown": stats["MaxDrawdown"],
 			"FinalEquity": stats["FinalEquity"],
+			"BlockedPhases": ",".join(blocked) if blocked else "",
 		})
 		updated_rows.append(updated_row)
 		fig = build_two_panel_figure(
@@ -2758,6 +2834,14 @@ def _run_saved_rows(rows_df, table_title, save_path=None, aggregate_sections=Non
 def ensure_cache_populated(symbols, timeframe, min_bars):
 	"""Ensure OHLCV cache has enough data for all symbols before running sweep."""
 	import time
+
+	# Quick API connectivity check - skip downloads if unreachable
+	try:
+		ex = get_data_exchange()
+		ex.fetch_ticker("BTC/USDT")
+	except Exception:
+		print("\n[Cache Init] API not reachable - using cached data only\n")
+		return
 
 	# Fixed start date: 2024-05-01 for historical sweep data
 	start_date = pd.Timestamp("2024-05-01", tz=BERLIN_TZ)
@@ -2822,6 +2906,7 @@ def run_parameter_sweep():
 
 	directions = get_enabled_directions()
 	hold_bar_candidates = MIN_HOLD_BAR_VALUES if USE_MIN_HOLD_FILTER else [DEFAULT_MIN_HOLD_BARS]
+	max_hold_candidates = MAX_HOLD_BAR_VALUES if MAX_HOLD_BAR_VALUES else [0]
 
 	for symbol in SYMBOLS:
 		df_raw = prepare_symbol_dataframe(symbol)
@@ -2841,38 +2926,44 @@ def run_parameter_sweep():
 				df_st = df_cache[cache_key]
 				for atr_mult in ATR_STOP_MULTS:
 					for min_hold_bars in hold_bar_candidates:
-						for direction in directions:
-							df_st_with_htf = df_st.copy()
-							for col in ("htf_trend", "htf_indicator", "momentum"):
-								if col in df_raw.columns:
-									df_st_with_htf[col] = df_raw[col]
-							# Select backtest function based on indicator type
-							if INDICATOR_TYPE == "htf_crossover":
-								trades = backtest_htf_crossover(
-									df_st_with_htf,
-									atr_stop_mult=atr_mult,
-									direction=direction,
-									min_hold_bars=min_hold_bars,
+						for max_hold_bars in max_hold_candidates:
+							for direction in directions:
+								df_st_with_htf = df_st.copy()
+								for col in ("htf_trend", "htf_indicator", "momentum"):
+									if col in df_raw.columns:
+										df_st_with_htf[col] = df_raw[col]
+								# Select backtest function based on indicator type
+								if INDICATOR_TYPE == "htf_crossover":
+									trades = backtest_htf_crossover(
+										df_st_with_htf,
+										atr_stop_mult=atr_mult,
+										direction=direction,
+										min_hold_bars=min_hold_bars,
+										max_hold_bars=max_hold_bars,
+										symbol=symbol,
+									)
+								else:  # Default: trend_flip for all other indicators
+									trades = backtest_supertrend(
+										df_st_with_htf,
+										atr_stop_mult=atr_mult,
+										direction=direction,
+										min_hold_bars=min_hold_bars,
+										max_hold_bars=max_hold_bars,
+										symbol=symbol,
+									)
+								stats = performance_report(
+									trades,
+									symbol,
+									param_a,
+									param_b,
+									direction.capitalize(),
+									min_hold_bars,
 								)
-							else:  # Default: trend_flip for all other indicators
-								trades = backtest_supertrend(
-									df_st_with_htf,
-									atr_stop_mult=atr_mult,
-									direction=direction,
-									min_hold_bars=min_hold_bars,
-								)
-							stats = performance_report(
-								trades,
-								symbol,
-								param_a,
-								param_b,
-								direction.capitalize(),
-								min_hold_bars,
-							)
-							stats["ATRStopMult"] = atr_mult if atr_mult is not None else "None"
-							stats["MinHoldBars"] = min_hold_bars
-							results[direction].append(stats)
-							trades_per_combo[direction][(param_a, param_b, atr_mult, min_hold_bars)] = trades
+								stats["ATRStopMult"] = atr_mult if atr_mult is not None else "None"
+								stats["MinHoldBars"] = min_hold_bars
+								stats["MaxHoldBars"] = max_hold_bars
+								results[direction].append(stats)
+								trades_per_combo[direction][(param_a, param_b, atr_mult, min_hold_bars, max_hold_bars)] = trades
 
 		for direction in directions:
 			dir_results = results[direction]
@@ -2889,6 +2980,7 @@ def run_parameter_sweep():
 			best_param_a, best_param_b = DEFAULT_PARAM_A, DEFAULT_PARAM_B
 			best_atr = None
 			best_hold_bars = DEFAULT_MIN_HOLD_BARS
+			best_max_hold = 0
 			final_equity = START_EQUITY
 			trades_count = 0
 			win_rate = 0.0
@@ -2902,12 +2994,13 @@ def run_parameter_sweep():
 				best_atr_raw = best_row.get("ATRStopMult", "None")
 				best_atr = best_atr_raw if best_atr_raw != "None" else None
 				best_hold_bars = int(best_row.get("MinHoldBars", DEFAULT_MIN_HOLD_BARS))
+				best_max_hold = int(best_row.get("MaxHoldBars", 0))
 				final_equity = float(best_row.get("FinalEquity", START_EQUITY))
 				trades_count = int(best_row.get("Trades", 0))
 				win_rate = float(best_row.get("WinRate", 0.0))
 				max_dd = float(best_row.get("MaxDrawdown", 0.0))
 				best_df = df_cache[(best_param_a, best_param_b)]
-				best_trades = trades_per_combo[direction][(best_param_a, best_param_b, best_atr, best_hold_bars)]
+				best_trades = trades_per_combo[direction][(best_param_a, best_param_b, best_atr, best_hold_bars, best_max_hold)]
 			else:
 				best_df = compute_indicator(df_raw, best_param_a, best_param_b)
 				for col in ("htf_trend", "htf_indicator", "momentum"):
@@ -2930,7 +3023,10 @@ def run_parameter_sweep():
 				"ATRStopMult": atr_label,
 				"ATRStopMultValue": best_atr,
 				"MinHoldBars": best_hold_bars,
+				"MaxHoldBars": best_max_hold,
 				"HTF": HIGHER_TIMEFRAME,
+				"HTFLength": HTF_LENGTH,
+				"HTFFactor": HTF_FACTOR,
 				"FinalEquity": final_equity,
 				"Trades": trades_count,
 				"WinRate": win_rate,
@@ -3079,9 +3175,882 @@ apply_indicator_type("supertrend")
 apply_higher_timeframe(HIGHER_TIMEFRAME)
 
 
+# =====================================================================
+#  PHASE-BASED SWEEP: Optimized parameters per market phase (Up/Down/Flat)
+#  Same trading strategy as trading_summary – only difference is
+#  separate best params for each phase.
+# =====================================================================
+
+def classify_market_phases(df, symbol):
+	"""
+	Classify each bar as Up/Down/Flat based on the current INDICATOR_TYPE.
+
+	- Supertrend / htf_crossover: st_trend directly → Up(+1) / Down(-1), no Flat
+	- JMA: slope of JMA on HTF, thr1=-0.0010, thr2=+0.0010 → Up/Flat/Down
+	- KAMA: slope of KAMA on HTF, thr1=-0.0001, thr2=+0.0001 → Up/Flat/Down
+
+	Uses current global HTF_LENGTH, HTF_FACTOR, HIGHER_TIMEFRAME.
+	"""
+	low_tf_minutes = timeframe_to_minutes(TIMEFRAME)
+	htf_minutes = timeframe_to_minutes(HIGHER_TIMEFRAME)
+	ratio = max(1, htf_minutes // low_tf_minutes)
+	htf_bars_needed = (len(df) // ratio) + 100
+
+	df_high = fetch_data(symbol, HIGHER_TIMEFRAME, htf_bars_needed)
+	if df_high.empty:
+		return pd.Series("Flat", index=df.index)
+
+	if INDICATOR_TYPE in ("supertrend", "htf_crossover"):
+		# Direct st_trend: +1 = Up, -1 = Down, no Flat
+		df_high_ind = compute_supertrend(df_high, length=HTF_LENGTH, factor=HTF_FACTOR)
+		if "st_trend" not in df_high_ind.columns:
+			return pd.Series("Flat", index=df.index)
+		st_trend = df_high_ind["st_trend"]
+		aligned = st_trend.reindex(df.index, method="ffill")
+		phases = pd.Series("Flat", index=df.index)
+		phases[aligned == 1] = "Up"
+		phases[aligned == -1] = "Down"
+		return phases
+
+	elif INDICATOR_TYPE == "jma":
+		# JMA slope with thresholds ±0.0010
+		df_high_ind = compute_jma(df_high, length=HTF_LENGTH, phase=0)
+		if "jma" not in df_high_ind.columns:
+			return pd.Series("Flat", index=df.index)
+		indicator_val = df_high_ind["jma"]
+		aligned = indicator_val.reindex(df.index, method="ffill")
+		raw_slope = aligned.diff()
+		slope_pct = raw_slope / aligned.shift(1)
+		slope_pct = slope_pct.rolling(window=5, min_periods=1).mean()
+		phases = pd.Series("Flat", index=df.index)
+		phases[slope_pct > 0.0010] = "Up"
+		phases[slope_pct < -0.0010] = "Down"
+		return phases
+
+	elif INDICATOR_TYPE == "kama":
+		# KAMA slope with thresholds ±0.0001
+		df_high_ind = compute_kama(df_high, length=HTF_LENGTH)
+		if "kama" not in df_high_ind.columns:
+			return pd.Series("Flat", index=df.index)
+		indicator_val = df_high_ind["kama"]
+		aligned = indicator_val.reindex(df.index, method="ffill")
+		raw_slope = aligned.diff()
+		slope_pct = raw_slope / aligned.shift(1)
+		slope_pct = slope_pct.rolling(window=5, min_periods=1).mean()
+		phases = pd.Series("Flat", index=df.index)
+		phases[slope_pct > 0.0001] = "Up"
+		phases[slope_pct < -0.0001] = "Down"
+		return phases
+
+	else:
+		# Fallback: Supertrend slope
+		df_high_ind = compute_supertrend(df_high, length=HTF_LENGTH, factor=HTF_FACTOR)
+		if "supertrend" not in df_high_ind.columns:
+			return pd.Series("Flat", index=df.index)
+		htf_st = df_high_ind["supertrend"]
+		aligned = htf_st.reindex(df.index, method="ffill")
+		raw_slope = aligned.diff()
+		slope_pct = raw_slope / aligned.shift(1)
+		slope_pct = slope_pct.rolling(window=5, min_periods=1).mean()
+		phases = pd.Series("Flat", index=df.index)
+		phases[slope_pct > 0.0005] = "Up"
+		phases[slope_pct < -0.0005] = "Down"
+		return phases
+
+
+def score_phase_compound(trades_df, phase_labels, phase):
+	"""
+	Compound growth using only trades from the given phase.
+	stake = equity / PHASE_STAKE_DIVISOR, PnL adds to equity.
+	Returns (final_equity, trade_count, win_count, max_drawdown).
+	"""
+	equity = START_EQUITY
+	peak_equity = START_EQUITY
+	max_dd = 0.0
+	count = 0
+	wins = 0
+
+	if trades_df.empty:
+		return equity, 0, 0, 0.0
+
+	for _, trade in trades_df.iterrows():
+		entry_time = trade["Zeit"]
+
+		# Look up phase at entry time
+		if entry_time in phase_labels.index:
+			trade_phase = phase_labels.loc[entry_time]
+		else:
+			idx = phase_labels.index.get_indexer([entry_time], method="ffill")[0]
+			trade_phase = phase_labels.iloc[idx] if idx >= 0 else "Flat"
+
+		if trade_phase != phase:
+			continue
+
+		count += 1
+		stake = equity / PHASE_STAKE_DIVISOR
+		entry_price = float(trade["Entry"])
+		exit_price = float(trade["ExitPreis"])
+		direction = str(trade["Direction"]).lower()
+
+		if direction == "long":
+			gross_pnl = (exit_price - entry_price) / entry_price * stake
+		else:
+			gross_pnl = (entry_price - exit_price) / entry_price * stake
+
+		fees = stake * FEE_RATE * 2.0
+		pnl = gross_pnl - fees
+		equity += pnl
+
+		if pnl > 0:
+			wins += 1
+		if equity > peak_equity:
+			peak_equity = equity
+		dd = peak_equity - equity
+		if dd > max_dd:
+			max_dd = dd
+
+	return equity, count, wins, max_dd
+
+
+def run_phase_based_sweep():
+	"""
+	Phase-based parameter sweep for the current indicator + HTF timeframe.
+	HTF_LENGTH/HTF_FACTOR are set by caller (paper_trader --sweep loop).
+
+	1. Classifies bars into Up/Down/Flat using current HTF settings
+	2. Runs all ParamA × ParamB × ATR × MinHold × MaxHold combos
+	3. Scores compound growth per phase (same strategy as trading_summary)
+	4. Returns best params per symbol × direction × phase
+
+	Does NOT modify any existing functions.
+	"""
+	ensure_cache_populated(SYMBOLS, TIMEFRAME, LOOKBACK)
+
+	directions = get_enabled_directions()
+	hold_bar_candidates = MIN_HOLD_BAR_VALUES if USE_MIN_HOLD_FILTER else [DEFAULT_MIN_HOLD_BARS]
+	max_hold_candidates = MAX_HOLD_BAR_VALUES if MAX_HOLD_BAR_VALUES else [0]
+	# Supertrend/htf_crossover: only Up/Down (no Flat). JMA/KAMA: Up/Down/Flat.
+	if INDICATOR_TYPE in ("supertrend", "htf_crossover"):
+		phase_names = ["Up", "Down"]
+	else:
+		phase_names = ["Up", "Down", "Flat"]
+
+	best_per_phase = {}  # {(symbol, direction, phase): row_dict}
+
+	total_params = len(PARAM_A_VALUES) * len(PARAM_B_VALUES) * len(ATR_STOP_MULTS) * len(hold_bar_candidates) * len(max_hold_candidates)
+	print(f"\n[Phase Sweep] {INDICATOR_DISPLAY_NAME} HTF={HIGHER_TIMEFRAME} L={HTF_LENGTH} F={HTF_FACTOR}")
+	print(f"[Phase Sweep] {len(SYMBOLS)} symbols × {total_params} param combos × 3 phases")
+
+	for sym_idx, symbol in enumerate(SYMBOLS, 1):
+		df_raw = prepare_symbol_dataframe(symbol)
+		if df_raw.empty:
+			continue
+
+		# Classify market phases for current HTF settings
+		phase_labels = classify_market_phases(df_raw, symbol)
+		phase_counts = phase_labels.value_counts().to_dict()
+		print(f"\n[Phase Sweep] [{sym_idx}/{len(SYMBOLS)}] {symbol}  phases={phase_counts}")
+
+		df_cache = {}
+
+		for param_a in PARAM_A_VALUES:
+			for param_b in PARAM_B_VALUES:
+				cache_key = (param_a, param_b)
+				if cache_key not in df_cache:
+					df_tmp = compute_indicator(df_raw, param_a, param_b)
+					for col in ("htf_trend", "htf_indicator", "momentum"):
+						if col in df_raw.columns:
+							df_tmp[col] = df_raw[col]
+					df_cache[cache_key] = df_tmp
+				df_st = df_cache[cache_key]
+
+				for atr_mult in ATR_STOP_MULTS:
+					for min_hold_bars in hold_bar_candidates:
+						for max_hold_bars in max_hold_candidates:
+							for direction in directions:
+								df_bt = df_st.copy()
+								for col in ("htf_trend", "htf_indicator", "momentum"):
+									if col in df_raw.columns:
+										df_bt[col] = df_raw[col]
+
+								# Run backtest (unchanged existing function)
+								if INDICATOR_TYPE == "htf_crossover":
+									trades = backtest_htf_crossover(
+										df_bt, atr_stop_mult=atr_mult,
+										direction=direction,
+										min_hold_bars=min_hold_bars,
+										max_hold_bars=max_hold_bars,
+										symbol=symbol,
+									)
+								else:
+									trades = backtest_supertrend(
+										df_bt, atr_stop_mult=atr_mult,
+										direction=direction,
+										min_hold_bars=min_hold_bars,
+										max_hold_bars=max_hold_bars,
+										symbol=symbol,
+									)
+
+								if trades.empty:
+									continue
+
+								# Score per phase with compound growth
+								atr_label = atr_mult if atr_mult is not None else "None"
+								for phase in phase_names:
+									final_eq, count, win_cnt, max_dd = score_phase_compound(
+										trades, phase_labels, phase
+									)
+									if count == 0:
+										continue
+
+									win_rate = win_cnt / count
+									key = (symbol, direction, phase)
+
+									candidate = {
+										"Symbol": symbol,
+										"Direction": direction.capitalize(),
+										"Indicator": INDICATOR_TYPE,
+										"IndicatorDisplay": INDICATOR_DISPLAY_NAME,
+										"Phase": phase,
+										"ParamA": param_a,
+										"ParamB": param_b,
+										"Length": param_a if INDICATOR_TYPE == "supertrend" else None,
+										"Factor": param_b if INDICATOR_TYPE == "supertrend" else None,
+										"ATRStopMult": atr_label,
+										"ATRStopMultValue": atr_mult,
+										"MinHoldBars": min_hold_bars,
+										"MaxHoldBars": max_hold_bars,
+										"HTF": HIGHER_TIMEFRAME,
+										"HTFLength": HTF_LENGTH,
+										"HTFFactor": HTF_FACTOR,
+										"FinalEquity": final_eq,
+										"Trades": count,
+										"WinRate": win_rate,
+										"MaxDrawdown": max_dd,
+									}
+
+									existing = best_per_phase.get(key)
+									if existing is None or final_eq > existing["FinalEquity"]:
+										best_per_phase[key] = candidate
+
+	# Print summary
+	results = list(best_per_phase.values())
+	print(f"\n[Phase Sweep] {INDICATOR_DISPLAY_NAME} HTF={HIGHER_TIMEFRAME} L={HTF_LENGTH} F={HTF_FACTOR}: {len(results)} best entries")
+	for row in sorted(results, key=lambda r: (r["Symbol"], r["Phase"])):
+		print(f"  {row['Symbol']:12s} {row['Phase']:5s} "
+			  f"{PARAM_A_LABEL}={row['ParamA']}, {PARAM_B_LABEL}={row['ParamB']}, "
+			  f"ATR={row['ATRStopMult']}, Hold={row['MinHoldBars']}/{row['MaxHoldBars']}, "
+			  f"Equity={row['FinalEquity']:.2f} ({row['Trades']} trades)")
+
+	return results
+
+
+def record_global_phase_best(indicator_key, summary_rows):
+	"""Record best phase-based results, keeping highest FinalEquity per phase."""
+	if not summary_rows:
+		return
+	indicator_store = GLOBAL_PHASE_RESULTS.setdefault(indicator_key, {})
+	for row in summary_rows:
+		symbol = row.get("Symbol")
+		direction = str(row.get("Direction", "Long")).lower()
+		phase = row.get("Phase", "Flat")
+		if not symbol:
+			continue
+		symbol_store = indicator_store.setdefault(symbol, {})
+		dir_store = symbol_store.setdefault(direction, {})
+		existing = dir_store.get(phase)
+		candidate_equity = float(row.get("FinalEquity", START_EQUITY))
+		existing_equity = float(existing.get("FinalEquity", START_EQUITY)) if existing else None
+		if existing is None or candidate_equity > existing_equity:
+			dir_store[phase] = dict(row)
+
+
+def _collect_best_phase_trades():
+	"""
+	Re-run backtests using the best params per phase from GLOBAL_PHASE_RESULTS.
+	For each symbol, picks the best indicator per phase, runs backtest,
+	keeps only trades matching the phase.
+	Returns chronological list of trade dicts.
+	"""
+	global HTF_LENGTH, HTF_FACTOR
+
+	# For each (symbol, phase): pick best across all indicators
+	best_per_sp = {}
+	for indicator_key, indicator_store in GLOBAL_PHASE_RESULTS.items():
+		for symbol, dir_dict in indicator_store.items():
+			for direction, phase_dict in dir_dict.items():
+				for phase, entry in phase_dict.items():
+					key = (symbol, phase)
+					existing = best_per_sp.get(key)
+					if existing is None or float(entry.get("FinalEquity", 0)) > float(existing.get("FinalEquity", 0)):
+						best_per_sp[key] = entry
+
+	all_trades = []
+	saved_htf_length = HTF_LENGTH
+	saved_htf_factor = HTF_FACTOR
+
+	# Group by (symbol, indicator, htf, htf_length, htf_factor) to avoid redundant backtests
+	backtest_groups = {}
+	for (symbol, phase), params in best_per_sp.items():
+		group_key = (
+			symbol, params["Indicator"], params.get("HTF", HIGHER_TIMEFRAME),
+			int(params.get("HTFLength", HTF_LENGTH)), float(params.get("HTFFactor", HTF_FACTOR)),
+			params["ParamA"], params["ParamB"],
+			params.get("ATRStopMultValue"), int(params.get("MinHoldBars", 0)), int(params.get("MaxHoldBars", 0)),
+		)
+		backtest_groups.setdefault(group_key, []).append((phase, params))
+
+	for group_key, phase_list in backtest_groups.items():
+		symbol, indicator, htf, htf_len, htf_fac, param_a, param_b, atr_mult, min_hold, max_hold = group_key
+
+		apply_indicator_type(indicator)
+		apply_higher_timeframe(htf)
+		HTF_LENGTH = htf_len
+		HTF_FACTOR = htf_fac
+		clear_data_cache()
+
+		df_raw = prepare_symbol_dataframe(symbol)
+		if df_raw.empty:
+			continue
+
+		phase_labels = classify_market_phases(df_raw, symbol)
+
+		df_ind = compute_indicator(df_raw, param_a, param_b)
+		for col in ("htf_trend", "htf_indicator", "momentum"):
+			if col in df_raw.columns:
+				df_ind[col] = df_raw[col]
+
+		direction = str(phase_list[0][1].get("Direction", "Long")).lower()
+
+		if indicator == "htf_crossover":
+			trades = backtest_htf_crossover(df_ind, atr_stop_mult=atr_mult, direction=direction,
+				min_hold_bars=min_hold, max_hold_bars=max_hold, symbol=symbol)
+		else:
+			trades = backtest_supertrend(df_ind, atr_stop_mult=atr_mult, direction=direction,
+				min_hold_bars=min_hold, max_hold_bars=max_hold, symbol=symbol)
+
+		if trades.empty:
+			continue
+
+		target_phases = {p for p, _ in phase_list}
+
+		for _, trade in trades.iterrows():
+			entry_time = trade["Zeit"]
+			if entry_time in phase_labels.index:
+				trade_phase = phase_labels.loc[entry_time]
+			else:
+				idx = phase_labels.index.get_indexer([entry_time], method="ffill")[0]
+				trade_phase = phase_labels.iloc[idx] if idx >= 0 else "Flat"
+
+			if trade_phase not in target_phases:
+				continue
+
+			all_trades.append({
+				"symbol": symbol,
+				"indicator": INDICATOR_DISPLAY_NAME,
+				"indicator_key": indicator,
+				"htf": htf,
+				"direction": direction,
+				"phase": trade_phase,
+				"entry_time": str(entry_time),
+				"exit_time": str(trade["ExitZeit"]),
+				"entry_price": float(trade["Entry"]),
+				"exit_price": float(trade["ExitPreis"]),
+				"reason": str(trade.get("ExitReason", "")),
+			})
+
+	HTF_LENGTH = saved_htf_length
+	HTF_FACTOR = saved_htf_factor
+
+	all_trades.sort(key=lambda t: t["entry_time"])
+	return all_trades
+
+
+def _generate_phase_dashboard(all_trades, dashboard_start="2025-12-01", summary_start="2024-12-01", stake_divisor=None, indicator_label=None, output_prefix="ph1"):
+	"""
+	Generate dashboard_{prefix}.html and trading_summary_{prefix}.html.
+
+	One compound growth curve from START_EQUITY starting at summary_start.
+	Summary shows all trades from summary_start.
+	Dashboard shows trades from dashboard_start onwards, starting equity =
+	equity reached at dashboard_start in the summary curve.
+
+	Trades must have: entry_price, exit_price, direction, entry_time, exit_time,
+	symbol, indicator, htf, phase, reason.
+	"""
+	now = datetime.now(BERLIN_TZ).strftime("%Y-%m-%d %H:%M:%S %Z")
+	phase_colors = {"Up": "#27ae60", "Down": "#e74c3c", "Flat": "#f39c12"}
+	max_positions = stake_divisor if stake_divisor else PHASE_STAKE_DIVISOR
+
+	# German number formatting
+	def fmt_de(val):
+		s = f"{val:,.2f}"
+		return s.replace(",", "X").replace(".", ",").replace("X", ".")
+
+	def fmt_price(val):
+		v = abs(val)
+		if v < 0.0001:
+			return f"{val:.8f}"
+		elif v < 1:
+			return f"{val:.6f}"
+		elif v < 100:
+			return f"{val:.4f}"
+		return fmt_de(val)
+
+	# ── Compound growth helper: start at START_EQUITY, stake = capital/max_positions ──
+	def _apply_compound(trades_raw):
+		# Separate closed and open ("Final bar") trades
+		closed_raw = [t for t in trades_raw if t.get("reason", "") != "Final bar"]
+		open_raw = [t for t in trades_raw if t.get("reason", "") == "Final bar"]
+
+		# Apply compound growth to closed trades only
+		capital = START_EQUITY
+		result = []
+		for t in closed_raw:
+			stake = capital / max_positions
+			ep = t["entry_price"]
+			xp = t["exit_price"]
+			if t["direction"] == "long":
+				pnl_pct = (xp - ep) / ep if ep else 0
+			else:
+				pnl_pct = (ep - xp) / ep if ep else 0
+			pnl_gross = pnl_pct * stake
+			fees = stake * FEE_RATE * 2.0
+			pnl_net = pnl_gross - fees
+			capital += pnl_net
+			tc = dict(t)
+			tc["stake"] = stake
+			tc["pnl"] = pnl_net
+			tc["pnl_pct"] = pnl_pct
+			tc["fees"] = fees
+			tc["equity_after"] = capital
+			result.append(tc)
+
+		# Open positions: uniform stake = final closed capital / max_positions
+		final_closed_capital = capital
+		open_stake = final_closed_capital / max_positions
+		for t in open_raw:
+			ep = t["entry_price"]
+			xp = t["exit_price"]
+			if t["direction"] == "long":
+				pnl_pct = (xp - ep) / ep if ep else 0
+			else:
+				pnl_pct = (ep - xp) / ep if ep else 0
+			pnl_gross = pnl_pct * open_stake
+			fees = open_stake * FEE_RATE * 2.0
+			pnl_net = pnl_gross - fees
+			tc = dict(t)
+			tc["stake"] = open_stake
+			tc["pnl"] = pnl_net
+			tc["pnl_pct"] = pnl_pct
+			tc["fees"] = fees
+			tc["equity_after"] = final_closed_capital
+			result.append(tc)
+		return result
+
+	# ── Two independent compound curves, both from 16500 ──
+	summ_raw = sorted([t for t in all_trades if t["entry_time"][:10] >= summary_start], key=lambda t: t["entry_time"])
+	summ_processed = _apply_compound(summ_raw)
+
+	dash_raw = sorted([t for t in all_trades if t["entry_time"][:10] >= dashboard_start], key=lambda t: t["entry_time"])
+	dash_processed = _apply_compound(dash_raw)
+
+	def trade_row(t, show_exit=True):
+		pnl_class = "pos" if t["pnl"] >= 0 else "neg"
+		pnl_pct_str = f"{'+' if t['pnl_pct'] >= 0 else ''}{t['pnl_pct']*100:.2f}%"
+		phase_color = phase_colors.get(t.get("phase", ""), "#888")
+		cols = [
+			f'<td>{t["symbol"]}</td>',
+			f'<td style="color:{phase_color};font-weight:bold">{t.get("phase", "")}</td>',
+			f'<td>{t["indicator"]}</td>',
+			f'<td>{t["htf"]}</td>',
+			f'<td>{t["entry_time"][:16]}</td>',
+			f'<td style="text-align:right">{fmt_price(t["entry_price"])}</td>',
+		]
+		if show_exit:
+			cols.append(f'<td>{t["exit_time"][:16]}</td>')
+			cols.append(f'<td style="text-align:right">{fmt_price(t["exit_price"])}</td>')
+		else:
+			cols.append(f'<td style="text-align:right">{fmt_price(t["exit_price"])}</td>')
+		cols += [
+			f'<td style="text-align:right">{fmt_de(t["stake"])}</td>',
+			f'<td class="{pnl_class}" style="text-align:right">{fmt_de(t["pnl"])}</td>',
+			f'<td class="{pnl_class}" style="text-align:right">{pnl_pct_str}</td>',
+		]
+		if show_exit:
+			cols.append(f'<td>{t["reason"]}</td>')
+		else:
+			cols.append(f'<td>Open</td>')
+		return "<tr>" + "".join(cols) + "</tr>"
+
+	def _build_html(trades_filtered, title, date_label, start_cap, auto_refresh=False):
+		open_t = [t for t in trades_filtered if t["reason"] == "Final bar"]
+		closed_t = [t for t in trades_filtered if t["reason"] != "Final bar"]
+
+		total_trades = len(trades_filtered)
+		winners = sum(1 for t in trades_filtered if t["pnl"] > 0)
+		win_rate = (winners / total_trades * 100) if total_trades else 0
+		# Limit open positions to max_positions (e.g. 8)
+		if len(open_t) > max_positions:
+			open_t = sorted(open_t, key=lambda t: t["entry_time"], reverse=True)[:max_positions]
+		open_pnl = sum(t["pnl"] for t in open_t)
+		closed_pnl = sum(t["pnl"] for t in closed_t)
+		total_pnl = closed_pnl + open_pnl
+		# Final capital = closed equity + unrealized open PnL
+		closed_capital = closed_t[-1]["equity_after"] if closed_t else start_cap
+		final_cap = closed_capital + open_pnl
+
+		open_rows = "\n".join(trade_row(t, show_exit=False) for t in open_t) if open_t else '<tr><td colspan="11" style="text-align:center;color:#888">Keine offenen Positionen</td></tr>'
+		closed_rows = "\n".join(trade_row(t, show_exit=True) for t in reversed(closed_t)) if closed_t else '<tr><td colspan="12" style="text-align:center;color:#888">Keine Trades</td></tr>'
+
+		cap_color = "#27ae60" if final_cap >= start_cap else "#e74c3c"
+		pnl_color = "#27ae60" if total_pnl >= 0 else "#e74c3c"
+		open_pnl_color = "#27ae60" if open_pnl >= 0 else "#e74c3c"
+		refresh_tag = '<meta http-equiv="refresh" content="60">' if auto_refresh else ''
+
+		return f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8">{refresh_tag}
+<title>{title} (ab {date_label})</title>
+<style>
+body {{ font-family: Arial, sans-serif; margin: 20px; background: #1a1a2e; color: #e0e0e0; }}
+h1 {{ color: #00d2ff; margin-bottom: 5px; }}
+h2 {{ color: #f39c12; margin-top: 30px; }}
+p.sub {{ color: #888; margin-top: 0; }}
+.cards {{ display: flex; gap: 15px; flex-wrap: wrap; margin: 20px 0; }}
+.card {{ background: #16213e; border-radius: 8px; padding: 15px 20px; min-width: 150px; }}
+.card .label {{ color: #888; font-size: 12px; text-transform: uppercase; }}
+.card .value {{ font-size: 22px; font-weight: bold; margin-top: 5px; }}
+table {{ border-collapse: collapse; width: 100%; font-size: 13px; margin-top: 10px; }}
+th {{ background: #16213e; color: #00d2ff; padding: 8px 10px; text-align: left; border-bottom: 2px solid #0f3460; }}
+td {{ padding: 6px 10px; border-bottom: 1px solid #333; }}
+tr:hover {{ background: #16213e; }}
+.pos {{ color: #27ae60; }}
+.neg {{ color: #e74c3c; }}
+</style>
+</head><body>
+<h1>{title}</h1>
+<p class="sub">Ab {date_label} | Stand: {now} | Compound Growth (stake = kapital/{max_positions})</p>
+
+<div class="cards">
+<div class="card"><div class="label">Start Kapital</div><div class="value">{fmt_de(start_cap)} USDT</div></div>
+<div class="card"><div class="label">Final Kapital</div><div class="value" style="color:{cap_color}">{fmt_de(final_cap)} USDT</div></div>
+<div class="card"><div class="label">Closed Trades</div><div class="value">{len(closed_t)}</div></div>
+<div class="card"><div class="label">Realized PnL</div><div class="value" style="color:{pnl_color}">{fmt_de(closed_pnl)} USDT</div></div>
+<div class="card"><div class="label">Open Positionen (max {max_positions})</div><div class="value">{len(open_t)}</div></div>
+<div class="card"><div class="label">Open PnL</div><div class="value" style="color:{open_pnl_color}">{fmt_de(open_pnl)} USDT</div></div>
+<div class="card"><div class="label">Win Rate</div><div class="value">{win_rate:.1f}%</div></div>
+</div>
+
+<h2>Open Positionen</h2>
+<table>
+<tr><th>Symbol</th><th>Phase</th><th>Indikator</th><th>HTF</th><th>Entry</th><th>Entry Preis</th><th>Aktuell</th><th>Stake</th><th>PnL</th><th>PnL%</th><th>Status</th></tr>
+{open_rows}
+</table>
+
+<h2>Closed Trades ({len(closed_t)})</h2>
+<table>
+<tr><th>Symbol</th><th>Phase</th><th>Indikator</th><th>HTF</th><th>Entry</th><th>Entry Preis</th><th>Exit</th><th>Exit Preis</th><th>Stake</th><th>PnL</th><th>PnL%</th><th>Reason</th></tr>
+{closed_rows}
+</table>
+
+</body></html>"""
+
+	# Title with optional indicator label
+	label_suffix = f" — {indicator_label}" if indicator_label else ""
+
+	# Summary: compound from 16500, trades ab summary_start
+	summ_html = _build_html(summ_processed, f"Phase Trading Summary{label_suffix}", summary_start, start_cap=START_EQUITY, auto_refresh=False)
+	summary_path = os.path.join(BASE_OUT_DIR, f"trading_summary_{output_prefix}.html")
+	with open(summary_path, "w", encoding="utf-8") as f:
+		f.write(summ_html)
+	print(f"[Phase Summary] {summary_path} ({len(summ_processed)} trades ab {summary_start}, start={fmt_de(START_EQUITY)})")
+
+	# Dashboard: compound from 16500, trades ab dashboard_start
+	dash_html = _build_html(dash_processed, f"Phase Dashboard{label_suffix}", dashboard_start, start_cap=START_EQUITY, auto_refresh=True)
+	dash_path = os.path.join(BASE_OUT_DIR, f"dashboard_{output_prefix}.html")
+	with open(dash_path, "w", encoding="utf-8") as f:
+		f.write(dash_html)
+	print(f"[Phase Dashboard] {dash_path} ({len(dash_processed)} trades ab {dashboard_start}, start={fmt_de(START_EQUITY)})")
+
+
+def _write_phase_sweep_html(df_out):
+	"""Generate phase_sweep_report.html with params table + equity comparison."""
+	now = datetime.now(BERLIN_TZ).strftime("%Y-%m-%d %H:%M:%S %Z")
+	phase_colors = {"Up": "#27ae60", "Down": "#e74c3c", "Flat": "#f39c12"}
+
+	# ── 1. Best-Params Tabelle (Symbol × Phase × Indicator) ──
+	display_cols = ["Symbol", "Indicator", "Phase", "ParamA", "ParamB",
+		"ATRStopMult", "MinHoldBars", "MaxHoldBars",
+		"HTF", "HTFLength", "HTFFactor", "Trades", "WinRate", "FinalEquity"]
+	available = [c for c in display_cols if c in df_out.columns]
+	table_df = df_out[available].copy()
+	if "WinRate" in table_df.columns:
+		table_df["WinRate"] = table_df["WinRate"].apply(lambda x: f"{float(x)*100:.1f}%")
+	if "FinalEquity" in table_df.columns:
+		table_df["FinalEquity"] = table_df["FinalEquity"].apply(lambda x: f"{float(x):,.2f}")
+
+	params_html = table_df.to_html(index=False, justify="left", border=0, classes="params-table")
+
+	# ── 2. Equity-Vergleich pro Symbol (Balkendiagramm als HTML-Tabelle) ──
+	equity_rows = []
+	for symbol in SYMBOLS:
+		sym_data = df_out[df_out["Symbol"] == symbol]
+		if sym_data.empty:
+			continue
+		row_data = {"Symbol": symbol}
+		for phase in ["Up", "Down", "Flat"]:
+			phase_data = sym_data[sym_data["Phase"] == phase]
+			if not phase_data.empty:
+				best = phase_data.loc[phase_data["FinalEquity"].astype(float).idxmax()]
+				row_data[f"{phase}_Equity"] = float(best["FinalEquity"])
+				row_data[f"{phase}_Indicator"] = best.get("IndicatorDisplay", best.get("Indicator", ""))
+				row_data[f"{phase}_Trades"] = int(best.get("Trades", 0))
+			else:
+				row_data[f"{phase}_Equity"] = START_EQUITY
+				row_data[f"{phase}_Indicator"] = "-"
+				row_data[f"{phase}_Trades"] = 0
+		equity_rows.append(row_data)
+
+	# Find max equity for bar scaling
+	all_equities = []
+	for r in equity_rows:
+		for p in ["Up", "Down", "Flat"]:
+			all_equities.append(r.get(f"{p}_Equity", START_EQUITY))
+	max_eq = max(all_equities) if all_equities else START_EQUITY * 1.1
+	bar_scale = max(max_eq, START_EQUITY * 1.01)
+
+	equity_html_parts = []
+	for r in equity_rows:
+		symbol = r["Symbol"]
+		equity_html_parts.append(f'<tr><td class="sym-col" rowspan="3"><b>{symbol}</b></td>')
+		for i, phase in enumerate(["Up", "Down", "Flat"]):
+			eq = r[f"{phase}_Equity"]
+			ind = r[f"{phase}_Indicator"]
+			trades = r[f"{phase}_Trades"]
+			pnl = eq - START_EQUITY
+			pnl_str = f"+{pnl:,.2f}" if pnl >= 0 else f"{pnl:,.2f}"
+			bar_pct = max(5, (eq / bar_scale) * 100)
+			color = phase_colors[phase]
+			if i > 0:
+				equity_html_parts.append("<tr>")
+			equity_html_parts.append(
+				f'<td style="width:60px;color:{color};font-weight:bold">{phase}</td>'
+				f'<td style="width:120px">{ind}</td>'
+				f'<td style="width:50px;text-align:right">{trades}</td>'
+				f'<td style="width:300px">'
+				f'<div style="background:{color};width:{bar_pct:.0f}%;height:20px;border-radius:3px;'
+				f'display:inline-block;min-width:5px"></div></td>'
+				f'<td style="width:120px;text-align:right;font-weight:bold">{eq:,.2f}</td>'
+				f'<td style="width:100px;text-align:right;color:{"#27ae60" if pnl >= 0 else "#e74c3c"}">'
+				f'{pnl_str}</td></tr>'
+			)
+
+	html = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<title>Phase-Based Sweep Report</title>
+<style>
+body {{ font-family: Arial, sans-serif; margin: 20px; background: #1a1a2e; color: #e0e0e0; }}
+h1 {{ color: #00d2ff; }}
+h2 {{ color: #f39c12; margin-top: 40px; }}
+p.info {{ color: #888; }}
+.params-table {{ border-collapse: collapse; width: 100%; font-size: 13px; }}
+.params-table th {{ background: #16213e; color: #00d2ff; padding: 8px 10px; text-align: left;
+  border-bottom: 2px solid #0f3460; }}
+.params-table td {{ padding: 6px 10px; border-bottom: 1px solid #333; }}
+.params-table tr:hover {{ background: #16213e; }}
+.equity-table {{ border-collapse: collapse; width: 100%; font-size: 13px; }}
+.equity-table th {{ background: #16213e; color: #00d2ff; padding: 8px 10px; text-align: left;
+  border-bottom: 2px solid #0f3460; }}
+.equity-table td {{ padding: 5px 8px; border-bottom: 1px solid #222; }}
+.sym-col {{ background: #16213e; font-size: 14px; vertical-align: middle; }}
+</style>
+</head><body>
+<h1>Phase-Based Sweep Report</h1>
+<p class="info">Stand: {now} | Start-Kapital: {START_EQUITY:,.0f} USDT | Stake: equity/{PHASE_STAKE_DIVISOR}</p>
+
+<h2>Equity-Vergleich pro Symbol und Marktphase</h2>
+<p class="info">Bester Indikator pro Phase, Compound Growth mit stake = equity/{PHASE_STAKE_DIVISOR}</p>
+<table class="equity-table">
+<tr><th>Symbol</th><th>Phase</th><th>Indikator</th><th>Trades</th><th>Equity</th><th></th><th>PnL</th></tr>
+{"".join(equity_html_parts)}
+</table>
+
+<h2>Alle Best-Params pro Symbol x Phase x Indikator</h2>
+<p class="info">{len(df_out)} Eintr&auml;ge: je 3 Phasen (Up/Down/Flat) x Indikatoren x Symbole</p>
+{params_html}
+
+</body></html>"""
+
+	report_path = os.path.join(BASE_OUT_DIR, "phase_sweep_report.html")
+	with open(report_path, "w", encoding="utf-8") as f:
+		f.write(html)
+	print(f"[Phase Sweep] HTML report: {report_path}")
+
+
+def _print_phase_pivot_table(df_out):
+	"""
+	Pivot Table: Symbol (Zeilen) × Phase (Spalten) → PnL.
+	Bester Indikator pro Symbol+Phase (höchste FinalEquity).
+	Identifiziert Symbol+Phase Kombis mit Verlust → BLOCKED_SYMBOL_PHASES.
+	"""
+	# Besten Indikator pro (Symbol, Phase) finden
+	pivot = {}
+	for _, row in df_out.iterrows():
+		symbol = row["Symbol"]
+		phase = row.get("Phase", "")
+		equity = float(row.get("FinalEquity", START_EQUITY))
+		indicator = row.get("IndicatorDisplay", row.get("Indicator", ""))
+		key = (symbol, phase)
+		if key not in pivot or equity > pivot[key]["equity"]:
+			pivot[key] = {"equity": equity, "pnl": equity - START_EQUITY, "indicator": indicator}
+
+	# Pivot Table drucken
+	phases_header = ["Up", "Down", "Flat"]
+	print(f"\n{'='*80}")
+	print(f"  PIVOT TABLE: Symbol × Phase → PnL (Bester Indikator)")
+	print(f"  Start-Kapital: {START_EQUITY:,.0f} USDT")
+	print(f"{'='*80}")
+	print(f"  {'Symbol':>12s}  {'Up':>14s}  {'Down':>14s}  {'Flat':>14s}")
+	print(f"  {'-'*60}")
+
+	blocked_new = {}
+	for symbol in SYMBOLS:
+		row_parts = []
+		for phase in phases_header:
+			key = (symbol, phase)
+			if key in pivot:
+				pnl = pivot[key]["pnl"]
+				marker = " *" if pnl < 0 else ""
+				row_parts.append(f"{pnl:>12.2f}{marker}")
+				if pnl < 0:
+					blocked_new.setdefault(symbol, []).append(phase)
+			else:
+				row_parts.append(f"{'N/A':>14s}")
+		print(f"  {symbol:>12s}  {'  '.join(row_parts)}")
+
+	# Blocked Phases ausgeben
+	print(f"\n  * = Verlust → wird geblockt")
+	print(f"\n  Empfohlene BLOCKED_SYMBOL_PHASES:")
+	if blocked_new:
+		print(f"  BLOCKED_SYMBOL_PHASES = {{")
+		for symbol in SYMBOLS:
+			if symbol in blocked_new:
+				phases_str = ", ".join(f'"{p}"' for p in blocked_new[symbol])
+				print(f'      "{symbol}": [{phases_str}],')
+		print(f"  }}")
+	else:
+		print(f"  BLOCKED_SYMBOL_PHASES = {{}}  # Keine Verlust-Kombis!")
+	print(f"{'='*80}")
+
+	# Pivot-Tabelle auch als CSV speichern
+	pivot_rows = []
+	for symbol in SYMBOLS:
+		row_data = {"Symbol": symbol}
+		for phase in phases_header:
+			key = (symbol, phase)
+			if key in pivot:
+				row_data[f"PnL_{phase}"] = pivot[key]["pnl"]
+				row_data[f"Indicator_{phase}"] = pivot[key]["indicator"]
+				row_data[f"Equity_{phase}"] = pivot[key]["equity"]
+			else:
+				row_data[f"PnL_{phase}"] = None
+				row_data[f"Indicator_{phase}"] = None
+				row_data[f"Equity_{phase}"] = None
+		pivot_rows.append(row_data)
+
+	if pivot_rows:
+		pivot_df = pd.DataFrame(pivot_rows)
+		pivot_path = os.path.join(BASE_OUT_DIR, "phase_pivot_table.csv")
+		pivot_df.to_csv(pivot_path, sep=";", decimal=",", index=False, encoding="utf-8")
+		print(f"\n  Pivot Table gespeichert: {pivot_path}")
+
+	return blocked_new
+
+
+def write_overall_phase_result_tables(dashboard_start="2025-12-01"):
+	"""Write phase-based best parameters to PHASE_PARAMS_CSV (best_params_overall.csv)."""
+	if not GLOBAL_PHASE_RESULTS:
+		print("[Phase Sweep] No results to write.")
+		return
+
+	indicator_order = list(INDICATOR_PRESETS.keys())
+	indicator_labels = {key: INDICATOR_PRESETS[key]["display_name"] for key in indicator_order}
+
+	csv_rows = []
+	for key in indicator_order:
+		indicator_store = GLOBAL_PHASE_RESULTS.get(key, {})
+		for symbol in SYMBOLS:
+			dir_dict = indicator_store.get(symbol, {})
+			for direction, phase_dict in dir_dict.items():
+				for phase, entry in phase_dict.items():
+					row = dict(entry)
+					row["Indicator"] = key
+					row["IndicatorDisplay"] = indicator_labels.get(key, key)
+					row["Direction"] = direction.capitalize()
+					row["Phase"] = phase
+					csv_rows.append(row)
+
+	if csv_rows:
+		os.makedirs(BASE_OUT_DIR, exist_ok=True)
+		df_out = pd.DataFrame(csv_rows)
+		sort_cols = [c for c in ["Symbol", "Indicator", "Phase", "Direction"] if c in df_out.columns]
+		if sort_cols:
+			df_out = df_out.sort_values(sort_cols).reset_index(drop=True)
+		df_out.to_csv(PHASE_PARAMS_CSV, sep=";", decimal=",", index=False, encoding="utf-8")
+		print(f"\n[Phase Sweep] Written {len(csv_rows)} rows to {PHASE_PARAMS_CSV}")
+
+		# Generate HTML reports
+		_write_phase_sweep_html(df_out)
+
+		# Generate dashboard + trading summary from phase trades
+		print("\n[Phase Dashboard] Collecting phase trades for dashboard...")
+		phase_trades = _collect_best_phase_trades()
+		if phase_trades:
+			_generate_phase_dashboard(phase_trades, dashboard_start=dashboard_start)
+		else:
+			print("[Phase Dashboard] No trades collected.")
+
+		# Console summary
+		print(f"\n{'='*80}")
+		print(f"  PHASE-BASED BEST PARAMETERS ({len(csv_rows)} entries)")
+		print(f"{'='*80}")
+		for _, row in df_out.iterrows():
+			eq = float(row.get("FinalEquity", 0))
+			print(f"  {row['Symbol']:12s} {row.get('Indicator',''):15s} {row.get('Phase',''):5s} "
+				  f"A={row.get('ParamA',''):>5} B={row.get('ParamB',''):>5} "
+				  f"HTF={row.get('HTF','')}/L={row.get('HTFLength','')}/F={row.get('HTFFactor','')} "
+				  f"Equity={eq:>12.2f}")
+
+		# ── Pivot Table: Symbol × Phase → PnL (bester Indikator je Kombi) ──
+		_print_phase_pivot_table(df_out)
+	else:
+		print("[Phase Sweep] No results to write.")
+
+
 if __name__ == "__main__":
 	if RUN_OVERALL_BEST:
 		run_overall_best_params()
+	elif RUN_PHASE_BASED_SWEEP:
+		indicator_candidates = get_indicator_candidates()
+		htf_candidates = get_highertimeframe_candidates()
+		htf_length_values = HTF_LENGTH_VALUES
+		htf_factor_values = HTF_FACTOR_VALUES
+		total = len(indicator_candidates) * len(htf_candidates) * len(htf_length_values) * len(htf_factor_values)
+		combo_num = 0
+		for indicator_name in indicator_candidates:
+			apply_indicator_type(indicator_name)
+			for htf_value in htf_candidates:
+				apply_higher_timeframe(htf_value)
+				for htf_len in htf_length_values:
+					for htf_fac in htf_factor_values:
+						combo_num += 1
+						HTF_LENGTH = htf_len
+						HTF_FACTOR = htf_fac
+						clear_data_cache()
+						print(f"\n[Phase Sweep {combo_num}/{total}] {INDICATOR_DISPLAY_NAME} HTF={htf_value} L={htf_len} F={htf_fac}")
+						summary_rows = run_phase_based_sweep()
+						record_global_phase_best(indicator_name, summary_rows)
+		write_overall_phase_result_tables()
 	else:
 		indicator_candidates = get_indicator_candidates()
 		htf_candidates = get_highertimeframe_candidates()

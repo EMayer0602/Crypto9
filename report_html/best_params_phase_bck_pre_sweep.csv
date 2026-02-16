@@ -1,0 +1,4 @@
+Symbol;Direction;Indicator;IndicatorDisplay;Phase;ParamA;ParamB;Length;Factor;ATRStopMult;ATRStopMultValue;MinHoldBars;MaxHoldBars;HTF;HTFLength;HTFFactor;FinalEquity;Trades;WinRate;MaxDrawdown
+BTC/USDC;Long;jma;Jurik Moving Average;Up;20;-50,0;;;None;;24;5;12h;180;15,0;15171,77;166;0,6325;186,9969
+BTC/USDC;Long;jma;Jurik Moving Average;Down;20;-50,0;;;None;;24;5;12h;180;15,0;15171,77;166;0,6325;186,9969
+BTC/USDC;Long;jma;Jurik Moving Average;Flat;20;-50,0;;;None;;24;5;12h;180;15,0;15171,77;166;0,6325;186,9969

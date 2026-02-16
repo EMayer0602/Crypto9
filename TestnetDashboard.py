@@ -1,264 +1,416 @@
 #!/usr/bin/env python3
-"""Generate HTML dashboard for Binance Testnet trading."""
+"""Generate HTML dashboard from trading_summary.json.
 
-import os
+Single source of truth: trading_summary.json
+"""
+
+import json
+import re
 import time
-import hmac
-import hashlib
-import requests
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
-from dotenv import load_dotenv
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
-load_dotenv()
-
-API_KEY = os.getenv("BINANCE_API_KEY_TEST")
-API_SECRET = os.getenv("BINANCE_API_SECRET_TEST")
-BASE_URL = "https://testnet.binance.vision"
-RECV_WINDOW_MS = 5_000
-
-# Trading symbols - Testnet only supports USDT pairs
-SYMBOLS = ["BTCUSDT", "ETHUSDT", "XRPUSDT", "LINKUSDT", "SOLUSDT", "BNBUSDT",
-           "SUIUSDT", "ZECUSDT", "LUNCUSDT", "TNSRUSDT"]
-
-# Base currencies (don't count as positions)
-BASE_CURRENCIES = {"USDT", "USDC", "BUSD", "BTC", "TUSD"}
-
-# Relevant trading assets (filter out testnet junk)
-RELEVANT_ASSETS = {"BTC", "ETH", "SOL", "XRP", "LINK", "BNB", "SUI", "ZEC", "LUNC", "TNSR"}
-
-# Only show trades from this date onwards (set to None to show all)
-TRADES_SINCE_DATE = datetime(2026, 1, 2, tzinfo=timezone.utc)  # Today
-
-OUTPUT_DIR = Path("report_testnet")
+# Lazy-loaded ccxt exchange instance (reused for all requests)
+_exchange = None
 
 
-def sign_request(params: dict, secret: str) -> str:
-    query_string = "&".join([f"{k}={v}" for k, v in params.items()])
-    signature = hmac.new(secret.encode(), query_string.encode(), hashlib.sha256).hexdigest()
-    return query_string + "&signature=" + signature
+def _get_exchange():
+    """Get or create cached CCXT exchange instance with proper configuration."""
+    global _exchange
+    if _exchange is None:
+        import ccxt
+        _exchange = ccxt.binance({
+            'enableRateLimit': True,
+            'timeout': 30000,  # 30 seconds timeout
+            'options': {'adjustForTimeDifference': True}
+        })
+    return _exchange
 
 
-def get_account_balances() -> list:
-    """Get all account balances."""
-    endpoint = "/api/v3/account"
-    url = BASE_URL + endpoint
-    params = {
-        "timestamp": int(time.time() * 1000),
-        "recvWindow": RECV_WINDOW_MS,
-    }
-    query = sign_request(params, API_SECRET)
-    headers = {"X-MBX-APIKEY": API_KEY}
-    try:
-        response = requests.get(url + "?" + query, headers=headers, timeout=10)
-        response.raise_for_status()
-        return response.json().get("balances", [])
-    except Exception as e:
-        print(f"Error fetching balances: {e}")
-        return []
+def fetch_live_prices_batch(symbols: list) -> dict:
+    """Fetch current prices for multiple symbols in one API call.
 
+    Args:
+        symbols: List of symbols like ['BTC/USDT', 'ETH/USDT']
 
-def get_all_orders(symbol: str) -> list:
-    """Get all orders for a symbol."""
-    endpoint = "/api/v3/allOrders"
-    url = BASE_URL + endpoint
-    params = {
-        "symbol": symbol,
-        "timestamp": int(time.time() * 1000),
-        "recvWindow": RECV_WINDOW_MS,
-    }
-    query = sign_request(params, API_SECRET)
-    headers = {"X-MBX-APIKEY": API_KEY}
-    try:
-        response = requests.get(url + "?" + query, headers=headers, timeout=10)
-        if response.status_code == 200:
-            return response.json()
-        return []
-    except:
-        return []
-
-
-def calculate_trade_stats(orders: list) -> dict:
-    """Calculate trading statistics from orders."""
-    if not orders:
-        return {"trades": 0, "buys": 0, "sells": 0, "volume": 0, "pnl": 0}
-
-    buys = []
-    sells = []
-
-    for o in orders:
-        if o.get("status") != "FILLED":
-            continue
-        side = o.get("side")
-        qty = float(o.get("executedQty", 0))
-        quote = float(o.get("cummulativeQuoteQty", 0))
-
-        if side == "BUY":
-            buys.append({"qty": qty, "quote": quote})
-        elif side == "SELL":
-            sells.append({"qty": qty, "quote": quote})
-
-    total_buy_quote = sum(b["quote"] for b in buys)
-    total_sell_quote = sum(s["quote"] for s in sells)
-
-    return {
-        "trades": len(buys) + len(sells),
-        "buys": len(buys),
-        "sells": len(sells),
-        "buy_volume": total_buy_quote,
-        "sell_volume": total_sell_quote,
-        "realized_pnl": total_sell_quote - total_buy_quote if sells else 0
-    }
-
-
-def match_trades(orders: list, symbol: str) -> list:
-    """Match BUY/SELL orders into round-trip trades.
-
-    Long trade: BUY entry -> SELL exit
-    Short trade: SELL entry -> BUY exit (on margin/futures, rare on spot)
+    Returns:
+        Dict mapping symbol -> price, e.g. {'BTC/USDT': 50000.0}
     """
-    filled = [o for o in orders if o.get("status") == "FILLED"]
-    filled.sort(key=lambda x: x.get("time", 0))
+    if not symbols:
+        return {}
 
-    matched = []
-    position_qty = 0.0
-    position_cost = 0.0
-    entry_time = None
-    entry_side = None
+    exchange = _get_exchange()
+    prices = {}
+    max_retries = 3
 
-    for o in filled:
-        side = o.get("side")
-        qty = float(o.get("executedQty", 0))
-        quote = float(o.get("cummulativeQuoteQty", 0))
-        ts = o.get("time", 0)
-        order_time = datetime.fromtimestamp(ts/1000, tz=timezone.utc) if ts else None
+    for attempt in range(max_retries):
+        try:
+            # Use fetch_tickers for batch request (much more efficient)
+            tickers = exchange.fetch_tickers(symbols)
+            for symbol in symbols:
+                if symbol in tickers and tickers[symbol].get('last'):
+                    prices[symbol] = tickers[symbol]['last']
+            return prices
 
-        if position_qty == 0:
-            # Opening new position
-            position_qty = qty
-            position_cost = quote
-            entry_time = order_time
-            entry_side = side
-        elif entry_side == "BUY" and side == "SELL":
-            # Closing long position
-            pnl = quote - position_cost
-            matched.append({
-                "symbol": symbol,
-                "direction": "LONG",
-                "entry_time": entry_time,
-                "exit_time": order_time,
-                "entry_value": position_cost,
-                "exit_value": quote,
-                "qty": position_qty,
-                "pnl": pnl,
-                "pnl_pct": (pnl / position_cost * 100) if position_cost > 0 else 0
-            })
-            position_qty = 0
-            position_cost = 0
-            entry_time = None
-            entry_side = None
-        elif entry_side == "SELL" and side == "BUY":
-            # Closing short position
-            pnl = position_cost - quote
-            matched.append({
-                "symbol": symbol,
-                "direction": "SHORT",
-                "entry_time": entry_time,
-                "exit_time": order_time,
-                "entry_value": position_cost,
-                "exit_value": quote,
-                "qty": position_qty,
-                "pnl": pnl,
-                "pnl_pct": (pnl / position_cost * 100) if position_cost > 0 else 0
-            })
-            position_qty = 0
-            position_cost = 0
-            entry_time = None
-            entry_side = None
+        except Exception as e:
+            error_type = type(e).__name__
+            if 'RateLimitExceeded' in error_type or '429' in str(e):
+                wait_time = 2 ** attempt
+                print(f"Rate-Limit erreicht. Warte {wait_time}s (Versuch {attempt + 1}/{max_retries})")
+                time.sleep(wait_time)
+            elif 'NetworkError' in error_type or 'Timeout' in error_type:
+                wait_time = 2 ** attempt
+                print(f"Netzwerkfehler: {e}. Warte {wait_time}s (Versuch {attempt + 1}/{max_retries})")
+                time.sleep(wait_time)
+            else:
+                print(f"Could not fetch batch prices: {error_type}: {e}")
+                break
+
+    # Fallback: try individual fetches with parallel execution
+    return _fetch_prices_parallel(symbols)
+
+
+def _fetch_prices_parallel(symbols: list) -> dict:
+    """Fallback: Fetch prices in parallel using ThreadPoolExecutor."""
+    prices = {}
+
+    def fetch_single(symbol):
+        exchange = _get_exchange()
+        try:
+            ticker = exchange.fetch_ticker(symbol)
+            return symbol, ticker.get('last')
+        except Exception as e:
+            print(f"Could not fetch {symbol}: {e}")
+            return symbol, None
+
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        futures = {executor.submit(fetch_single, s): s for s in symbols}
+        for future in as_completed(futures, timeout=60):
+            try:
+                symbol, price = future.result()
+                if price is not None:
+                    prices[symbol] = price
+            except Exception as e:
+                print(f"Parallel fetch error: {e}")
+
+    return prices
+
+
+def update_open_positions_with_live_prices(open_positions: list) -> list:
+    """Update open positions with live prices from Binance (batch fetch)."""
+    if not open_positions:
+        return []
+
+    # Collect all unique symbols
+    symbols = list(set(pos.get('symbol', '') for pos in open_positions if pos.get('symbol')))
+
+    # Batch fetch all prices at once
+    print(f"  Fetching {len(symbols)} symbols in batch...")
+    prices = fetch_live_prices_batch(symbols)
+    print(f"  Got prices for {len(prices)}/{len(symbols)} symbols")
+
+    updated = []
+    for pos in open_positions:
+        symbol = pos.get('symbol', '')
+        live_price = prices.get(symbol)
+
+        if live_price:
+            pos = dict(pos)  # Copy to avoid modifying original
+            old_price = pos.get('last_price', 0)
+            pos['last_price'] = live_price
+            # Recalculate unrealized PnL
+            entry_price = pos.get('entry_price', 0)
+            stake = pos.get('stake', 0)
+            if entry_price > 0:
+                pnl_pct = (live_price - entry_price) / entry_price
+                pos['unrealized_pct'] = pnl_pct * 100
+                pos['unrealized_pnl'] = pnl_pct * stake
+                pos['status'] = 'Gewinn' if pnl_pct >= 0 else 'Verlust'
+            print(f"  {symbol}: Entry {entry_price:.8f} | Old {old_price:.8f} -> Live {live_price:.8f} ({pos['unrealized_pct']:+.2f}%)")
         else:
-            # Adding to position (same side)
-            position_qty += qty
-            position_cost += quote
-
-    return matched
+            print(f"  {symbol}: FAILED to fetch live price, using cached: {pos.get('last_price', 0):.8f}")
+        updated.append(pos)
+    return updated
 
 
-def generate_dashboard():
-    """Generate HTML dashboard."""
-    print("Fetching testnet data...")
+# Capital settings - same as paper_trader.py
+START_CAPITAL = 16500.0
+MAX_POSITIONS = 8
+START_DATE = "2025-12-01"  # Trades before this date are ignored
 
-    # Get balances
-    balances = get_account_balances()
+# Fixed paths - all in one folder
+REPORT_DIR = Path("report_html")
+SOURCE_JSON = REPORT_DIR / "trading_summary_bck.json"
+OUTPUT_DIR = REPORT_DIR
 
-    # Filter relevant balances (ignore testnet junk tokens)
-    open_positions = []
-    base_balances = []
-    for bal in balances:
-        asset = bal["asset"]
-        free = float(bal["free"])
-        locked = float(bal["locked"])
-        total = free + locked
-        if total > 0:
-            if asset in BASE_CURRENCIES:
-                base_balances.append({"asset": asset, "amount": total})
-            elif asset in RELEVANT_ASSETS:
-                open_positions.append({"asset": asset, "amount": total})
 
-    # Get order history for each symbol (filtered by date)
-    all_matched_trades = []
-    symbol_stats = {}
-    for sym in SYMBOLS:
-        orders = get_all_orders(sym)
-        if orders:
-            # Filter orders by date if TRADES_SINCE_DATE is set
-            if TRADES_SINCE_DATE:
-                filtered_orders = []
-                for o in orders:
-                    ts = o.get("time", 0)
-                    if ts:
-                        order_time = datetime.fromtimestamp(ts/1000, tz=timezone.utc)
-                        if order_time >= TRADES_SINCE_DATE:
-                            filtered_orders.append(o)
-                orders = filtered_orders
+def parse_number(s: str) -> float:
+    """Parse number from string, handling various formats."""
+    if not s or s == "-":
+        return 0.0
+    # Remove any HTML tags
+    s = re.sub(r"<[^>]+>", "", s)
+    # Remove currency symbols and whitespace
+    s = s.replace("USDT", "").replace("$", "").strip()
+    # Handle German format: 1.234,56 -> 1234.56
+    if "," in s and "." in s:
+        # Determine which is decimal separator
+        last_comma = s.rfind(",")
+        last_dot = s.rfind(".")
+        if last_comma > last_dot:
+            # German format: 1.234,56
+            s = s.replace(".", "").replace(",", ".")
+        else:
+            # US format: 1,234.56
+            s = s.replace(",", "")
+    elif "," in s:
+        s = s.replace(",", ".")
+    try:
+        return float(s)
+    except (ValueError, TypeError):
+        return 0.0
 
-            stats = calculate_trade_stats(orders)
-            if stats["trades"] > 0:
-                symbol_stats[sym] = stats
 
-            # Match trades into round-trips
-            matched = match_trades(orders, sym)
-            all_matched_trades.extend(matched)
+def load_json(path: Path) -> list | dict:
+    """Load JSON file, return empty list/dict if not found."""
+    if not path.exists():
+        print(f"Warning: {path} not found")
+        return []
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"Error loading {path}: {e}")
+        return []
 
-    # Sort matched trades by exit time (most recent first)
-    all_matched_trades.sort(key=lambda x: x["exit_time"] or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+
+def parse_entry_time(entry_time: str) -> datetime:
+    """Parse entry_time string to datetime."""
+    try:
+        return datetime.fromisoformat(entry_time.replace("Z", "+00:00"))
+    except (ValueError, TypeError, AttributeError):
+        try:
+            return datetime.strptime(entry_time[:19], "%Y-%m-%d %H:%M:%S")
+        except (ValueError, TypeError):
+            return datetime.min
+
+
+def parse_trades_from_json(json_path: Path, start_date: str = None) -> tuple[list, list]:
+    """Parse closed trades and open positions from trading_summary.json.
+
+    Args:
+        json_path: Path to trading_summary.json
+        start_date: Optional start date filter (YYYY-MM-DD). Trades before this are skipped.
+    """
+    if not json_path.exists():
+        print(f"Error: {json_path} not found")
+        return [], []
+
+    data = load_json(json_path)
+    if not isinstance(data, dict):
+        print(f"Warning: Invalid JSON format in {json_path}")
+        return [], []
+
+    # Parse start_date filter
+    start_dt = None
+    if start_date:
+        start_dt = datetime.fromisoformat(start_date + "T00:00:00+01:00")
+
+    # Get trades from JSON
+    trades = data.get("trades", [])
+    open_positions = data.get("open_positions_data", [])
+
+    # Filter to Long only + start_date filter
+    long_trades = []
+    for t in trades:
+        direction = str(t.get("direction", "long")).lower()
+        if direction != "long":
+            continue
+
+        entry_time = t.get("entry_time", "")
+
+        # Apply start_date filter early
+        if start_dt:
+            entry_dt = parse_entry_time(entry_time)
+            if entry_dt < start_dt:
+                continue
+
+        # Calculate PnL percentage from prices
+        entry_price = float(t.get("entry_price", 0) or 0)
+        exit_price = float(t.get("exit_price", 0) or 0)
+        if entry_price > 0:
+            pnl_pct = (exit_price - entry_price) / entry_price * 100
+        else:
+            pnl_pct = 0
+
+        long_trades.append({
+            "symbol": t.get("symbol", ""),
+            "indicator": t.get("indicator", ""),
+            "htf": t.get("htf", ""),
+            "entry_time": entry_time,
+            "exit_time": t.get("exit_time", ""),
+            "entry_price": entry_price,
+            "exit_price": exit_price,
+            "original_stake": float(t.get("stake", 0) or 0),
+            "original_pnl": float(t.get("pnl", 0) or 0),
+            "original_pnl_pct": pnl_pct,
+            "reason": t.get("reason", ""),
+            "direction": "long",
+        })
+
+    # Parse open positions with start_date filter
+    parsed_open = []
+    for p in open_positions:
+        direction = str(p.get("direction", "long")).lower()
+        if direction != "long":
+            continue
+
+        entry_time = p.get("entry_time", "")
+
+        # Apply start_date filter early
+        if start_dt:
+            entry_dt = parse_entry_time(entry_time)
+            if entry_dt < start_dt:
+                continue
+
+        parsed_open.append({
+            "symbol": p.get("symbol", ""),
+            "direction": direction,
+            "indicator": p.get("indicator", ""),
+            "htf": p.get("htf", ""),
+            "entry_time": entry_time,
+            "entry_price": float(p.get("entry_price", 0) or 0),
+            "last_price": float(p.get("last_price", 0) or 0),
+            "stake": float(p.get("stake", 0) or 0),
+            "bars_held": int(float(p.get("bars_held", 0) or 0)),
+        })
+
+    return long_trades, parsed_open
+
+
+def fmt_de(value: float) -> str:
+    """Format number in German style."""
+    if abs(value) >= 1000:
+        return f"{value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    return f"{value:.2f}".replace(".", ",")
+
+
+def generate_dashboard(start_date: str = None, output_dir: Path = None, german: bool = False):
+    """Generate HTML dashboard from simulation JSON file."""
+    print(f"Loading simulation data from JSON (start_date={start_date})...")
+
+    if output_dir is None:
+        output_dir = OUTPUT_DIR
+
+    # Read from JSON (single source of truth)
+    closed_trades, open_positions = parse_trades_from_json(SOURCE_JSON, start_date=start_date)
+
+    # Fetch live prices for open positions
+    if open_positions:
+        print("Fetching live prices from Binance...")
+        open_positions = update_open_positions_with_live_prices(open_positions)
+
+    print(f"Loaded {len(closed_trades)} closed trades, {len(open_positions)} open positions")
+
+    if not closed_trades:
+        print("Warning: No trades found. Check if the file format is correct.")
+
+    # Sort helper (reuse parse_entry_time)
+    def get_entry_time(t):
+        return parse_entry_time(t.get("entry_time", ""))
+
+    # === RECALCULATE CLOSED TRADES WITH COMPOUND GROWTH ===
+    # Sort chronologically (oldest first) for compound calculation
+    trades_chrono = sorted(closed_trades, key=get_entry_time, reverse=False)
+
+    capital = START_CAPITAL
+    recalculated_trades = []
+
+    for t in trades_chrono:
+        stake = capital / MAX_POSITIONS
+        original_pnl_pct = t.get("original_pnl_pct", 0) / 100  # Convert from percentage
+
+        # Recalculate PnL with new stake
+        pnl = original_pnl_pct * stake
+        capital += pnl
+
+        # Create recalculated trade entry
+        recalc_trade = dict(t)
+        recalc_trade["stake"] = stake
+        recalc_trade["pnl"] = pnl
+        recalc_trade["pnl_pct"] = original_pnl_pct * 100
+        recalc_trade["equity_after"] = capital
+        recalculated_trades.append(recalc_trade)
+
+    final_capital = capital
+
+    # === RECALCULATE OPEN POSITIONS WITH DYNAMIC STAKE ===
+    # Dynamic stake = final_capital / MAX_POSITIONS (consistent with closed trades compound growth)
+    dynamic_stake = final_capital / MAX_POSITIONS
+    recalculated_open = []
+
+    for p in open_positions:
+        entry_price = p.get("entry_price", 0)
+        last_price = p.get("last_price", 0)
+        direction = p.get("direction", "").lower()
+        # Use dynamic stake based on current capital (not original stake from JSON)
+        stake = dynamic_stake
+
+        if entry_price > 0 and stake > 0:
+            if direction == "long":
+                pnl_pct = (last_price - entry_price) / entry_price
+            else:  # short
+                pnl_pct = (entry_price - last_price) / entry_price
+            unrealized_pnl = pnl_pct * stake
+        else:
+            pnl_pct = 0
+            unrealized_pnl = 0
+
+        recalc_pos = dict(p)
+        recalc_pos["stake"] = stake
+        recalc_pos["unrealized_pnl"] = unrealized_pnl
+        recalc_pos["unrealized_pct"] = pnl_pct * 100
+        recalc_pos["status"] = "Gewinn" if unrealized_pnl > 0 else "Verlust" if unrealized_pnl < 0 else "Flat"
+        recalculated_open.append(recalc_pos)
+
+    # Sort by entry time (newest first) for display
+    recalculated_trades.sort(key=get_entry_time, reverse=True)
+    recalculated_open.sort(key=get_entry_time, reverse=True)
+
+    # Limit open positions to MAX_POSITIONS (newest first)
+    if len(recalculated_open) > MAX_POSITIONS:
+        recalculated_open = recalculated_open[:MAX_POSITIONS]
 
     # Separate long and short trades
-    long_trades = [t for t in all_matched_trades if t["direction"] == "LONG"]
-    short_trades = [t for t in all_matched_trades if t["direction"] == "SHORT"]
+    long_trades = [t for t in recalculated_trades if t.get("direction", "").lower() == "long"]
+    short_trades = [t for t in recalculated_trades if t.get("direction", "").lower() == "short"]
 
-    # Calculate total volume for share calculation
-    total_volume = sum(t["entry_value"] for t in all_matched_trades) if all_matched_trades else 1
+    # Calculate statistics from recalculated values
+    total_pnl = sum(t.get("pnl", 0) for t in recalculated_trades)
+    long_pnl = sum(t.get("pnl", 0) for t in long_trades)
+    short_pnl = sum(t.get("pnl", 0) for t in short_trades)
+    long_wins = sum(1 for t in long_trades if t.get("pnl", 0) > 0)
+    short_wins = sum(1 for t in short_trades if t.get("pnl", 0) > 0)
 
-    # Calculate totals
-    total_realized_pnl = sum(t["pnl"] for t in all_matched_trades)
-    total_closed_trades = len(all_matched_trades)
-    long_pnl = sum(t["pnl"] for t in long_trades)
-    short_pnl = sum(t["pnl"] for t in short_trades)
-    long_wins = sum(1 for t in long_trades if t["pnl"] > 0)
-    short_wins = sum(1 for t in short_trades if t["pnl"] > 0)
+    # Open positions stats from recalculated values
+    open_equity = sum(p.get("unrealized_pnl", 0) for p in recalculated_open)
+
+    # Use recalculated data for display
+    open_positions = recalculated_open
 
     # Generate HTML
     html = f"""<!DOCTYPE html>
 <html>
 <head>
     <meta charset="utf-8">
-    <title>Testnet Trading Dashboard</title>
+    <meta http-equiv="refresh" content="60">
+    <title>Trading Dashboard</title>
     <style>
         body {{ font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }}
-        .container {{ max-width: 1400px; margin: 0 auto; }}
+        .container {{ max-width: 1600px; margin: 0 auto; }}
         h1 {{ color: #333; border-bottom: 2px solid #007bff; padding-bottom: 10px; }}
         h2 {{ color: #555; margin-top: 30px; }}
-        h3 {{ color: #666; margin-top: 20px; }}
         table {{ border-collapse: collapse; width: 100%; margin-top: 10px; background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }}
         th, td {{ border: 1px solid #ddd; padding: 8px; text-align: right; }}
         th {{ background: #007bff; color: white; text-align: center; }}
@@ -270,98 +422,161 @@ def generate_dashboard():
         .summary-box .value {{ font-size: 24px; font-weight: bold; }}
         .long-header {{ background: #28a745 !important; }}
         .short-header {{ background: #dc3545 !important; }}
+        .open-header {{ background: #17a2b8 !important; }}
+        .phase-up {{ background: #d4edda; color: #155724; font-weight: bold; text-align: center; }}
+        .phase-down {{ background: #f8d7da; color: #721c24; font-weight: bold; text-align: center; }}
+        .phase-flat {{ background: #fff3cd; color: #856404; font-weight: bold; text-align: center; }}
         .timestamp {{ color: #666; font-size: 12px; margin-top: 20px; }}
         .section {{ margin-bottom: 30px; }}
+        .source-note {{ color: #666; font-style: italic; margin-bottom: 20px; }}
     </style>
 </head>
 <body>
 <div class="container">
-    <h1>Binance Testnet Dashboard</h1>
+    <h1>Trading Dashboard</h1>
+    <p class="source-note">Simulation trades, recalculated with {fmt_de(START_CAPITAL)} initial capital | Updated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}</p>
 
     <div class="summary-boxes">
         <div class="summary-box">
+            <h3>Start Capital</h3>
+            <div class="value">{fmt_de(START_CAPITAL)}</div>
+        </div>
+        <div class="summary-box">
+            <h3>Final Capital</h3>
+            <div class="value {'positive' if final_capital >= START_CAPITAL else 'negative'}">{fmt_de(final_capital)}</div>
+        </div>
+        <div class="summary-box">
             <h3>Closed Trades</h3>
-            <div class="value">{total_closed_trades}</div>
+            <div class="value">{len(recalculated_trades)}</div>
         </div>
         <div class="summary-box">
             <h3>Realized PnL</h3>
-            <div class="value {'positive' if total_realized_pnl >= 0 else 'negative'}">{total_realized_pnl:,.2f}</div>
-        </div>
-        <div class="summary-box">
-            <h3>Long Trades</h3>
-            <div class="value">{len(long_trades)} ({long_wins}W)</div>
-        </div>
-        <div class="summary-box">
-            <h3>Short Trades</h3>
-            <div class="value">{len(short_trades)} ({short_wins}W)</div>
+            <div class="value {'positive' if total_pnl >= 0 else 'negative'}">{fmt_de(total_pnl)}</div>
         </div>
         <div class="summary-box">
             <h3>Open Positions</h3>
             <div class="value">{len(open_positions)}</div>
         </div>
+        <div class="summary-box">
+            <h3>Open Equity</h3>
+            <div class="value {'positive' if open_equity >= 0 else 'negative'}">{fmt_de(open_equity)}</div>
+        </div>
     </div>
-
-    <h2>Base Currency Balances</h2>
-    <table>
-        <tr><th>Currency</th><th>Amount</th></tr>
 """
-    for bal in sorted(base_balances, key=lambda x: x["amount"], reverse=True):
-        html += f"        <tr><td>{bal['asset']}</td><td>{bal['amount']:,.2f}</td></tr>\n"
 
-    html += """    </table>
+    # Format prices - use more decimals for small prices like LUNC
+    def fmt_price(price):
+        if price < 0.0001:
+            return f"{price:.8f}"
+        elif price < 1:
+            return f"{price:.6f}"
+        elif price < 100:
+            return f"{price:.4f}"
+        else:
+            return fmt_de(price)
 
-    <h2>Open Positions</h2>
+    # Open Positions section (FIRST - before closed trades)
+    html += f"""
+    <div class="section">
+    <h2>Open Positions ({len(open_positions)}, Equity: <span class="{'positive' if open_equity >= 0 else 'negative'}">{fmt_de(open_equity)}</span>)</h2>
     <table>
-        <tr><th>Asset</th><th>Amount</th></tr>
+        <tr class="open-header"><th>Symbol</th><th>Direction</th><th>Indicator</th><th>HTF</th><th>Entry Phase</th><th>Current Phase</th><th>Entry Time</th><th>Entry Price</th><th>Last Price</th><th>Amount</th><th>Stake</th><th>Bars</th><th>PnL</th><th>PnL%</th><th>Status</th></tr>
 """
     if open_positions:
-        for pos in sorted(open_positions, key=lambda x: x["amount"], reverse=True)[:20]:
-            html += f"        <tr><td>{pos['asset']}</td><td>{pos['amount']:,.4f}</td></tr>\n"
-    else:
-        html += "        <tr><td colspan='2'>No open positions</td></tr>\n"
+        for p in open_positions:
+            entry_time = p.get("entry_time", "")
+            try:
+                entry_dt = datetime.fromisoformat(entry_time.replace("Z", "+00:00"))
+                entry_str = entry_dt.strftime("%Y-%m-%d %H:%M")
+            except (ValueError, TypeError, AttributeError):
+                entry_str = entry_time[:16] if entry_time else "N/A"
 
-    # Helper function to generate trade table rows
-    def trade_table_rows(trades, header_class=""):
+            pnl = p.get("unrealized_pnl", 0)
+            pnl_pct = p.get("unrealized_pct", 0)
+            pnl_class = "positive" if pnl >= 0 else "negative"
+            direction = p.get("direction", "").upper()
+            entry_price = p.get("entry_price", 0)
+            stake = p.get("stake", 0)
+            amount = stake / entry_price if entry_price > 0 else 0
+
+            entry_phase = p.get('entry_phase', '')
+            current_phase = p.get('current_phase', '')
+            ep_class = f"phase-{entry_phase.lower()}" if entry_phase in ("Up", "Down", "Flat") else ""
+            cp_class = f"phase-{current_phase.lower()}" if current_phase in ("Up", "Down", "Flat") else ""
+
+            html += f"""        <tr>
+            <td>{p.get('symbol', 'N/A')}</td>
+            <td>{direction}</td>
+            <td>{p.get('indicator', 'N/A')}</td>
+            <td>{p.get('htf', 'N/A')}</td>
+            <td class="{ep_class}">{entry_phase}</td>
+            <td class="{cp_class}">{current_phase}</td>
+            <td>{entry_str}</td>
+            <td>{fmt_price(entry_price)}</td>
+            <td>{fmt_price(p.get('last_price', 0))}</td>
+            <td>{amount:.6f}</td>
+            <td>{fmt_de(stake)}</td>
+            <td>{p.get('bars_held', 0)}</td>
+            <td class="{pnl_class}">{fmt_de(pnl)}</td>
+            <td class="{pnl_class}">{pnl_pct:+.2f}%</td>
+            <td>{p.get('status', 'N/A')}</td>
+        </tr>\n"""
+    else:
+        html += "        <tr><td colspan='15'>No open positions</td></tr>\n"
+
+    html += "    </table>\n    </div>\n"
+
+    # Helper function to generate closed trade table rows
+    def trade_rows(trades):
         if not trades:
-            return "<tr><td colspan='8'>No trades</td></tr>\n"
+            return "        <tr><td colspan='12'>-</td></tr>\n"
         rows = ""
         for t in trades:
-            pnl_class = "positive" if t["pnl"] >= 0 else "negative"
-            entry_str = t["entry_time"].strftime("%Y-%m-%d %H:%M") if t["entry_time"] else "N/A"
-            exit_str = t["exit_time"].strftime("%Y-%m-%d %H:%M") if t["exit_time"] else "N/A"
-            share = (t["entry_value"] / total_volume * 100) if total_volume > 0 else 0
+            entry_time = t.get("entry_time", "")
+            exit_time = t.get("exit_time", "")
+            try:
+                entry_dt = datetime.fromisoformat(entry_time.replace("Z", "+00:00"))
+                entry_str = entry_dt.strftime("%Y-%m-%d %H:%M")
+            except (ValueError, TypeError, AttributeError):
+                entry_str = entry_time[:16] if entry_time else "N/A"
+            try:
+                exit_dt = datetime.fromisoformat(exit_time.replace("Z", "+00:00"))
+                exit_str = exit_dt.strftime("%Y-%m-%d %H:%M")
+            except (ValueError, TypeError, AttributeError):
+                exit_str = exit_time[:16] if exit_time else "N/A"
+
+            pnl = t.get("pnl", 0)
+            stake = t.get("stake", 0)
+            pnl_pct = t.get("pnl_pct", 0)
+            pnl_class = "positive" if pnl >= 0 else "negative"
+            entry_price = t.get("entry_price", 0)
+            exit_price = t.get("exit_price", 0)
+            amount = stake / entry_price if entry_price > 0 else 0
+
             rows += f"""        <tr>
-            <td>{t['symbol']}</td>
+            <td>{t.get('symbol', 'N/A')}</td>
+            <td>{t.get('indicator', 'N/A')}</td>
+            <td>{t.get('htf', 'N/A')}</td>
             <td>{entry_str}</td>
+            <td>{fmt_price(entry_price)}</td>
             <td>{exit_str}</td>
-            <td>{t['entry_value']:,.2f}</td>
-            <td>{t['exit_value']:,.2f}</td>
-            <td class="{pnl_class}">{t['pnl']:,.2f}</td>
-            <td class="{pnl_class}">{t['pnl_pct']:+.2f}%</td>
-            <td>{share:.1f}%</td>
+            <td>{fmt_price(exit_price)}</td>
+            <td>{amount:.6f}</td>
+            <td>{fmt_de(stake)}</td>
+            <td class="{pnl_class}">{fmt_de(pnl)}</td>
+            <td class="{pnl_class}">{pnl_pct:+.2f}%</td>
+            <td>{t.get('reason', 'N/A')}</td>
         </tr>\n"""
         return rows
 
     # Long Trades section
-    html += f"""    </table>
-
+    html += f"""
     <div class="section">
-    <h2>Long Trades ({len(long_trades)} closed, PnL: <span class="{'positive' if long_pnl >= 0 else 'negative'}">{long_pnl:,.2f}</span>)</h2>
+    <h2>Closed Trades ({len(long_trades)}, PnL: <span class="{'positive' if long_pnl >= 0 else 'negative'}">{fmt_de(long_pnl)}</span>)</h2>
     <table>
-        <tr class="long-header"><th>Symbol</th><th>Entry</th><th>Exit</th><th>Entry Value</th><th>Exit Value</th><th>PnL</th><th>PnL %</th><th>Share</th></tr>
+        <tr class="long-header"><th>Symbol</th><th>Indicator</th><th>HTF</th><th>Entry Time</th><th>Entry Price</th><th>Exit Time</th><th>Exit Price</th><th>Amount</th><th>Stake</th><th>PnL</th><th>PnL%</th><th>Reason</th></tr>
 """
-    html += trade_table_rows(long_trades)
-
-    # Short Trades section
-    html += f"""    </table>
-    </div>
-
-    <div class="section">
-    <h2>Short Trades ({len(short_trades)} closed, PnL: <span class="{'positive' if short_pnl >= 0 else 'negative'}">{short_pnl:,.2f}</span>)</h2>
-    <table>
-        <tr class="short-header"><th>Symbol</th><th>Entry</th><th>Exit</th><th>Entry Value</th><th>Exit Value</th><th>PnL</th><th>PnL %</th><th>Share</th></tr>
-"""
-    html += trade_table_rows(short_trades)
+    html += trade_rows(long_trades)
 
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     html += f"""    </table>
@@ -373,16 +588,121 @@ def generate_dashboard():
 </html>"""
 
     # Write to file
-    OUTPUT_DIR.mkdir(exist_ok=True)
-    output_path = OUTPUT_DIR / "dashboard.html"
+    output_dir.mkdir(exist_ok=True)
+    filename = "dashboard_de.html" if german else "dashboard.html"
+    output_path = output_dir / filename
     output_path.write_text(html, encoding="utf-8")
     print(f"Dashboard saved to: {output_path}")
     return output_path
 
 
-if __name__ == "__main__":
-    if not API_KEY or not API_SECRET:
-        print("Error: BINANCE_API_KEY_TEST or BINANCE_API_SECRET_TEST not set")
+def get_last_trade_date() -> str | None:
+    """Get the exit time of the most recent trade from trading_summary.json."""
+    if not SOURCE_JSON.exists():
+        return None
+    try:
+        data = load_json(SOURCE_JSON)
+        trades = data.get("trades", [])
+        if not trades:
+            return None
+        # Find the newest exit_time
+        newest = max(trades, key=lambda t: t.get("exit_time", "") or "")
+        exit_time = newest.get("exit_time", "")
+        if exit_time:
+            # Return just the date part for --start parameter
+            return exit_time[:10]  # YYYY-MM-DD
+    except Exception as e:
+        print(f"Error reading last trade date: {e}")
+    return None
+
+
+def refresh_simulation_data() -> bool:
+    """Run paper_trader.py --simulate to fill gap from last trade to now."""
+    import subprocess
+
+    last_date = get_last_trade_date()
+    if not last_date:
+        print("No existing trades found, running full simulation...")
+        cmd = ["python3", "paper_trader.py", "--simulate", "--start", "2024-01-31"]
     else:
-        path = generate_dashboard()
-        print(f"\nOpen with: start {path}")
+        print(f"Last trade date: {last_date}, simulating gap to now...")
+        # Append mode - simulation reads existing trades from trading_summary.json
+        cmd = ["python3", "paper_trader.py", "--simulate", "--start", last_date]
+
+    print(f"Running: {' '.join(cmd)}")
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        if result.returncode == 0:
+            print("Simulation completed successfully")
+            if result.stdout:
+                # Show last few lines of output
+                lines = result.stdout.strip().split('\n')
+                for line in lines[-5:]:
+                    print(f"  {line}")
+            return True
+        else:
+            print(f"Simulation failed with code {result.returncode}")
+            if result.stderr:
+                print(f"Error: {result.stderr[:500]}")
+            return False
+    except subprocess.TimeoutExpired:
+        print("Simulation timed out (10 min)")
+        return False
+    except Exception as e:
+        print(f"Could not run simulation: {e}")
+        return False
+
+
+if __name__ == "__main__":
+    import argparse
+    import subprocess
+    import time
+
+    parser = argparse.ArgumentParser(description="Generate trading dashboard")
+    parser.add_argument("--start", type=str, default=START_DATE, help="Start date YYYY-MM-DD (default: 2025-12-01)")
+    parser.add_argument("--output-dir", type=str, default="report_html", help="Output directory")
+    parser.add_argument("--loop", action="store_true", help="Run continuously")
+    parser.add_argument("--interval", type=int, default=300, help="Loop interval in seconds (default: 300)")
+    parser.add_argument("--no-refresh", action="store_true", help="Skip paper_trader.py refresh (use existing data)")
+    parser.add_argument("--testnet", action="store_true", help="Send trades to testnet and get feedback")
+    args = parser.parse_args()
+
+    output_dir = Path(args.output_dir)
+    first_run = True
+
+    while True:
+        # Refresh data via paper_trader.py simulation (skip on first run or if --no-refresh)
+        if not first_run and not args.no_refresh:
+            print("\n=== Refreshing trade data via paper_trader.py ===")
+            refresh_simulation_data()
+
+        # Testnet integration
+        if args.testnet and not first_run:
+            print("\n=== Sending trades to testnet ===")
+            try:
+                result = subprocess.run(
+                    ["python3", "paper_trader.py", "--testnet"],
+                    capture_output=True,
+                    text=True,
+                    timeout=120
+                )
+                if result.returncode == 0:
+                    print("Testnet sync completed")
+                else:
+                    print(f"Testnet sync failed: {result.returncode}")
+            except Exception as e:
+                print(f"Testnet error: {e}")
+
+        # Generate both English and German dashboards
+        path_en = generate_dashboard(start_date=args.start, output_dir=output_dir, german=False)
+        path_de = generate_dashboard(start_date=args.start, output_dir=output_dir, german=True)
+        print(f"\nOpen with: xdg-open {path_en}")
+        print(f"German:    xdg-open {path_de}")
+
+        first_run = False
+
+        if not args.loop:
+            break
+
+        print(f"\nWaiting {args.interval} seconds...")
+        time.sleep(args.interval)

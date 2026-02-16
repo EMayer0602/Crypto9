@@ -1,0 +1,2373 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="refresh" content="60">
+    <title>Trading Dashboard</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
+        .container { max-width: 1600px; margin: 0 auto; }
+        h1 { color: #333; border-bottom: 2px solid #007bff; padding-bottom: 10px; }
+        h2 { color: #555; margin-top: 30px; }
+        table { border-collapse: collapse; width: 100%; margin-top: 10px; background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: right; }
+        th { background: #007bff; color: white; text-align: center; }
+        td:first-child { text-align: left; }
+        .positive { color: green; font-weight: bold; }
+        .negative { color: red; font-weight: bold; }
+        .summary-box { display: inline-block; background: white; padding: 20px; margin: 10px; border-radius: 5px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); min-width: 150px; text-align: center; }
+        .summary-box h3 { margin: 0 0 10px 0; color: #666; font-size: 14px; }
+        .summary-box .value { font-size: 24px; font-weight: bold; }
+        .long-header { background: #28a745 !important; }
+        .short-header { background: #dc3545 !important; }
+        .open-header { background: #17a2b8 !important; }
+        .phase-up { background: #d4edda; color: #155724; font-weight: bold; text-align: center; }
+        .phase-down { background: #f8d7da; color: #721c24; font-weight: bold; text-align: center; }
+        .phase-flat { background: #fff3cd; color: #856404; font-weight: bold; text-align: center; }
+        .timestamp { color: #666; font-size: 12px; margin-top: 20px; }
+        .section { margin-bottom: 30px; }
+        .source-note { color: #666; font-style: italic; margin-bottom: 20px; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>Trading Dashboard</h1>
+    <p class="source-note">Simulation trades, recalculated with 16.500,00 initial capital | Updated: 2026-02-15 09:18:19</p>
+
+    <div class="summary-boxes">
+        <div class="summary-box">
+            <h3>Start Capital</h3>
+            <div class="value">16.500,00</div>
+        </div>
+        <div class="summary-box">
+            <h3>Final Capital</h3>
+            <div class="value positive">18.316,61</div>
+        </div>
+        <div class="summary-box">
+            <h3>Closed Trades</h3>
+            <div class="value">154</div>
+        </div>
+        <div class="summary-box">
+            <h3>Realized PnL</h3>
+            <div class="value positive">1.816,61</div>
+        </div>
+        <div class="summary-box">
+            <h3>Open Positions</h3>
+            <div class="value">8</div>
+        </div>
+        <div class="summary-box">
+            <h3>Open Equity</h3>
+            <div class="value positive">281,21</div>
+        </div>
+    </div>
+
+    <div class="section">
+    <h2>Open Positions (8, Equity: <span class="positive">281,21</span>)</h2>
+    <table>
+        <tr class="open-header"><th>Symbol</th><th>Direction</th><th>Indicator</th><th>HTF</th><th>Entry Phase</th><th>Current Phase</th><th>Entry Time</th><th>Entry Price</th><th>Last Price</th><th>Amount</th><th>Stake</th><th>Bars</th><th>PnL</th><th>PnL%</th><th>Status</th></tr>
+        <tr>
+            <td>ETH/USDC</td>
+            <td>LONG</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td class=""></td>
+            <td class=""></td>
+            <td>2026-02-13 09:00</td>
+            <td>1.957,73</td>
+            <td>1.964,08</td>
+            <td>1.169506</td>
+            <td>2.289,58</td>
+            <td>1</td>
+            <td class="positive">7,43</td>
+            <td class="positive">+0.32%</td>
+            <td>Gewinn</td>
+        </tr>
+        <tr>
+            <td>BTC/USDC</td>
+            <td>LONG</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td class=""></td>
+            <td class=""></td>
+            <td>2026-02-13 09:00</td>
+            <td>66.652,28</td>
+            <td>66.859,52</td>
+            <td>0.034351</td>
+            <td>2.289,58</td>
+            <td>1</td>
+            <td class="positive">7,12</td>
+            <td class="positive">+0.31%</td>
+            <td>Gewinn</td>
+        </tr>
+        <tr>
+            <td>TNSR/USDC</td>
+            <td>LONG</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td class=""></td>
+            <td class=""></td>
+            <td>2026-02-13 08:00</td>
+            <td>0.054700</td>
+            <td>0.061200</td>
+            <td>41856.971694</td>
+            <td>2.289,58</td>
+            <td>2</td>
+            <td class="positive">272,07</td>
+            <td class="positive">+11.88%</td>
+            <td>Gewinn</td>
+        </tr>
+        <tr>
+            <td>TAO/USDC</td>
+            <td>LONG</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td class=""></td>
+            <td class=""></td>
+            <td>2026-02-13 08:00</td>
+            <td>154,20</td>
+            <td>157,00</td>
+            <td>14.848096</td>
+            <td>2.289,58</td>
+            <td>2</td>
+            <td class="positive">41,57</td>
+            <td class="positive">+1.82%</td>
+            <td>Gewinn</td>
+        </tr>
+        <tr>
+            <td>SUI/USDC</td>
+            <td>LONG</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td class=""></td>
+            <td class=""></td>
+            <td>2026-02-12 20:00</td>
+            <td>0.912100</td>
+            <td>0.928700</td>
+            <td>2510.225142</td>
+            <td>2.289,58</td>
+            <td>14</td>
+            <td class="positive">41,67</td>
+            <td class="positive">+1.82%</td>
+            <td>Gewinn</td>
+        </tr>
+        <tr>
+            <td>XRP/USDC</td>
+            <td>LONG</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td class=""></td>
+            <td class=""></td>
+            <td>2026-02-12 06:00</td>
+            <td>1.3796</td>
+            <td>1.3680</td>
+            <td>1659.594340</td>
+            <td>2.289,58</td>
+            <td>28</td>
+            <td class="negative">-19,25</td>
+            <td class="negative">-0.84%</td>
+            <td>Verlust</td>
+        </tr>
+        <tr>
+            <td>ICP/USDC</td>
+            <td>LONG</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td class=""></td>
+            <td class=""></td>
+            <td>2026-02-12 04:00</td>
+            <td>2.3610</td>
+            <td>2.2980</td>
+            <td>969.748561</td>
+            <td>2.289,58</td>
+            <td>30</td>
+            <td class="negative">-61,09</td>
+            <td class="negative">-2.67%</td>
+            <td>Verlust</td>
+        </tr>
+        <tr>
+            <td>SOL/USDC</td>
+            <td>LONG</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td class=""></td>
+            <td class=""></td>
+            <td>2026-02-12 01:00</td>
+            <td>79.9400</td>
+            <td>79.6500</td>
+            <td>28.641185</td>
+            <td>2.289,58</td>
+            <td>33</td>
+            <td class="negative">-8,31</td>
+            <td class="negative">-0.36%</td>
+            <td>Verlust</td>
+        </tr>
+    </table>
+    </div>
+
+    <div class="section">
+    <h2>Closed Trades (154, PnL: <span class="positive">1.816,61</span>)</h2>
+    <table>
+        <tr class="long-header"><th>Symbol</th><th>Indicator</th><th>HTF</th><th>Entry Time</th><th>Entry Price</th><th>Exit Time</th><th>Exit Price</th><th>Amount</th><th>Stake</th><th>PnL</th><th>PnL%</th><th>Reason</th></tr>
+        <tr>
+            <td>TNSR/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-02-12 05:00</td>
+            <td>0.055000</td>
+            <td>2026-02-13 08:00</td>
+            <td>0.054700</td>
+            <td>41657.063483</td>
+            <td>2.291,14</td>
+            <td class="negative">-12,50</td>
+            <td class="negative">-0.55%</td>
+            <td>Time-based exit (2 bars, optimal=2)</td>
+        </tr>
+        <tr>
+            <td>ETH/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-02-12 01:00</td>
+            <td>1.957,51</td>
+            <td>2026-02-12 17:00</td>
+            <td>1.901,55</td>
+            <td>1.174632</td>
+            <td>2.299,35</td>
+            <td class="negative">-65,73</td>
+            <td class="negative">-2.86%</td>
+            <td>ATR stop x2.00</td>
+        </tr>
+        <tr>
+            <td>ETH/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-02-09 15:00</td>
+            <td>2.042,66</td>
+            <td>2026-02-10 15:00</td>
+            <td>1.987,45</td>
+            <td>1.138989</td>
+            <td>2.326,57</td>
+            <td class="negative">-62,88</td>
+            <td class="negative">-2.70%</td>
+            <td>ATR stop x2.00</td>
+        </tr>
+        <tr>
+            <td>SUI/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-02-09 15:00</td>
+            <td>0.947600</td>
+            <td>2026-02-12 10:00</td>
+            <td>0.940400</td>
+            <td>2446.926691</td>
+            <td>2.318,71</td>
+            <td class="negative">-17,62</td>
+            <td class="negative">-0.76%</td>
+            <td>Time-based exit (5 bars, optimal=5)</td>
+        </tr>
+        <tr>
+            <td>ICP/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-02-09 15:00</td>
+            <td>2.3960</td>
+            <td>2026-02-12 03:00</td>
+            <td>2.3470</td>
+            <td>966.821994</td>
+            <td>2.316,51</td>
+            <td class="negative">-47,37</td>
+            <td class="negative">-2.05%</td>
+            <td>Trend flip</td>
+        </tr>
+        <tr>
+            <td>XRP/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-02-09 15:00</td>
+            <td>1.4301</td>
+            <td>2026-02-12 04:00</td>
+            <td>1.3745</td>
+            <td>1615.679822</td>
+            <td>2.310,58</td>
+            <td class="negative">-89,83</td>
+            <td class="negative">-3.89%</td>
+            <td>Trend flip</td>
+        </tr>
+        <tr>
+            <td>TNSR/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-02-08 12:00</td>
+            <td>0.045200</td>
+            <td>2026-02-09 19:00</td>
+            <td>0.044800</td>
+            <td>51529.742590</td>
+            <td>2.329,14</td>
+            <td class="negative">-20,61</td>
+            <td class="negative">-0.88%</td>
+            <td>Time-based exit (2 bars, optimal=2)</td>
+        </tr>
+        <tr>
+            <td>SOL/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-02-07 13:00</td>
+            <td>86.1700</td>
+            <td>2026-02-10 01:00</td>
+            <td>86.3700</td>
+            <td>27.021804</td>
+            <td>2.328,47</td>
+            <td class="positive">5,40</td>
+            <td class="positive">+0.23%</td>
+            <td>Time-based exit (5 bars, optimal=5)</td>
+        </tr>
+        <tr>
+            <td>ETH/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-02-07 02:00</td>
+            <td>2.061,00</td>
+            <td>2026-02-09 15:00</td>
+            <td>2.042,66</td>
+            <td>1.131034</td>
+            <td>2.331,06</td>
+            <td class="negative">-20,74</td>
+            <td class="negative">-0.89%</td>
+            <td>Time-based exit (5 bars, optimal=5)</td>
+        </tr>
+        <tr>
+            <td>XRP/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-02-06 23:00</td>
+            <td>1.4885</td>
+            <td>2026-02-09 14:00</td>
+            <td>1.3947</td>
+            <td>1633.120315</td>
+            <td>2.430,90</td>
+            <td class="negative">-153,19</td>
+            <td class="negative">-6.30%</td>
+            <td>Trend flip</td>
+        </tr>
+        <tr>
+            <td>TAO/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-02-06 23:00</td>
+            <td>176,20</td>
+            <td>2026-02-09 14:00</td>
+            <td>156,40</td>
+            <td>13.687578</td>
+            <td>2.411,75</td>
+            <td class="negative">-271,01</td>
+            <td class="negative">-11.24%</td>
+            <td>Trend flip</td>
+        </tr>
+        <tr>
+            <td>TNSR/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-02-06 23:00</td>
+            <td>0.046800</td>
+            <td>2026-02-08 10:00</td>
+            <td>0.044600</td>
+            <td>50809.284149</td>
+            <td>2.377,87</td>
+            <td class="negative">-111,78</td>
+            <td class="negative">-4.70%</td>
+            <td>Trend flip</td>
+        </tr>
+        <tr>
+            <td>LUNC/USDT</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-02-06 23:00</td>
+            <td>0.00003640</td>
+            <td>2026-02-09 00:00</td>
+            <td>0.00003486</td>
+            <td>64942361.127038</td>
+            <td>2.363,90</td>
+            <td class="negative">-100,01</td>
+            <td class="negative">-4.23%</td>
+            <td>Trend flip</td>
+        </tr>
+        <tr>
+            <td>ICP/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-02-06 23:00</td>
+            <td>2.5290</td>
+            <td>2026-02-09 14:00</td>
+            <td>2.3540</td>
+            <td>929.774828</td>
+            <td>2.351,40</td>
+            <td class="negative">-162,71</td>
+            <td class="negative">-6.92%</td>
+            <td>Trend flip</td>
+        </tr>
+        <tr>
+            <td>SUI/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-02-06 20:00</td>
+            <td>1.0078</td>
+            <td>2026-02-09 14:00</td>
+            <td>0.928100</td>
+            <td>2436.167802</td>
+            <td>2.455,17</td>
+            <td class="negative">-194,16</td>
+            <td class="negative">-7.91%</td>
+            <td>Trend flip</td>
+        </tr>
+        <tr>
+            <td>TNSR/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-02-04 02:00</td>
+            <td>0.049300</td>
+            <td>2026-02-05 02:00</td>
+            <td>0.049000</td>
+            <td>49838.516342</td>
+            <td>2.457,04</td>
+            <td class="negative">-14,95</td>
+            <td class="negative">-0.61%</td>
+            <td>Time-based exit (2 bars, optimal=2)</td>
+        </tr>
+        <tr>
+            <td>ICP/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-02-04 01:00</td>
+            <td>2.6590</td>
+            <td>2026-02-06 19:00</td>
+            <td>2.4910</td>
+            <td>931.402144</td>
+            <td>2.476,60</td>
+            <td class="negative">-156,48</td>
+            <td class="negative">-6.32%</td>
+            <td>Trend flip</td>
+        </tr>
+        <tr>
+            <td>LUNC/USDT</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-02-03 20:00</td>
+            <td>0.00003689</td>
+            <td>2026-02-06 00:00</td>
+            <td>0.00003263</td>
+            <td>68117948.172310</td>
+            <td>2.512,87</td>
+            <td class="negative">-290,18</td>
+            <td class="negative">-11.55%</td>
+            <td>Trend flip</td>
+        </tr>
+        <tr>
+            <td>TAO/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-02-02 23:00</td>
+            <td>199,20</td>
+            <td>2026-02-05 11:00</td>
+            <td>179,40</td>
+            <td>12.773522</td>
+            <td>2.544,49</td>
+            <td class="negative">-252,92</td>
+            <td class="negative">-9.94%</td>
+            <td>Trend flip</td>
+        </tr>
+        <tr>
+            <td>SUI/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-02-02 19:00</td>
+            <td>1.1506</td>
+            <td>2026-02-06 09:00</td>
+            <td>0.912100</td>
+            <td>2270.265840</td>
+            <td>2.612,17</td>
+            <td class="negative">-541,46</td>
+            <td class="negative">-20.73%</td>
+            <td>Trend flip</td>
+        </tr>
+        <tr>
+            <td>LUNC/USDT</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-02-01 17:00</td>
+            <td>0.00003803</td>
+            <td>2026-02-03 17:00</td>
+            <td>0.00003676</td>
+            <td>68974957.924098</td>
+            <td>2.623,12</td>
+            <td class="negative">-87,60</td>
+            <td class="negative">-3.34%</td>
+            <td>Trend flip</td>
+        </tr>
+        <tr>
+            <td>LUNC/USDT</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-01-30 15:00</td>
+            <td>0.00003673</td>
+            <td>2026-02-01 15:00</td>
+            <td>0.00003817</td>
+            <td>71067939.578799</td>
+            <td>2.610,33</td>
+            <td class="positive">102,34</td>
+            <td class="positive">+3.92%</td>
+            <td>Time-based exit (4 bars, optimal=4)</td>
+        </tr>
+        <tr>
+            <td>TNSR/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-01-28 18:00</td>
+            <td>0.058700</td>
+            <td>2026-01-29 19:00</td>
+            <td>0.054200</td>
+            <td>44899.168707</td>
+            <td>2.635,58</td>
+            <td class="negative">-202,05</td>
+            <td class="negative">-7.67%</td>
+            <td>Trend flip</td>
+        </tr>
+        <tr>
+            <td>LUNC/USDT</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-01-28 12:00</td>
+            <td>0.00003786</td>
+            <td>2026-01-30 13:00</td>
+            <td>0.00003656</td>
+            <td>69913951.936527</td>
+            <td>2.646,94</td>
+            <td class="negative">-90,89</td>
+            <td class="negative">-3.43%</td>
+            <td>Trend flip</td>
+        </tr>
+        <tr>
+            <td>TNSR/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-01-27 16:00</td>
+            <td>0.058600</td>
+            <td>2026-01-28 16:00</td>
+            <td>0.058300</td>
+            <td>45198.586473</td>
+            <td>2.648,64</td>
+            <td class="negative">-13,56</td>
+            <td class="negative">-0.51%</td>
+            <td>Time-based exit (2 bars, optimal=2)</td>
+        </tr>
+        <tr>
+            <td>ICP/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-01-27 13:00</td>
+            <td>3.2570</td>
+            <td>2026-01-30 02:00</td>
+            <td>3.0460</td>
+            <td>819.852867</td>
+            <td>2.670,26</td>
+            <td class="negative">-172,99</td>
+            <td class="negative">-6.48%</td>
+            <td>Trend flip</td>
+        </tr>
+        <tr>
+            <td>SUI/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-01-27 09:00</td>
+            <td>1.4387</td>
+            <td>2026-01-30 02:00</td>
+            <td>1.2988</td>
+            <td>1893.443239</td>
+            <td>2.724,10</td>
+            <td class="negative">-264,89</td>
+            <td class="negative">-9.72%</td>
+            <td>Trend flip</td>
+        </tr>
+        <tr>
+            <td>TAO/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-01-27 09:00</td>
+            <td>232,10</td>
+            <td>2026-01-30 02:00</td>
+            <td>217,80</td>
+            <td>11.594077</td>
+            <td>2.690,99</td>
+            <td class="negative">-165,80</td>
+            <td class="negative">-6.16%</td>
+            <td>Trend flip</td>
+        </tr>
+        <tr>
+            <td>XRP/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-01-27 02:00</td>
+            <td>1.9048</td>
+            <td>2026-01-29 15:00</td>
+            <td>1.8242</td>
+            <td>1437.726735</td>
+            <td>2.738,58</td>
+            <td class="negative">-115,88</td>
+            <td class="negative">-4.23%</td>
+            <td>Trend flip</td>
+        </tr>
+        <tr>
+            <td>SOL/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-01-26 22:00</td>
+            <td>124,44</td>
+            <td>2026-01-29 12:00</td>
+            <td>122,61</td>
+            <td>22.047777</td>
+            <td>2.743,63</td>
+            <td class="negative">-40,35</td>
+            <td class="negative">-1.47%</td>
+            <td>Trend flip</td>
+        </tr>
+        <tr>
+            <td>ETH/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-01-26 18:00</td>
+            <td>2.907,47</td>
+            <td>2026-01-29 06:00</td>
+            <td>2.947,71</td>
+            <td>0.942017</td>
+            <td>2.738,89</td>
+            <td class="positive">37,91</td>
+            <td class="positive">+1.38%</td>
+            <td>Time-based exit (5 bars, optimal=5)</td>
+        </tr>
+        <tr>
+            <td>LUNC/USDT</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-01-26 11:00</td>
+            <td>0.00003789</td>
+            <td>2026-01-28 11:00</td>
+            <td>0.00003774</td>
+            <td>72321007.788806</td>
+            <td>2.740,24</td>
+            <td class="negative">-10,85</td>
+            <td class="negative">-0.40%</td>
+            <td>Time-based exit (4 bars, optimal=4)</td>
+        </tr>
+        <tr>
+            <td>TAO/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-01-24 15:00</td>
+            <td>237,70</td>
+            <td>2026-01-27 04:00</td>
+            <td>234,20</td>
+            <td>11.591826</td>
+            <td>2.755,38</td>
+            <td class="negative">-40,57</td>
+            <td class="negative">-1.47%</td>
+            <td>Trend flip</td>
+        </tr>
+        <tr>
+            <td>SUI/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-01-24 15:00</td>
+            <td>1.4896</td>
+            <td>2026-01-27 04:00</td>
+            <td>1.4460</td>
+            <td>1846.338298</td>
+            <td>2.750,31</td>
+            <td class="negative">-80,50</td>
+            <td class="negative">-2.93%</td>
+            <td>Trend flip</td>
+        </tr>
+        <tr>
+            <td>XRP/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-01-24 13:00</td>
+            <td>1.9174</td>
+            <td>2026-01-27 01:00</td>
+            <td>1.9024</td>
+            <td>1438.444788</td>
+            <td>2.758,07</td>
+            <td class="negative">-21,58</td>
+            <td class="negative">-0.78%</td>
+            <td>Time-based exit (5 bars, optimal=5)</td>
+        </tr>
+        <tr>
+            <td>LUNC/USDT</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-01-24 04:00</td>
+            <td>0.00003803</td>
+            <td>2026-01-26 09:00</td>
+            <td>0.00003738</td>
+            <td>72678916.605518</td>
+            <td>2.763,98</td>
+            <td class="negative">-47,24</td>
+            <td class="negative">-1.71%</td>
+            <td>Trend flip</td>
+        </tr>
+        <tr>
+            <td>TNSR/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-01-24 03:00</td>
+            <td>0.061200</td>
+            <td>2026-01-25 03:00</td>
+            <td>0.062800</td>
+            <td>45015.947858</td>
+            <td>2.754,98</td>
+            <td class="positive">72,03</td>
+            <td class="positive">+2.61%</td>
+            <td>Time-based exit (2 bars, optimal=2)</td>
+        </tr>
+        <tr>
+            <td>ETH/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-01-24 02:00</td>
+            <td>2.952,86</td>
+            <td>2026-01-25 17:00</td>
+            <td>2.901,14</td>
+            <td>0.935033</td>
+            <td>2.761,02</td>
+            <td class="negative">-48,36</td>
+            <td class="negative">-1.75%</td>
+            <td>ATR stop x2.00</td>
+        </tr>
+        <tr>
+            <td>SOL/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-01-22 05:00</td>
+            <td>130,25</td>
+            <td>2026-01-24 22:00</td>
+            <td>126,99</td>
+            <td>21.264385</td>
+            <td>2.769,69</td>
+            <td class="negative">-69,32</td>
+            <td class="negative">-2.50%</td>
+            <td>Trend flip</td>
+        </tr>
+        <tr>
+            <td>LUNC/USDT</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-01-22 01:00</td>
+            <td>0.00003874</td>
+            <td>2026-01-24 03:00</td>
+            <td>0.00003783</td>
+            <td>72337248.690089</td>
+            <td>2.802,35</td>
+            <td class="negative">-65,83</td>
+            <td class="negative">-2.35%</td>
+            <td>Trend flip</td>
+        </tr>
+        <tr>
+            <td>TAO/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-01-22 01:00</td>
+            <td>247,00</td>
+            <td>2026-01-24 14:00</td>
+            <td>236,80</td>
+            <td>11.312213</td>
+            <td>2.794,12</td>
+            <td class="negative">-115,38</td>
+            <td class="negative">-4.13%</td>
+            <td>Trend flip</td>
+        </tr>
+        <tr>
+            <td>SUI/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-01-22 01:00</td>
+            <td>1.5277</td>
+            <td>2026-01-24 14:00</td>
+            <td>1.4837</td>
+            <td>1819.528429</td>
+            <td>2.779,69</td>
+            <td class="negative">-80,06</td>
+            <td class="negative">-2.88%</td>
+            <td>Trend flip</td>
+        </tr>
+        <tr>
+            <td>XRP/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-01-21 15:00</td>
+            <td>1.9411</td>
+            <td>2026-01-24 05:00</td>
+            <td>1.9233</td>
+            <td>1445.345891</td>
+            <td>2.805,56</td>
+            <td class="negative">-25,73</td>
+            <td class="negative">-0.92%</td>
+            <td>Time-based exit (5 bars, optimal=5)</td>
+        </tr>
+        <tr>
+            <td>ICP/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-01-19 04:00</td>
+            <td>3.8730</td>
+            <td>2026-01-21 17:00</td>
+            <td>3.5440</td>
+            <td>732.163995</td>
+            <td>2.835,67</td>
+            <td class="negative">-240,88</td>
+            <td class="negative">-8.49%</td>
+            <td>Trend flip</td>
+        </tr>
+        <tr>
+            <td>TNSR/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-01-18 01:00</td>
+            <td>0.072300</td>
+            <td>2026-01-19 22:00</td>
+            <td>0.066100</td>
+            <td>39645.874214</td>
+            <td>2.866,40</td>
+            <td class="negative">-245,80</td>
+            <td class="negative">-8.58%</td>
+            <td>Trend flip</td>
+        </tr>
+        <tr>
+            <td>TNSR/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-01-16 18:00</td>
+            <td>0.071700</td>
+            <td>2026-01-17 21:00</td>
+            <td>0.071500</td>
+            <td>39968.345508</td>
+            <td>2.865,73</td>
+            <td class="negative">-7,99</td>
+            <td class="negative">-0.28%</td>
+            <td>Time-based exit (2 bars, optimal=2)</td>
+        </tr>
+        <tr>
+            <td>LUNC/USDT</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-01-16 18:00</td>
+            <td>0.00004085</td>
+            <td>2026-01-18 18:00</td>
+            <td>0.00004104</td>
+            <td>70128057.877665</td>
+            <td>2.864,73</td>
+            <td class="positive">13,32</td>
+            <td class="positive">+0.47%</td>
+            <td>Time-based exit (4 bars, optimal=4)</td>
+        </tr>
+        <tr>
+            <td>ICP/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-01-16 09:00</td>
+            <td>4.3670</td>
+            <td>2026-01-19 00:00</td>
+            <td>3.8940</td>
+            <td>665.230624</td>
+            <td>2.905,06</td>
+            <td class="negative">-314,65</td>
+            <td class="negative">-10.83%</td>
+            <td>Trend flip</td>
+        </tr>
+        <tr>
+            <td>ETH/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-01-15 23:00</td>
+            <td>3.309,06</td>
+            <td>2026-01-18 11:00</td>
+            <td>3.325,02</td>
+            <td>0.877383</td>
+            <td>2.903,31</td>
+            <td class="positive">14,00</td>
+            <td class="positive">+0.48%</td>
+            <td>Time-based exit (5 bars, optimal=5)</td>
+        </tr>
+        <tr>
+            <td>SOL/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-01-14 13:00</td>
+            <td>144,54</td>
+            <td>2026-01-17 01:00</td>
+            <td>144,29</td>
+            <td>20.090906</td>
+            <td>2.903,94</td>
+            <td class="negative">-5,02</td>
+            <td class="negative">-0.17%</td>
+            <td>Time-based exit (5 bars, optimal=5)</td>
+        </tr>
+        <tr>
+            <td>TNSR/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-01-14 10:00</td>
+            <td>0.073900</td>
+            <td>2026-01-15 12:00</td>
+            <td>0.072000</td>
+            <td>39422.224280</td>
+            <td>2.913,30</td>
+            <td class="negative">-74,90</td>
+            <td class="negative">-2.57%</td>
+            <td>Trend flip</td>
+        </tr>
+        <tr>
+            <td>LUNC/USDT</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-01-13 16:00</td>
+            <td>0.00004311</td>
+            <td>2026-01-15 17:00</td>
+            <td>0.00004270</td>
+            <td>67658777.236044</td>
+            <td>2.916,77</td>
+            <td class="negative">-27,74</td>
+            <td class="negative">-0.95%</td>
+            <td>Time-based exit (4 bars, optimal=4)</td>
+        </tr>
+        <tr>
+            <td>ICP/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-01-13 15:00</td>
+            <td>3.4950</td>
+            <td>2026-01-16 03:00</td>
+            <td>4.6720</td>
+            <td>800.842883</td>
+            <td>2.798,95</td>
+            <td class="positive">942,59</td>
+            <td class="positive">+33.68%</td>
+            <td>Time-based exit (5 bars, optimal=5)</td>
+        </tr>
+        <tr>
+            <td>SUI/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-01-13 14:00</td>
+            <td>1.8014</td>
+            <td>2026-01-16 02:00</td>
+            <td>1.7840</td>
+            <td>1555.639721</td>
+            <td>2.802,33</td>
+            <td class="negative">-27,07</td>
+            <td class="negative">-0.97%</td>
+            <td>Time-based exit (5 bars, optimal=5)</td>
+        </tr>
+        <tr>
+            <td>XRP/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-01-13 13:00</td>
+            <td>2.0620</td>
+            <td>2026-01-16 01:00</td>
+            <td>2.0821</td>
+            <td>1357.380686</td>
+            <td>2.798,92</td>
+            <td class="positive">27,28</td>
+            <td class="positive">+0.97%</td>
+            <td>Time-based exit (5 bars, optimal=5)</td>
+        </tr>
+        <tr>
+            <td>TNSR/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-01-13 03:00</td>
+            <td>0.068800</td>
+            <td>2026-01-14 03:00</td>
+            <td>0.073900</td>
+            <td>40308.464084</td>
+            <td>2.773,22</td>
+            <td class="positive">205,57</td>
+            <td class="positive">+7.41%</td>
+            <td>Time-based exit (2 bars, optimal=2)</td>
+        </tr>
+        <tr>
+            <td>TAO/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-01-13 01:00</td>
+            <td>284,00</td>
+            <td>2026-01-15 13:00</td>
+            <td>286,50</td>
+            <td>9.651844</td>
+            <td>2.741,12</td>
+            <td class="positive">24,13</td>
+            <td class="positive">+0.88%</td>
+            <td>Time-based exit (5 bars, optimal=5)</td>
+        </tr>
+        <tr>
+            <td>ETH/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-01-13 01:00</td>
+            <td>3.105,77</td>
+            <td>2026-01-15 13:00</td>
+            <td>3.369,09</td>
+            <td>0.883562</td>
+            <td>2.744,14</td>
+            <td class="positive">232,66</td>
+            <td class="positive">+8.48%</td>
+            <td>Time-based exit (5 bars, optimal=5)</td>
+        </tr>
+        <tr>
+            <td>SOL/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-01-12 00:00</td>
+            <td>139,54</td>
+            <td>2026-01-14 12:00</td>
+            <td>143,73</td>
+            <td>19.594278</td>
+            <td>2.734,19</td>
+            <td class="positive">82,10</td>
+            <td class="positive">+3.00%</td>
+            <td>Time-based exit (5 bars, optimal=5)</td>
+        </tr>
+        <tr>
+            <td>ETH/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-01-12 00:00</td>
+            <td>3.119,63</td>
+            <td>2026-01-12 15:00</td>
+            <td>3.089,40</td>
+            <td>0.879735</td>
+            <td>2.744,45</td>
+            <td class="negative">-26,60</td>
+            <td class="negative">-0.97%</td>
+            <td>ATR stop x2.00</td>
+        </tr>
+        <tr>
+            <td>ICP/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-01-11 02:00</td>
+            <td>3.1940</td>
+            <td>2026-01-13 14:00</td>
+            <td>3.3690</td>
+            <td>850.215132</td>
+            <td>2.715,59</td>
+            <td class="positive">148,79</td>
+            <td class="positive">+5.48%</td>
+            <td>Time-based exit (5 bars, optimal=5)</td>
+        </tr>
+        <tr>
+            <td>TAO/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-01-10 07:00</td>
+            <td>277,20</td>
+            <td>2026-01-12 19:00</td>
+            <td>282,10</td>
+            <td>9.774892</td>
+            <td>2.709,60</td>
+            <td class="positive">47,90</td>
+            <td class="positive">+1.77%</td>
+            <td>Time-based exit (5 bars, optimal=5)</td>
+        </tr>
+        <tr>
+            <td>LUNC/USDT</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-01-10 06:00</td>
+            <td>0.00004284</td>
+            <td>2026-01-12 06:00</td>
+            <td>0.00004357</td>
+            <td>63114864.093494</td>
+            <td>2.703,84</td>
+            <td class="positive">46,07</td>
+            <td class="positive">+1.70%</td>
+            <td>Time-based exit (4 bars, optimal=4)</td>
+        </tr>
+        <tr>
+            <td>SOL/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-01-08 14:00</td>
+            <td>134,35</td>
+            <td>2026-01-11 02:00</td>
+            <td>136,16</td>
+            <td>20.091515</td>
+            <td>2.699,30</td>
+            <td class="positive">36,37</td>
+            <td class="positive">+1.35%</td>
+            <td>Time-based exit (5 bars, optimal=5)</td>
+        </tr>
+        <tr>
+            <td>TAO/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-01-06 21:00</td>
+            <td>287,90</td>
+            <td>2026-01-09 12:00</td>
+            <td>285,50</td>
+            <td>9.438283</td>
+            <td>2.717,28</td>
+            <td class="negative">-22,65</td>
+            <td class="negative">-0.83%</td>
+            <td>Time-based exit (5 bars, optimal=5)</td>
+        </tr>
+        <tr>
+            <td>TNSR/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-01-06 21:00</td>
+            <td>0.080600</td>
+            <td>2026-01-07 21:00</td>
+            <td>0.077000</td>
+            <td>33678.042077</td>
+            <td>2.714,45</td>
+            <td class="negative">-121,24</td>
+            <td class="negative">-4.47%</td>
+            <td>Trend flip</td>
+        </tr>
+        <tr>
+            <td>LUNC/USDT</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-01-06 15:00</td>
+            <td>0.00004671</td>
+            <td>2026-01-08 20:00</td>
+            <td>0.00004268</td>
+            <td>58807665.116243</td>
+            <td>2.746,91</td>
+            <td class="negative">-236,99</td>
+            <td class="negative">-8.63%</td>
+            <td>Trend flip</td>
+        </tr>
+        <tr>
+            <td>ICP/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-01-06 12:00</td>
+            <td>3.4080</td>
+            <td>2026-01-09 00:00</td>
+            <td>3.1740</td>
+            <td>812.994758</td>
+            <td>2.770,69</td>
+            <td class="negative">-190,24</td>
+            <td class="negative">-6.87%</td>
+            <td>Trend flip</td>
+        </tr>
+        <tr>
+            <td>XRP/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-01-06 11:00</td>
+            <td>2.3607</td>
+            <td>2026-01-09 00:00</td>
+            <td>2.1214</td>
+            <td>1188.733908</td>
+            <td>2.806,24</td>
+            <td class="negative">-284,46</td>
+            <td class="negative">-10.14%</td>
+            <td>Trend flip</td>
+        </tr>
+        <tr>
+            <td>ETH/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-01-06 04:00</td>
+            <td>3.225,69</td>
+            <td>2026-01-07 15:00</td>
+            <td>3.174,36</td>
+            <td>0.871701</td>
+            <td>2.811,84</td>
+            <td class="negative">-44,75</td>
+            <td class="negative">-1.59%</td>
+            <td>ATR stop x2.00</td>
+        </tr>
+        <tr>
+            <td>SUI/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-01-05 15:00</td>
+            <td>1.6875</td>
+            <td>2026-01-08 03:00</td>
+            <td>1.8077</td>
+            <td>1646.704714</td>
+            <td>2.778,81</td>
+            <td class="positive">197,93</td>
+            <td class="positive">+7.12%</td>
+            <td>Time-based exit (5 bars, optimal=5)</td>
+        </tr>
+        <tr>
+            <td>TNSR/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-01-05 15:00</td>
+            <td>0.080400</td>
+            <td>2026-01-06 15:00</td>
+            <td>0.082300</td>
+            <td>34870.098794</td>
+            <td>2.803,56</td>
+            <td class="positive">66,25</td>
+            <td class="positive">+2.36%</td>
+            <td>Time-based exit (2 bars, optimal=2)</td>
+        </tr>
+        <tr>
+            <td>SOL/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-01-05 11:00</td>
+            <td>135,77</td>
+            <td>2026-01-07 23:00</td>
+            <td>136,38</td>
+            <td>20.455583</td>
+            <td>2.777,25</td>
+            <td class="positive">12,48</td>
+            <td class="positive">+0.45%</td>
+            <td>Time-based exit (5 bars, optimal=5)</td>
+        </tr>
+        <tr>
+            <td>TAO/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-01-04 09:00</td>
+            <td>258,10</td>
+            <td>2026-01-06 21:00</td>
+            <td>287,90</td>
+            <td>10.607293</td>
+            <td>2.737,74</td>
+            <td class="positive">316,10</td>
+            <td class="positive">+11.55%</td>
+            <td>Time-based exit (5 bars, optimal=5)</td>
+        </tr>
+        <tr>
+            <td>LUNC/USDT</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-01-04 08:00</td>
+            <td>0.00004353</td>
+            <td>2026-01-06 08:00</td>
+            <td>0.00004523</td>
+            <td>62587696.186292</td>
+            <td>2.724,44</td>
+            <td class="positive">106,40</td>
+            <td class="positive">+3.91%</td>
+            <td>Time-based exit (4 bars, optimal=4)</td>
+        </tr>
+        <tr>
+            <td>ICP/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-01-03 23:00</td>
+            <td>3.1350</td>
+            <td>2026-01-06 11:00</td>
+            <td>3.3850</td>
+            <td>860.463455</td>
+            <td>2.697,55</td>
+            <td class="positive">215,12</td>
+            <td class="positive">+7.97%</td>
+            <td>Time-based exit (5 bars, optimal=5)</td>
+        </tr>
+        <tr>
+            <td>TNSR/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-01-03 22:00</td>
+            <td>0.080200</td>
+            <td>2026-01-04 22:00</td>
+            <td>0.082700</td>
+            <td>33504.771706</td>
+            <td>2.687,08</td>
+            <td class="positive">83,76</td>
+            <td class="positive">+3.12%</td>
+            <td>Time-based exit (2 bars, optimal=2)</td>
+        </tr>
+        <tr>
+            <td>XRP/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-01-03 15:00</td>
+            <td>2.0105</td>
+            <td>2026-01-06 03:00</td>
+            <td>2.3934</td>
+            <td>1305.446777</td>
+            <td>2.624,60</td>
+            <td class="positive">499,86</td>
+            <td class="positive">+19.05%</td>
+            <td>Time-based exit (5 bars, optimal=5)</td>
+        </tr>
+        <tr>
+            <td>ETH/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-01-03 13:00</td>
+            <td>3.104,01</td>
+            <td>2026-01-06 01:00</td>
+            <td>3.216,66</td>
+            <td>0.841733</td>
+            <td>2.612,75</td>
+            <td class="positive">94,82</td>
+            <td class="positive">+3.63%</td>
+            <td>Time-based exit (5 bars, optimal=5)</td>
+        </tr>
+        <tr>
+            <td>ETH/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-01-03 01:00</td>
+            <td>3.130,33</td>
+            <td>2026-01-03 08:00</td>
+            <td>3.083,03</td>
+            <td>0.833605</td>
+            <td>2.609,46</td>
+            <td class="negative">-39,43</td>
+            <td class="negative">-1.51%</td>
+            <td>ATR stop x2.00</td>
+        </tr>
+        <tr>
+            <td>SUI/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-01-03 01:00</td>
+            <td>1.6403</td>
+            <td>2026-01-05 13:00</td>
+            <td>1.6817</td>
+            <td>1587.838217</td>
+            <td>2.604,53</td>
+            <td class="positive">65,74</td>
+            <td class="positive">+2.52%</td>
+            <td>Time-based exit (5 bars, optimal=5)</td>
+        </tr>
+        <tr>
+            <td>SOL/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-01-02 22:00</td>
+            <td>131,88</td>
+            <td>2026-01-05 10:00</td>
+            <td>135,39</td>
+            <td>19.742365</td>
+            <td>2.603,62</td>
+            <td class="positive">69,30</td>
+            <td class="positive">+2.66%</td>
+            <td>Time-based exit (5 bars, optimal=5)</td>
+        </tr>
+        <tr>
+            <td>TNSR/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-01-02 22:00</td>
+            <td>0.080900</td>
+            <td>2026-01-03 22:00</td>
+            <td>0.080200</td>
+            <td>32290.296590</td>
+            <td>2.612,28</td>
+            <td class="negative">-22,60</td>
+            <td class="negative">-0.87%</td>
+            <td>Time-based exit (2 bars, optimal=2)</td>
+        </tr>
+        <tr>
+            <td>LUNC/USDT</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-01-02 07:00</td>
+            <td>0.00004037</td>
+            <td>2026-01-04 07:00</td>
+            <td>0.00004308</td>
+            <td>63957331.820184</td>
+            <td>2.581,96</td>
+            <td class="positive">173,32</td>
+            <td class="positive">+6.71%</td>
+            <td>Time-based exit (4 bars, optimal=4)</td>
+        </tr>
+        <tr>
+            <td>TNSR/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-01-01 15:00</td>
+            <td>0.078200</td>
+            <td>2026-01-02 15:00</td>
+            <td>0.079500</td>
+            <td>32948.891186</td>
+            <td>2.576,60</td>
+            <td class="positive">42,83</td>
+            <td class="positive">+1.66%</td>
+            <td>Time-based exit (2 bars, optimal=2)</td>
+        </tr>
+        <tr>
+            <td>TAO/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-01-01 14:00</td>
+            <td>224,10</td>
+            <td>2026-01-04 02:00</td>
+            <td>256,70</td>
+            <td>11.292224</td>
+            <td>2.530,59</td>
+            <td class="positive">368,13</td>
+            <td class="positive">+14.55%</td>
+            <td>Time-based exit (5 bars, optimal=5)</td>
+        </tr>
+        <tr>
+            <td>ICP/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2026-01-01 06:00</td>
+            <td>2.8770</td>
+            <td>2026-01-03 18:00</td>
+            <td>3.1140</td>
+            <td>870.627438</td>
+            <td>2.504,80</td>
+            <td class="positive">206,34</td>
+            <td class="positive">+8.24%</td>
+            <td>Time-based exit (5 bars, optimal=5)</td>
+        </tr>
+        <tr>
+            <td>XRP/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2025-12-31 11:00</td>
+            <td>1.8703</td>
+            <td>2026-01-02 23:00</td>
+            <td>2.0150</td>
+            <td>1326.420101</td>
+            <td>2.480,80</td>
+            <td class="positive">191,93</td>
+            <td class="positive">+7.74%</td>
+            <td>Time-based exit (5 bars, optimal=5)</td>
+        </tr>
+        <tr>
+            <td>SOL/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2025-12-31 10:00</td>
+            <td>126,16</td>
+            <td>2026-01-02 22:00</td>
+            <td>131,88</td>
+            <td>19.553131</td>
+            <td>2.466,82</td>
+            <td class="positive">111,84</td>
+            <td class="positive">+4.53%</td>
+            <td>Time-based exit (5 bars, optimal=5)</td>
+        </tr>
+        <tr>
+            <td>SUI/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2025-12-31 08:00</td>
+            <td>1.4445</td>
+            <td>2026-01-02 20:00</td>
+            <td>1.5878</td>
+            <td>1686.817520</td>
+            <td>2.436,61</td>
+            <td class="positive">241,72</td>
+            <td class="positive">+9.92%</td>
+            <td>Time-based exit (5 bars, optimal=5)</td>
+        </tr>
+        <tr>
+            <td>LUNC/USDT</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2025-12-31 02:00</td>
+            <td>0.00003735</td>
+            <td>2026-01-02 02:00</td>
+            <td>0.00004038</td>
+            <td>64582259.086680</td>
+            <td>2.412,15</td>
+            <td class="positive">195,68</td>
+            <td class="positive">+8.11%</td>
+            <td>Time-based exit (4 bars, optimal=4)</td>
+        </tr>
+        <tr>
+            <td>ETH/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2025-12-31 00:00</td>
+            <td>2.971,13</td>
+            <td>2026-01-02 12:00</td>
+            <td>3.045,23</td>
+            <td>0.809339</td>
+            <td>2.404,65</td>
+            <td class="positive">59,97</td>
+            <td class="positive">+2.49%</td>
+            <td>Time-based exit (5 bars, optimal=5)</td>
+        </tr>
+        <tr>
+            <td>TAO/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2025-12-30 01:00</td>
+            <td>219,10</td>
+            <td>2026-01-01 13:00</td>
+            <td>222,50</td>
+            <td>10.953882</td>
+            <td>2.400,00</td>
+            <td class="positive">37,24</td>
+            <td class="positive">+1.55%</td>
+            <td>Time-based exit (5 bars, optimal=5)</td>
+        </tr>
+        <tr>
+            <td>TNSR/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2025-12-29 16:00</td>
+            <td>0.080100</td>
+            <td>2025-12-30 16:00</td>
+            <td>0.080400</td>
+            <td>29948.469521</td>
+            <td>2.398,87</td>
+            <td class="positive">8,98</td>
+            <td class="positive">+0.37%</td>
+            <td>Time-based exit (2 bars, optimal=2)</td>
+        </tr>
+        <tr>
+            <td>SOL/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2025-12-28 22:00</td>
+            <td>123,80</td>
+            <td>2025-12-31 10:00</td>
+            <td>126,16</td>
+            <td>19.330935</td>
+            <td>2.393,17</td>
+            <td class="positive">45,62</td>
+            <td class="positive">+1.91%</td>
+            <td>Time-based exit (5 bars, optimal=5)</td>
+        </tr>
+        <tr>
+            <td>SUI/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2025-12-28 15:00</td>
+            <td>1.4621</td>
+            <td>2025-12-31 05:00</td>
+            <td>1.4357</td>
+            <td>1639.738612</td>
+            <td>2.397,46</td>
+            <td class="negative">-43,29</td>
+            <td class="negative">-1.81%</td>
+            <td>Trend flip</td>
+        </tr>
+        <tr>
+            <td>XRP/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2025-12-28 15:00</td>
+            <td>1.8703</td>
+            <td>2025-12-31 03:00</td>
+            <td>1.8773</td>
+            <td>1278.966309</td>
+            <td>2.392,05</td>
+            <td class="positive">8,95</td>
+            <td class="positive">+0.37%</td>
+            <td>Time-based exit (5 bars, optimal=5)</td>
+        </tr>
+        <tr>
+            <td>LUNC/USDT</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2025-12-28 04:00</td>
+            <td>0.00004090</td>
+            <td>2025-12-30 06:00</td>
+            <td>0.00003794</td>
+            <td>59152771.395586</td>
+            <td>2.419,35</td>
+            <td class="negative">-175,09</td>
+            <td class="negative">-7.24%</td>
+            <td>Trend flip</td>
+        </tr>
+        <tr>
+            <td>ETH/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2025-12-27 18:00</td>
+            <td>2.927,06</td>
+            <td>2025-12-30 06:00</td>
+            <td>2.938,64</td>
+            <td>0.826137</td>
+            <td>2.418,15</td>
+            <td class="positive">9,57</td>
+            <td class="positive">+0.40%</td>
+            <td>Time-based exit (5 bars, optimal=5)</td>
+        </tr>
+        <tr>
+            <td>TNSR/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2025-12-27 16:00</td>
+            <td>0.083500</td>
+            <td>2025-12-28 17:00</td>
+            <td>0.082900</td>
+            <td>28985.945661</td>
+            <td>2.420,33</td>
+            <td class="negative">-17,39</td>
+            <td class="negative">-0.72%</td>
+            <td>Time-based exit (2 bars, optimal=2)</td>
+        </tr>
+        <tr>
+            <td>TAO/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2025-12-27 12:00</td>
+            <td>219,10</td>
+            <td>2025-12-30 00:00</td>
+            <td>218,40</td>
+            <td>11.051088</td>
+            <td>2.421,29</td>
+            <td class="negative">-7,74</td>
+            <td class="negative">-0.32%</td>
+            <td>Time-based exit (5 bars, optimal=5)</td>
+        </tr>
+        <tr>
+            <td>TNSR/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2025-12-26 15:00</td>
+            <td>0.085100</td>
+            <td>2025-12-27 15:00</td>
+            <td>0.083000</td>
+            <td>28540.367561</td>
+            <td>2.428,79</td>
+            <td class="negative">-59,93</td>
+            <td class="negative">-2.47%</td>
+            <td>Trend flip</td>
+        </tr>
+        <tr>
+            <td>ETH/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2025-12-26 03:00</td>
+            <td>2.971,35</td>
+            <td>2025-12-26 15:00</td>
+            <td>2.926,33</td>
+            <td>0.812867</td>
+            <td>2.415,31</td>
+            <td class="negative">-36,59</td>
+            <td class="negative">-1.51%</td>
+            <td>ATR stop x2.00</td>
+        </tr>
+        <tr>
+            <td>SUI/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2025-12-26 03:00</td>
+            <td>1.4076</td>
+            <td>2025-12-28 15:00</td>
+            <td>1.4621</td>
+            <td>1712.658059</td>
+            <td>2.410,74</td>
+            <td class="positive">93,34</td>
+            <td class="positive">+3.87%</td>
+            <td>Time-based exit (5 bars, optimal=5)</td>
+        </tr>
+        <tr>
+            <td>SOL/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2025-12-26 03:00</td>
+            <td>123,36</td>
+            <td>2025-12-28 15:00</td>
+            <td>124,52</td>
+            <td>19.636876</td>
+            <td>2.422,40</td>
+            <td class="positive">22,78</td>
+            <td class="positive">+0.94%</td>
+            <td>Time-based exit (5 bars, optimal=5)</td>
+        </tr>
+        <tr>
+            <td>LUNC/USDT</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2025-12-26 03:00</td>
+            <td>0.00004043</td>
+            <td>2025-12-28 03:00</td>
+            <td>0.00004086</td>
+            <td>59986453.473091</td>
+            <td>2.425,25</td>
+            <td class="positive">25,79</td>
+            <td class="positive">+1.06%</td>
+            <td>Time-based exit (4 bars, optimal=4)</td>
+        </tr>
+        <tr>
+            <td>XRP/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2025-12-26 03:00</td>
+            <td>1.8684</td>
+            <td>2025-12-28 15:00</td>
+            <td>1.8703</td>
+            <td>1299.762677</td>
+            <td>2.428,48</td>
+            <td class="positive">2,47</td>
+            <td class="positive">+0.10%</td>
+            <td>Time-based exit (5 bars, optimal=5)</td>
+        </tr>
+        <tr>
+            <td>ICP/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2025-12-26 02:00</td>
+            <td>3.0230</td>
+            <td>2025-12-28 14:00</td>
+            <td>3.0760</td>
+            <td>797.231151</td>
+            <td>2.410,03</td>
+            <td class="positive">42,25</td>
+            <td class="positive">+1.75%</td>
+            <td>Time-based exit (5 bars, optimal=5)</td>
+        </tr>
+        <tr>
+            <td>TNSR/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2025-12-25 14:00</td>
+            <td>0.079900</td>
+            <td>2025-12-26 14:00</td>
+            <td>0.083800</td>
+            <td>29980.155727</td>
+            <td>2.395,41</td>
+            <td class="positive">116,92</td>
+            <td class="positive">+4.88%</td>
+            <td>Time-based exit (2 bars, optimal=2)</td>
+        </tr>
+        <tr>
+            <td>TAO/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2025-12-24 23:00</td>
+            <td>219,50</td>
+            <td>2025-12-27 11:00</td>
+            <td>216,70</td>
+            <td>10.930479</td>
+            <td>2.399,24</td>
+            <td class="negative">-30,61</td>
+            <td class="negative">-1.28%</td>
+            <td>Trend flip</td>
+        </tr>
+        <tr>
+            <td>LUNC/USDT</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2025-12-23 16:00</td>
+            <td>0.00003918</td>
+            <td>2025-12-25 16:00</td>
+            <td>0.00003978</td>
+            <td>61119350.660245</td>
+            <td>2.394,66</td>
+            <td class="positive">36,67</td>
+            <td class="positive">+1.53%</td>
+            <td>Time-based exit (4 bars, optimal=4)</td>
+        </tr>
+        <tr>
+            <td>ICP/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2025-12-23 14:00</td>
+            <td>2.9770</td>
+            <td>2025-12-26 02:00</td>
+            <td>3.0230</td>
+            <td>802.835021</td>
+            <td>2.390,04</td>
+            <td class="positive">36,93</td>
+            <td class="positive">+1.55%</td>
+            <td>Time-based exit (5 bars, optimal=5)</td>
+        </tr>
+        <tr>
+            <td>TNSR/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2025-12-22 11:00</td>
+            <td>0.086400</td>
+            <td>2025-12-23 12:00</td>
+            <td>0.081700</td>
+            <td>27851.884720</td>
+            <td>2.406,40</td>
+            <td class="negative">-130,90</td>
+            <td class="negative">-5.44%</td>
+            <td>Trend flip</td>
+        </tr>
+        <tr>
+            <td>SUI/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2025-12-22 04:00</td>
+            <td>1.4532</td>
+            <td>2025-12-24 18:00</td>
+            <td>1.4111</td>
+            <td>1668.200440</td>
+            <td>2.424,23</td>
+            <td class="negative">-70,23</td>
+            <td class="negative">-2.90%</td>
+            <td>Trend flip</td>
+        </tr>
+        <tr>
+            <td>TAO/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2025-12-22 04:00</td>
+            <td>223,60</td>
+            <td>2025-12-24 21:00</td>
+            <td>216,90</td>
+            <td>10.802549</td>
+            <td>2.415,45</td>
+            <td class="negative">-72,38</td>
+            <td class="negative">-3.00%</td>
+            <td>Trend flip</td>
+        </tr>
+        <tr>
+            <td>XRP/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2025-12-21 19:00</td>
+            <td>1.9124</td>
+            <td>2025-12-24 15:00</td>
+            <td>1.8578</td>
+            <td>1272.177101</td>
+            <td>2.432,91</td>
+            <td class="negative">-69,46</td>
+            <td class="negative">-2.86%</td>
+            <td>Trend flip</td>
+        </tr>
+        <tr>
+            <td>ETH/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2025-12-21 17:00</td>
+            <td>2.985,75</td>
+            <td>2025-12-23 07:00</td>
+            <td>2.950,90</td>
+            <td>0.816032</td>
+            <td>2.436,47</td>
+            <td class="negative">-28,44</td>
+            <td class="negative">-1.17%</td>
+            <td>ATR stop x2.00</td>
+        </tr>
+        <tr>
+            <td>SOL/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2025-12-21 16:00</td>
+            <td>125,03</td>
+            <td>2025-12-24 14:00</td>
+            <td>121,91</td>
+            <td>19.548029</td>
+            <td>2.444,09</td>
+            <td class="negative">-60,99</td>
+            <td class="negative">-2.50%</td>
+            <td>Trend flip</td>
+        </tr>
+        <tr>
+            <td>LUNC/USDT</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2025-12-21 05:00</td>
+            <td>0.00004005</td>
+            <td>2025-12-23 07:00</td>
+            <td>0.00003858</td>
+            <td>61307246.933410</td>
+            <td>2.455,36</td>
+            <td class="negative">-90,12</td>
+            <td class="negative">-3.67%</td>
+            <td>Trend flip</td>
+        </tr>
+        <tr>
+            <td>TNSR/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2025-12-20 03:00</td>
+            <td>0.089000</td>
+            <td>2025-12-21 08:00</td>
+            <td>0.086900</td>
+            <td>27669.871697</td>
+            <td>2.462,62</td>
+            <td class="negative">-58,11</td>
+            <td class="negative">-2.36%</td>
+            <td>Trend flip</td>
+        </tr>
+        <tr>
+            <td>ICP/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2025-12-19 20:00</td>
+            <td>2.9630</td>
+            <td>2025-12-22 08:00</td>
+            <td>3.0730</td>
+            <td>827.284314</td>
+            <td>2.451,24</td>
+            <td class="positive">91,00</td>
+            <td class="positive">+3.71%</td>
+            <td>Time-based exit (5 bars, optimal=5)</td>
+        </tr>
+        <tr>
+            <td>LUNC/USDT</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2025-12-19 04:00</td>
+            <td>0.00003783</td>
+            <td>2025-12-21 04:00</td>
+            <td>0.00003928</td>
+            <td>64204163.189757</td>
+            <td>2.428,84</td>
+            <td class="positive">93,10</td>
+            <td class="positive">+3.83%</td>
+            <td>Time-based exit (4 bars, optimal=4)</td>
+        </tr>
+        <tr>
+            <td>XRP/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2025-12-19 04:00</td>
+            <td>1.8395</td>
+            <td>2025-12-21 16:00</td>
+            <td>1.9044</td>
+            <td>1326.708615</td>
+            <td>2.440,48</td>
+            <td class="positive">86,10</td>
+            <td class="positive">+3.53%</td>
+            <td>Time-based exit (5 bars, optimal=5)</td>
+        </tr>
+        <tr>
+            <td>SOL/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2025-12-19 03:00</td>
+            <td>118,91</td>
+            <td>2025-12-21 15:00</td>
+            <td>124,40</td>
+            <td>20.017326</td>
+            <td>2.380,26</td>
+            <td class="positive">109,90</td>
+            <td class="positive">+4.62%</td>
+            <td>Time-based exit (5 bars, optimal=5)</td>
+        </tr>
+        <tr>
+            <td>SUI/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2025-12-19 03:00</td>
+            <td>1.3402</td>
+            <td>2025-12-21 15:00</td>
+            <td>1.4315</td>
+            <td>1786.298428</td>
+            <td>2.394,00</td>
+            <td class="positive">163,09</td>
+            <td class="positive">+6.81%</td>
+            <td>Time-based exit (5 bars, optimal=5)</td>
+        </tr>
+        <tr>
+            <td>ETH/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2025-12-19 03:00</td>
+            <td>2.834,48</td>
+            <td>2025-12-21 15:00</td>
+            <td>2.970,29</td>
+            <td>0.851791</td>
+            <td>2.414,38</td>
+            <td class="positive">115,68</td>
+            <td class="positive">+4.79%</td>
+            <td>Time-based exit (5 bars, optimal=5)</td>
+        </tr>
+        <tr>
+            <td>TNSR/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2025-12-16 04:00</td>
+            <td>0.093500</td>
+            <td>2025-12-17 04:00</td>
+            <td>0.094400</td>
+            <td>25426.735352</td>
+            <td>2.377,40</td>
+            <td class="positive">22,88</td>
+            <td class="positive">+0.96%</td>
+            <td>Time-based exit (2 bars, optimal=2)</td>
+        </tr>
+        <tr>
+            <td>ETH/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2025-12-15 02:00</td>
+            <td>3.109,00</td>
+            <td>2025-12-15 15:00</td>
+            <td>3.052,78</td>
+            <td>0.766415</td>
+            <td>2.382,79</td>
+            <td class="negative">-43,09</td>
+            <td class="negative">-1.81%</td>
+            <td>ATR stop x2.00</td>
+        </tr>
+        <tr>
+            <td>SOL/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2025-12-15 01:00</td>
+            <td>130,16</td>
+            <td>2025-12-17 14:00</td>
+            <td>129,19</td>
+            <td>18.323660</td>
+            <td>2.385,01</td>
+            <td class="negative">-17,77</td>
+            <td class="negative">-0.75%</td>
+            <td>Time-based exit (5 bars, optimal=5)</td>
+        </tr>
+        <tr>
+            <td>TNSR/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2025-12-13 05:00</td>
+            <td>0.095700</td>
+            <td>2025-12-14 05:00</td>
+            <td>0.103600</td>
+            <td>24667.175447</td>
+            <td>2.360,65</td>
+            <td class="positive">194,87</td>
+            <td class="positive">+8.25%</td>
+            <td>Time-based exit (2 bars, optimal=2)</td>
+        </tr>
+        <tr>
+            <td>XRP/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2025-12-12 02:00</td>
+            <td>2.0286</td>
+            <td>2025-12-15 00:00</td>
+            <td>1.9790</td>
+            <td>1167.251132</td>
+            <td>2.367,89</td>
+            <td class="negative">-57,90</td>
+            <td class="negative">-2.45%</td>
+            <td>Trend flip</td>
+        </tr>
+        <tr>
+            <td>TAO/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2025-12-11 19:00</td>
+            <td>291,80</td>
+            <td>2025-12-14 07:00</td>
+            <td>292,40</td>
+            <td>8.112670</td>
+            <td>2.367,28</td>
+            <td class="positive">4,87</td>
+            <td class="positive">+0.21%</td>
+            <td>Time-based exit (5 bars, optimal=5)</td>
+        </tr>
+        <tr>
+            <td>SUI/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2025-12-11 16:00</td>
+            <td>1.5421</td>
+            <td>2025-12-14 04:00</td>
+            <td>1.6064</td>
+            <td>1527.140139</td>
+            <td>2.355,00</td>
+            <td class="positive">98,20</td>
+            <td class="positive">+4.17%</td>
+            <td>Time-based exit (5 bars, optimal=5)</td>
+        </tr>
+        <tr>
+            <td>SOL/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2025-12-10 18:00</td>
+            <td>136,85</td>
+            <td>2025-12-13 12:00</td>
+            <td>133,36</td>
+            <td>17.263676</td>
+            <td>2.362,53</td>
+            <td class="negative">-60,25</td>
+            <td class="negative">-2.55%</td>
+            <td>Trend flip</td>
+        </tr>
+        <tr>
+            <td>ETH/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2025-12-10 14:00</td>
+            <td>3.335,01</td>
+            <td>2025-12-11 01:00</td>
+            <td>3.274,93</td>
+            <td>0.710003</td>
+            <td>2.367,87</td>
+            <td class="negative">-42,66</td>
+            <td class="negative">-1.80%</td>
+            <td>ATR stop x2.00</td>
+        </tr>
+        <tr>
+            <td>TAO/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2025-12-09 06:00</td>
+            <td>289,40</td>
+            <td>2025-12-11 18:00</td>
+            <td>287,20</td>
+            <td>8.189768</td>
+            <td>2.370,12</td>
+            <td class="negative">-18,02</td>
+            <td class="negative">-0.76%</td>
+            <td>Time-based exit (5 bars, optimal=5)</td>
+        </tr>
+        <tr>
+            <td>LUNC/USDT</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2025-12-08 13:00</td>
+            <td>0.00004934</td>
+            <td>2025-12-10 13:00</td>
+            <td>0.00006336</td>
+            <td>46388780.790447</td>
+            <td>2.288,82</td>
+            <td class="positive">650,37</td>
+            <td class="positive">+28.42%</td>
+            <td>Time-based exit (4 bars, optimal=4)</td>
+        </tr>
+        <tr>
+            <td>ICP/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2025-12-08 02:00</td>
+            <td>3.4510</td>
+            <td>2025-12-10 14:00</td>
+            <td>3.5230</td>
+            <td>652.745733</td>
+            <td>2.252,63</td>
+            <td class="positive">47,00</td>
+            <td class="positive">+2.09%</td>
+            <td>Time-based exit (5 bars, optimal=5)</td>
+        </tr>
+        <tr>
+            <td>XRP/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2025-12-08 02:00</td>
+            <td>2.0682</td>
+            <td>2025-12-10 14:00</td>
+            <td>2.0652</td>
+            <td>1092.012492</td>
+            <td>2.258,50</td>
+            <td class="negative">-3,28</td>
+            <td class="negative">-0.15%</td>
+            <td>Time-based exit (5 bars, optimal=5)</td>
+        </tr>
+        <tr>
+            <td>ETH/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2025-12-08 02:00</td>
+            <td>3.098,92</td>
+            <td>2025-12-10 14:00</td>
+            <td>3.335,01</td>
+            <td>0.728670</td>
+            <td>2.258,09</td>
+            <td class="positive">172,03</td>
+            <td class="positive">+7.62%</td>
+            <td>Time-based exit (5 bars, optimal=5)</td>
+        </tr>
+        <tr>
+            <td>SOL/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2025-12-08 02:00</td>
+            <td>133,40</td>
+            <td>2025-12-10 14:00</td>
+            <td>137,72</td>
+            <td>17.088416</td>
+            <td>2.279,59</td>
+            <td class="positive">73,82</td>
+            <td class="positive">+3.24%</td>
+            <td>Time-based exit (5 bars, optimal=5)</td>
+        </tr>
+        <tr>
+            <td>SUI/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2025-12-07 13:00</td>
+            <td>1.5917</td>
+            <td>2025-12-10 01:00</td>
+            <td>1.6463</td>
+            <td>1409.190049</td>
+            <td>2.243,01</td>
+            <td class="positive">76,94</td>
+            <td class="positive">+3.43%</td>
+            <td>Time-based exit (5 bars, optimal=5)</td>
+        </tr>
+        <tr>
+            <td>TAO/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2025-12-06 15:00</td>
+            <td>279,20</td>
+            <td>2025-12-09 03:00</td>
+            <td>289,20</td>
+            <td>7.997888</td>
+            <td>2.233,01</td>
+            <td class="positive">79,98</td>
+            <td class="positive">+3.58%</td>
+            <td>Time-based exit (5 bars, optimal=5)</td>
+        </tr>
+        <tr>
+            <td>LUNC/USDT</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2025-12-06 01:00</td>
+            <td>0.00005896</td>
+            <td>2025-12-08 04:00</td>
+            <td>0.00005141</td>
+            <td>38571253.848100</td>
+            <td>2.274,16</td>
+            <td class="negative">-291,21</td>
+            <td class="negative">-12.81%</td>
+            <td>Trend flip</td>
+        </tr>
+        <tr>
+            <td>TNSR/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2025-12-06 01:00</td>
+            <td>0.117800</td>
+            <td>2025-12-07 01:00</td>
+            <td>0.115800</td>
+            <td>18996.260663</td>
+            <td>2.237,76</td>
+            <td class="negative">-37,99</td>
+            <td class="negative">-1.70%</td>
+            <td>Trend flip</td>
+        </tr>
+        <tr>
+            <td>LUNC/USDT</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2025-12-03 16:00</td>
+            <td>0.00002804</td>
+            <td>2025-12-05 16:00</td>
+            <td>0.00005042</td>
+            <td>73746611.329841</td>
+            <td>2.067,85</td>
+            <td class="positive">1.650,45</td>
+            <td class="positive">+79.81%</td>
+            <td>Time-based exit (4 bars, optimal=4)</td>
+        </tr>
+        <tr>
+            <td>TNSR/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2025-12-03 04:00</td>
+            <td>0.125500</td>
+            <td>2025-12-04 04:00</td>
+            <td>0.120400</td>
+            <td>16561.057016</td>
+            <td>2.078,41</td>
+            <td class="negative">-84,46</td>
+            <td class="negative">-4.06%</td>
+            <td>Trend flip</td>
+        </tr>
+        <tr>
+            <td>TAO/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2025-12-03 03:00</td>
+            <td>279,30</td>
+            <td>2025-12-05 15:00</td>
+            <td>280,10</td>
+            <td>7.438843</td>
+            <td>2.077,67</td>
+            <td class="positive">5,95</td>
+            <td class="positive">+0.29%</td>
+            <td>Time-based exit (5 bars, optimal=5)</td>
+        </tr>
+        <tr>
+            <td>XRP/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2025-12-03 02:00</td>
+            <td>2.1617</td>
+            <td>2025-12-05 17:00</td>
+            <td>2.0344</td>
+            <td>968.254672</td>
+            <td>2.093,08</td>
+            <td class="negative">-123,26</td>
+            <td class="negative">-5.89%</td>
+            <td>Trend flip</td>
+        </tr>
+        <tr>
+            <td>ETH/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2025-12-02 23:00</td>
+            <td>3.018,79</td>
+            <td>2025-12-05 11:00</td>
+            <td>3.136,14</td>
+            <td>0.692354</td>
+            <td>2.090,07</td>
+            <td class="positive">81,25</td>
+            <td class="positive">+3.89%</td>
+            <td>Time-based exit (5 bars, optimal=5)</td>
+        </tr>
+        <tr>
+            <td>SOL/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2025-12-02 23:00</td>
+            <td>139,98</td>
+            <td>2025-12-05 12:00</td>
+            <td>137,05</td>
+            <td>15.003767</td>
+            <td>2.100,23</td>
+            <td class="negative">-43,96</td>
+            <td class="negative">-2.09%</td>
+            <td>Trend flip</td>
+        </tr>
+        <tr>
+            <td>SUI/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2025-12-02 23:00</td>
+            <td>1.6443</td>
+            <td>2025-12-05 11:00</td>
+            <td>1.6339</td>
+            <td>1273.935559</td>
+            <td>2.094,73</td>
+            <td class="negative">-13,25</td>
+            <td class="negative">-0.63%</td>
+            <td>Time-based exit (5 bars, optimal=5)</td>
+        </tr>
+        <tr>
+            <td>ICP/USDC</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2025-12-02 14:00</td>
+            <td>3.6590</td>
+            <td>2025-12-05 02:00</td>
+            <td>3.6500</td>
+            <td>571.389509</td>
+            <td>2.090,71</td>
+            <td class="negative">-5,14</td>
+            <td class="negative">-0.25%</td>
+            <td>Time-based exit (5 bars, optimal=5)</td>
+        </tr>
+        <tr>
+            <td>LUNC/USDT</td>
+            <td>jma</td>
+            <td>12h</td>
+            <td>2025-12-01 13:00</td>
+            <td>0.00002522</td>
+            <td>2025-12-03 13:00</td>
+            <td>0.00002798</td>
+            <td>81780333.068993</td>
+            <td>2.062,50</td>
+            <td class="positive">225,71</td>
+            <td class="positive">+10.94%</td>
+            <td>Time-based exit (4 bars, optimal=4)</td>
+        </tr>
+    </table>
+    </div>
+
+    <p class="timestamp">Generated: 2026-02-15 09:18:19</p>
+</div>
+</body>
+</html>

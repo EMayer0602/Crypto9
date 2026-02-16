@@ -25,3 +25,4 @@ ENV/
 .DS_Store
 Thumbs.db
 report_testnet/
+sweep_output.log

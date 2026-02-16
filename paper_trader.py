@@ -78,7 +78,7 @@ SIMULATION_OPEN_POSITIONS_JSON = "paper_trading_actual_trades.json"
 # Default paths - will be overridden by get_report_dir() for testnet
 REPORT_DIR = "report_html"
 SIMULATION_SUMMARY_HTML = os.path.join("report_html", "trading_summary.html")
-SIMULATION_SUMMARY_JSON = os.path.join("report_html", "trading_summary.json")
+SIMULATION_SUMMARY_JSON = os.path.join("report_html", "trading_summary_bck.json")
 
 
 def get_report_dir(use_testnet: bool = False) -> str:
@@ -102,6 +102,21 @@ DEFAULT_SPIKE_INTERVAL_MIN = 5
 DEFAULT_ATR_SPIKE_MULT = 2.5
 DEFAULT_POLL_SECONDS = 30
 TESTNET_DEFAULT_STAKE = 2000.0
+_TESTNET_ACTIVE = False  # Track if testnet mode is active for dashboard updates
+_DASHBOARD_START = None  # Dashboard start date for filtering trades (datetime object)
+
+
+def set_dashboard_start(start_date) -> None:
+    """Set dashboard start date for filtering trades."""
+    global _DASHBOARD_START
+    _DASHBOARD_START = start_date
+
+
+def get_dashboard_start_str() -> str:
+    """Get dashboard start date as YYYY-MM-DD string for generate_dashboard()."""
+    if _DASHBOARD_START is None:
+        return "2025-12-01"
+    return _DASHBOARD_START.strftime("%Y-%m-%d")
 
 
 def set_max_open_positions(value: int) -> None:
@@ -184,6 +199,7 @@ class Position:
     param_b: float
     atr_mult: Optional[float]
     min_hold_bars: int
+    max_hold_bars: int
     entry_price: float
     entry_time: str
     entry_atr: float
@@ -201,6 +217,7 @@ class StrategyContext:
     param_b: float
     atr_mult: Optional[float]
     min_hold_bars: int
+    max_hold_bars: int = 0
 
     @property
     def key(self) -> str:
@@ -801,8 +818,8 @@ def build_strategy_context(row: pd.Series) -> StrategyContext:
     htf_value = str(row.get("HTF", st.HIGHER_TIMEFRAME) or st.HIGHER_TIMEFRAME).strip()
     param_a, param_b = normalize_params(row, indicator_key)
     atr_mult = parse_float(row.get("ATRStopMultValue", row.get("ATRStopMult")))
-    min_hold_days = int(parse_float(row.get("MinHoldDays")) or 0)
-    min_hold_bars = int(min_hold_days * st.BARS_PER_DAY)
+    min_hold_bars = int(parse_float(row.get("MinHoldBars")) or 0)
+    max_hold_bars = int(parse_float(row.get("MaxHoldBars")) or 0)
     return StrategyContext(
         symbol=symbol,
         direction=direction,
@@ -812,6 +829,7 @@ def build_strategy_context(row: pd.Series) -> StrategyContext:
         param_b=param_b,
         atr_mult=atr_mult,
         min_hold_bars=min_hold_bars,
+        max_hold_bars=max_hold_bars,
     )
 
 
@@ -1184,7 +1202,7 @@ def find_last_signal_bar(df: pd.DataFrame, direction: str, lookback_hours: float
     return ts, price, ts >= cutoff
 
 
-def evaluate_exit(position: Dict, df: pd.DataFrame, atr_mult: Optional[float], min_hold_bars: int) -> Optional[Dict]:
+def evaluate_exit(position: Dict, df: pd.DataFrame, atr_mult: Optional[float], min_hold_bars: int, max_hold_bars: int = 0) -> Optional[Dict]:
     if len(df) < 2:
         return None
     curr = df.iloc[-1]
@@ -1209,6 +1227,11 @@ def evaluate_exit(position: Dict, df: pd.DataFrame, atr_mult: Optional[float], m
         if hit_stop:
             exit_price = stop_price
             reason = f"ATR stop x{atr_mult:.2f}"
+
+    # MaxHoldBars: Force-close after N bars regardless of profit/loss
+    if max_hold_bars > 0 and exit_price is None and bars_held >= max_hold_bars:
+        exit_price = float(curr["close"])
+        reason = f"Max hold exit ({bars_held}/{max_hold_bars} bars)"
 
     # Time-based exit: Exit after optimal hold time based on peak profit analysis
     # Analysis showed peak profit occurs at ~65% of trade duration on average
@@ -1300,7 +1323,7 @@ def process_snapshot(
     existing = find_position(state, context.key)
     if existing:
         prior_total = state["total_capital"]
-        exit_info = evaluate_exit(existing, df_slice, context.atr_mult, context.min_hold_bars)
+        exit_info = evaluate_exit(existing, df_slice, context.atr_mult, context.min_hold_bars, context.max_hold_bars)
         if exit_info:
             size_units = float(existing.get("size_units", 0.0))
             stake_val = float(existing.get("stake"))
@@ -1360,6 +1383,16 @@ def process_snapshot(
     if existing is not None:
         return trades
 
+    # Phase blocking: skip entry if symbol+phase is in BLOCKED_SYMBOL_PHASES
+    if st.BLOCKED_SYMBOL_PHASES:
+        blocked_phases = st.BLOCKED_SYMBOL_PHASES.get(context.symbol, [])
+        if blocked_phases and "htf_trend" in df_slice.columns:
+            htf_val = int(df_slice.iloc[-1].get("htf_trend", 0))
+            current_phase = "Up" if htf_val >= 1 else ("Down" if htf_val <= -1 else "Flat")
+            if current_phase in blocked_phases:
+                _signal_log(f"{context.symbol} {context.direction} blocked: phase {current_phase} is blocked for this symbol")
+                return trades
+
     entry_allowed, entry_reason = evaluate_entry(df_slice, context.direction)
 
     # Debug: Count entry attempts for BTC/ETH
@@ -1394,6 +1427,7 @@ def process_snapshot(
         param_b=context.param_b,
         atr_mult=context.atr_mult,
         min_hold_bars=context.min_hold_bars,
+        max_hold_bars=context.max_hold_bars,
         entry_price=entry_price,
         entry_time=latest_iso,
         entry_atr=float(df_slice.iloc[-1].get("atr", 0.0)),
@@ -1506,6 +1540,7 @@ def _context_from_position(pos: Dict) -> StrategyContext:
     if param_b_val is None:
         param_b_val = float(st.DEFAULT_PARAM_B)
     min_hold_bars = int(pos.get("min_hold_bars", 0) or 0)
+    max_hold_bars = int(pos.get("max_hold_bars", 0) or 0)
     return StrategyContext(
         symbol=str(pos.get("symbol", "")).strip(),
         direction=str(pos.get("direction", "long")).strip().lower() or "long",
@@ -1515,7 +1550,23 @@ def _context_from_position(pos: Dict) -> StrategyContext:
         param_b=float(param_b_val),
         atr_mult=parse_float(pos.get("atr_mult")),
         min_hold_bars=min_hold_bars,
+        max_hold_bars=max_hold_bars,
     )
+
+
+def _lookup_phase(phases: pd.Series, ts) -> str:
+    """Look up market phase at a given timestamp using forward-fill."""
+    if phases is None or phases.empty:
+        return "Flat"
+    try:
+        if ts in phases.index:
+            return str(phases.loc[ts])
+        idx = phases.index.get_indexer([ts], method="ffill")[0]
+        if idx >= 0:
+            return str(phases.iloc[idx])
+    except Exception:
+        pass
+    return "Flat"
 
 
 def enrich_open_positions(positions: List[Dict]) -> pd.DataFrame:
@@ -1523,6 +1574,7 @@ def enrich_open_positions(positions: List[Dict]) -> pd.DataFrame:
         return pd.DataFrame()
     enriched = []
     df_cache: Dict[Tuple[str, str, str, float, float], pd.DataFrame] = {}
+    phase_cache: Dict[Tuple[str, str, str, float, float], pd.Series] = {}
     ticker_cache: Dict[str, float] = {}
     now_ts = pd.Timestamp.now(tz=st.BERLIN_TZ)
     for pos in positions:
@@ -1541,6 +1593,19 @@ def enrich_open_positions(positions: List[Dict]) -> pd.DataFrame:
                 print(f"[OpenPositions] Datenabruf für {cache_key} fehlgeschlagen: {exc}")
                 df_cache[cache_key] = pd.DataFrame()
         df = df_cache[cache_key]
+
+        # Phase classification (cached per indicator/htf combo)
+        if cache_key not in phase_cache:
+            try:
+                if not df.empty:
+                    phase_cache[cache_key] = st.classify_market_phases(df, context.symbol)
+                else:
+                    phase_cache[cache_key] = pd.Series(dtype=str)
+            except Exception as exc:
+                print(f"[OpenPositions] Phase-Klassifikation für {cache_key} fehlgeschlagen: {exc}")
+                phase_cache[cache_key] = pd.Series(dtype=str)
+        phases = phase_cache[cache_key]
+
         latest_price = None
         latest_ts = now_ts
         if not df.empty:
@@ -1572,6 +1637,21 @@ def enrich_open_positions(positions: List[Dict]) -> pd.DataFrame:
         status = "Gewinn" if unrealized_pnl > 0 else "Verlust" if unrealized_pnl < 0 else "Flat"
         entry_time = pos.get("entry_time")
         bars_held = bars_in_position(entry_time, latest_ts) if entry_time else 0
+
+        # Phase lookup: entry phase + current phase
+        entry_phase = "Flat"
+        current_phase = "Flat"
+        if not phases.empty:
+            if entry_time:
+                try:
+                    entry_ts = pd.Timestamp(entry_time)
+                    if entry_ts.tzinfo is None:
+                        entry_ts = entry_ts.tz_localize(st.BERLIN_TZ)
+                    entry_phase = _lookup_phase(phases, entry_ts)
+                except Exception:
+                    pass
+            current_phase = str(phases.iloc[-1]) if len(phases) > 0 else "Flat"
+
         enriched.append({
             "symbol": context.symbol,
             "direction": context.direction,
@@ -1589,6 +1669,8 @@ def enrich_open_positions(positions: List[Dict]) -> pd.DataFrame:
             "unrealized_pct": unrealized_pct * 100.0,
             "unrealized_pnl": unrealized_pnl,
             "status": status,
+            "entry_phase": entry_phase,
+            "current_phase": current_phase,
         })
     return pd.DataFrame(enriched)
 
@@ -1762,6 +1844,68 @@ def build_summary_payload(
     # Per-symbol statistics
     symbol_stats = calc_symbol_stats(trades_df)
 
+    # Convert trades DataFrame to list of dicts for JSON/HTML export
+    # Apply compound growth recalculation
+    trades_list = []
+    if not trades_df.empty:
+        trades_export = trades_df.copy()
+        if "entry_time" in trades_export.columns:
+            trades_export = trades_export.sort_values("entry_time", ascending=True)
+
+        capital = float(START_TOTAL_CAPITAL)
+        max_positions = MAX_OPEN_POSITIONS
+
+        entry_prices = trades_export["entry_price"].fillna(0).astype(float)
+        exit_prices = trades_export["exit_price"].fillna(0).astype(float)
+        directions = trades_export["direction"].fillna("long").astype(str).str.lower()
+
+        pnl_pct = np.where(
+            entry_prices > 0,
+            np.where(
+                directions == "long",
+                (exit_prices - entry_prices) / entry_prices,
+                (entry_prices - exit_prices) / entry_prices
+            ),
+            0.0
+        )
+
+        n = len(trades_export)
+        new_stakes = np.zeros(n)
+        new_pnls = np.zeros(n)
+
+        for i in range(n):
+            stake = capital / max_positions
+            pnl = pnl_pct[i] * stake
+            new_stakes[i] = stake
+            new_pnls[i] = pnl
+            capital += pnl
+
+        trades_export["stake"] = new_stakes
+        trades_export["pnl"] = new_pnls
+
+        if "entry_time" in trades_export.columns:
+            trades_export = trades_export.sort_values("entry_time", ascending=False)
+
+        for col in trades_export.columns:
+            if pd.api.types.is_datetime64_any_dtype(trades_export[col]):
+                trades_export[col] = trades_export[col].apply(
+                    lambda x: x.isoformat() if pd.notna(x) else None
+                )
+        trades_list = trades_export.to_dict(orient="records")
+
+    # Convert open positions DataFrame to list of dicts
+    open_positions_list = []
+    if not open_positions_df.empty:
+        positions_export = open_positions_df.copy()
+        if "entry_time" in positions_export.columns:
+            positions_export = positions_export.sort_values("entry_time", ascending=False)
+        for col in positions_export.columns:
+            if pd.api.types.is_datetime64_any_dtype(positions_export[col]):
+                positions_export[col] = positions_export[col].apply(
+                    lambda x: x.isoformat() if pd.notna(x) else None
+                )
+        open_positions_list = positions_export.to_dict(orient="records")
+
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "start": start_ts.isoformat(),
@@ -1780,193 +1924,275 @@ def build_summary_payload(
         **long_open_stats,
         **short_open_stats,
         "symbol_stats": symbol_stats,
+        "trades": trades_list,
+        "open_positions_data": open_positions_list,
     }
 
 
-def generate_summary_html(
-    summary: Dict[str, Any],
-    trades_df: pd.DataFrame,
-    open_positions_df: pd.DataFrame,
-    path: str,
-) -> None:
-    html_parts = [
-        "<html><head><meta charset='utf-8'>",
-        "<title>Paper Trading Simulation Summary</title>",
-        "<style>body{font-family:Arial,sans-serif;margin:20px;}table{border-collapse:collapse;margin-top:12px;width:auto;}th,td{border:1px solid #ccc;padding:6px 10px;text-align:right;}th{text-align:center;background:#f0f0f0;font-weight:bold;}td:first-child{text-align:left;}h1{margin-bottom:10px;}h2{margin-top:30px;margin-bottom:10px;}.stats-container{display:flex;gap:20px;flex-wrap:wrap;}</style>",
-        "</head><body>",
-        f"<h1>Simulation Summary {summary['start']} → {summary['end']}</h1>",
+def load_from_summary_json(path: str = None) -> tuple:
+    """Load trades and open positions from trading_summary_bck.json.
 
-        # Combined Statistics Table (Overall + Long + Short)
+    Returns:
+        (trades_list, open_positions_list) - both as list of dicts
+    """
+    if path is None:
+        path = os.path.join(get_report_dir(), "trading_summary_bck.json")
+
+    if not os.path.exists(path):
+        return [], []
+
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        trades = data.get("trades", [])
+        open_positions = data.get("open_positions_data", [])
+        return trades, open_positions
+    except Exception as e:
+        print(f"[JSON] Error loading {path}: {e}")
+        return [], []
+
+
+def merge_trades(existing_trades: list, new_trades: list) -> list:
+    """Merge new trades into existing trades, avoiding duplicates.
+
+    Duplicate detection: same symbol + entry_time + exit_time.
+    Existing closed trades are NEVER modified.
+    """
+    existing_keys = set()
+    for t in existing_trades:
+        key = (t.get("symbol", ""), t.get("entry_time", ""), t.get("exit_time", ""))
+        existing_keys.add(key)
+
+    merged = list(existing_trades)
+    added = 0
+    for t in new_trades:
+        key = (t.get("symbol", ""), t.get("entry_time", ""), t.get("exit_time", ""))
+        if key not in existing_keys:
+            merged.append(t)
+            existing_keys.add(key)
+            added += 1
+
+    if added > 0:
+        print(f"[JSON] Merged {added} new trades (total: {len(merged)})")
+
+    return merged
+
+
+def write_summary_json(summary: Dict[str, Any], path: str, summary_start: str = "2024-01-31") -> None:
+    import re as _re
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(summary, fh, ensure_ascii=False, indent=2)
+
+    # Post-process to replace scientific notation with decimal format
+    # This ensures LUNC prices like 3.749e-05 become 0.00003749
+    with open(path, "r", encoding="utf-8") as fh:
+        content = fh.read()
+
+    def replace_scientific(match):
+        try:
+            value = float(match.group(0))
+            formatted = format(value, '.10f').rstrip('0').rstrip('.')
+            return formatted
+        except (ValueError, OverflowError):
+            return match.group(0)
+
+    content = _re.sub(r'-?\d+\.?\d*[eE][+-]?\d+', replace_scientific, content)
+
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(content)
+
+    print(f"[Simulation] Summary JSON saved to {path}")
+
+    # Also generate trading_summary.html
+    html_path = path.replace(".json", ".html")
+    write_summary_html(summary, html_path, summary_start=summary_start)
+
+
+def write_summary_html(summary: Dict[str, Any], path: str, summary_start: str = "2024-01-31") -> None:
+    """Generate trading_summary.html from summary data."""
+    trades = summary.get("trades", [])
+    open_positions_raw = summary.get("open_positions_data", [])
+
+    # Filter trades by summary_start date and recalculate compound growth from START_TOTAL_CAPITAL
+    if summary_start:
+        trades = [dict(t) for t in trades if (t.get("entry_time", "") or "")[:10] >= summary_start]
+        trades_asc = sorted(trades, key=lambda t: t.get("entry_time", "") or "")
+        capital = float(START_TOTAL_CAPITAL)
+        for t in trades_asc:
+            entry_price = float(t.get("entry_price", 0) or 0)
+            exit_price = float(t.get("exit_price", 0) or 0)
+            direction = str(t.get("direction", "long")).lower()
+            stake = capital / MAX_OPEN_POSITIONS
+            if entry_price > 0:
+                if direction == "long":
+                    pnl_pct = (exit_price - entry_price) / entry_price
+                else:
+                    pnl_pct = (entry_price - exit_price) / entry_price
+                pnl = pnl_pct * stake
+            else:
+                pnl = 0.0
+            t["stake"] = stake
+            t["pnl"] = pnl
+            capital += pnl
+        trades = trades_asc
+
+    total_trades = len(trades)
+    open_count = len(open_positions_raw)
+    total_pnl = sum(float(t.get("pnl", 0) or 0) for t in trades)
+    winners = sum(1 for t in trades if float(t.get("pnl", 0) or 0) > 0)
+    losers = sum(1 for t in trades if float(t.get("pnl", 0) or 0) < 0)
+    win_rate = (winners / total_trades * 100) if total_trades > 0 else 0
+
+    # Use compound-recalculated final capital (trades already have compound PnL from build_summary_payload)
+    compound_closed_pnl = sum(float(t.get("pnl", 0) or 0) for t in trades)
+    final_capital = START_TOTAL_CAPITAL + compound_closed_pnl
+    max_positions = MAX_OPEN_POSITIONS
+    dynamic_stake = final_capital / max_positions
+
+    # Recalculate open positions with dynamic stake
+    open_positions = []
+    for p in open_positions_raw:
+        entry_price = float(p.get("entry_price", 0) or 0)
+        last_price = float(p.get("last_price", 0) or 0)
+        direction = str(p.get("direction", "long")).lower()
+        stake = dynamic_stake
+
+        if entry_price > 0 and stake > 0:
+            if direction == "long":
+                pnl_pct = (last_price - entry_price) / entry_price
+            else:
+                pnl_pct = (entry_price - last_price) / entry_price
+            unrealized_pnl = pnl_pct * stake
+        else:
+            pnl_pct = 0
+            unrealized_pnl = 0
+
+        recalc_pos = dict(p)
+        recalc_pos["stake"] = stake
+        recalc_pos["unrealized_pnl"] = unrealized_pnl
+        recalc_pos["unrealized_pct"] = pnl_pct * 100
+        open_positions.append(recalc_pos)
+
+    # Sort newest first, limit to MAX_OPEN_POSITIONS
+    open_positions = sorted(open_positions, key=lambda p: p.get("entry_time", "") or "", reverse=True)
+    if len(open_positions) > max_positions:
+        open_positions = open_positions[:max_positions]
+    open_count = len(open_positions)
+    open_pnl = sum(float(p.get("unrealized_pnl", 0) or 0) for p in open_positions)
+
+    def fmt(val):
+        """Format number with German locale."""
+        if val is None or val == "NaN":
+            return "-"
+        try:
+            return f"{float(val):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        except (ValueError, TypeError):
+            return str(val)
+
+    def fmt_pct(val):
+        if val is None or val == "NaN":
+            return "-"
+        try:
+            return f"{float(val):+.2f}%"
+        except (ValueError, TypeError):
+            return str(val)
+
+    def fmt_price(price):
+        """Format price with appropriate decimals - avoids scientific notation."""
+        if price is None or price == "NaN":
+            return "-"
+        try:
+            p = float(price)
+            if p < 0.0001:
+                return f"{p:.8f}"
+            elif p < 1:
+                return f"{p:.6f}"
+            elif p < 100:
+                return f"{p:.4f}"
+            else:
+                return fmt(p)
+        except (ValueError, TypeError):
+            return str(price)
+
+    def pnl_class(val):
+        try:
+            return "pos" if float(val) >= 0 else "neg"
+        except (ValueError, TypeError):
+            return ""
+
+    def status_text(val):
+        try:
+            return "Gewinn" if float(val) >= 0 else "Verlust"
+        except (ValueError, TypeError):
+            return ""
+
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    html_parts = [
+        "<html><head><meta charset='utf-8'><meta http-equiv='refresh' content='60'><title>Trading Summary</title>",
+        "<style>body{font-family:Arial;margin:20px}table{border-collapse:collapse;margin:12px 0}",
+        "th,td{border:1px solid #ccc;padding:6px 10px;text-align:right}th{background:#f0f0f0}",
+        "td:first-child{text-align:left}.pos{color:green}.neg{color:red}.source-note{color:#666;font-style:italic;margin-bottom:20px}</style></head><body>",
+        "<h1>Trading Summary</h1>",
+        f"<p class='source-note'>Updated: {timestamp}</p>",
         "<h2>Statistics</h2>",
-        "<table>",
-        "<tr><th>Metric</th><th>Overall</th><th>Long</th><th>Short</th></tr>",
-        f"<tr><td>Closed trades</td><td>{summary['closed_trades']}</td><td>{summary.get('long_trades', 0)}</td><td>{summary.get('short_trades', 0)}</td></tr>",
-        f"<tr><td>Open positions</td><td>{summary['open_positions']}</td><td>{summary.get('long_open', 0)}</td><td>{summary.get('short_open', 0)}</td></tr>",
-        f"<tr><td>PnL (USDT)</td><td>{summary['closed_pnl']:.2f}</td><td>{summary.get('long_pnl', 0):.2f}</td><td>{summary.get('short_pnl', 0):.2f}</td></tr>",
-        f"<tr><td>Avg PnL (USDT)</td><td>{summary['avg_trade_pnl']:.2f}</td><td>{summary.get('long_avg_pnl', 0):.2f}</td><td>{summary.get('short_avg_pnl', 0):.2f}</td></tr>",
-        f"<tr><td>Win rate (%)</td><td>{summary['win_rate_pct']:.2f}</td><td>{summary.get('long_win_rate', 0):.2f}</td><td>{summary.get('short_win_rate', 0):.2f}</td></tr>",
-        f"<tr><td>Winners</td><td>{summary['winners']}</td><td>{summary.get('long_winners', 0)}</td><td>{summary.get('short_winners', 0)}</td></tr>",
-        f"<tr><td>Losers</td><td>{summary['losers']}</td><td>{summary.get('long_losers', 0)}</td><td>{summary.get('short_losers', 0)}</td></tr>",
-        f"<tr><td>Open equity (USDT)</td><td>{summary['open_equity']:.2f}</td><td>{summary.get('long_open_equity', 0):.2f}</td><td>{summary.get('short_open_equity', 0):.2f}</td></tr>",
-        f"<tr style='font-weight:bold;'><td>Final capital (USDT)</td><td>{summary['final_capital']:.2f}</td><td>-</td><td>-</td></tr>",
+        "<table><tr><th>Metric</th><th>Value</th></tr>",
+        f"<tr><td>Closed trades</td><td>{total_trades}</td></tr>",
+        f"<tr><td>Open positions (max {max_positions})</td><td>{open_count}</td></tr>",
+        f"<tr><td>Total PnL (closed)</td><td class=\"{pnl_class(total_pnl)}\">{fmt(total_pnl)} USDT</td></tr>",
+        f"<tr><td>Open PnL (unrealized)</td><td class=\"{pnl_class(open_pnl)}\">{fmt(open_pnl)} USDT</td></tr>",
+        f"<tr><td>Winners</td><td>{winners}</td></tr>",
+        f"<tr><td>Losers</td><td>{losers}</td></tr>",
+        f"<tr><td>Win Rate</td><td>{win_rate:.1f}%</td></tr>",
         "</table>",
     ]
 
-    # Per-Symbol Statistics Table
-    symbol_stats = summary.get("symbol_stats", [])
-    if symbol_stats:
-        html_parts.append("<h2>Statistics by Symbol</h2>")
-        html_parts.append("<table>")
-        html_parts.append("<tr><th>Symbol</th><th>Trades</th><th>Win</th><th>Loss</th><th>Win%</th><th>Total PnL</th><th>Avg PnL</th><th>Best</th><th>Worst</th><th>Max DD</th><th>PF</th><th>Long</th><th>Short</th><th>Long PnL</th><th>Short PnL</th></tr>")
-        for ss in symbol_stats:
-            pnl_color = "green" if ss["total_pnl"] >= 0 else "red"
-            html_parts.append(
-                f"<tr>"
-                f"<td>{ss['symbol']}</td>"
-                f"<td>{ss['trades']}</td>"
-                f"<td>{ss['winners']}</td>"
-                f"<td>{ss['losers']}</td>"
-                f"<td>{ss['win_rate']:.1f}%</td>"
-                f"<td style='color:{pnl_color}'>{ss['total_pnl']:.2f}</td>"
-                f"<td>{ss['avg_pnl']:.2f}</td>"
-                f"<td style='color:green'>{ss['best_trade']:.2f}</td>"
-                f"<td style='color:red'>{ss['worst_trade']:.2f}</td>"
-                f"<td style='color:orange'>{ss['max_drawdown']:.2f}</td>"
-                f"<td>{ss['profit_factor']}</td>"
-                f"<td>{ss['long_trades']}</td>"
-                f"<td>{ss['short_trades']}</td>"
-                f"<td>{ss['long_pnl']:.2f}</td>"
-                f"<td>{ss['short_pnl']:.2f}</td>"
-                f"</tr>"
-            )
-        html_parts.append("</table>")
+    # Open Positions
+    html_parts.append(f"<h2>Open Positions ({open_count}, max {max_positions}, Equity: <span class=\"{pnl_class(open_pnl)}\">{fmt(open_pnl)}</span>)</h2>")
+    html_parts.append("<table><tr><th>Symbol</th><th>Direction</th><th>Indicator</th><th>HTF</th><th>Entry Time</th><th>Entry Price</th><th>Last Price</th><th>Stake</th><th>Amount</th><th>Bars</th><th>PnL %</th><th>PnL</th><th>Status</th></tr>")
+    for pos in open_positions:
+        symbol = pos.get("symbol", "")
+        direction = pos.get("direction", "")
+        indicator = pos.get("indicator", "")
+        htf = pos.get("htf", "")
+        entry_time = pos.get("entry_time", "")[:16] if pos.get("entry_time") else ""
+        entry_price_val = float(pos.get("entry_price", 0) or 0)
+        last_price_val = float(pos.get("last_price", 0) or 0)
+        stake_val = float(pos.get("stake", 0) or 0)
+        amount = stake_val / entry_price_val if entry_price_val > 0 else 0
+        bars_held = pos.get("bars_held", "")
+        unrealized_pct = float(pos.get("unrealized_pct", 0) or 0)
+        unrealized_pnl = float(pos.get("unrealized_pnl", 0) or 0)
+        status = status_text(unrealized_pnl)
+        html_parts.append(f"<tr><td>{symbol}</td><td>{direction}</td><td>{indicator}</td><td>{htf}</td><td>{entry_time}</td><td>{fmt_price(entry_price_val)}</td><td>{fmt_price(last_price_val) if last_price_val else '-'}</td><td>{fmt(stake_val)}</td><td>{fmt(amount)}</td><td>{bars_held}</td><td class='{pnl_class(unrealized_pct)}'>{fmt_pct(unrealized_pct)}</td><td class='{pnl_class(unrealized_pnl)}'>{fmt(unrealized_pnl)}</td><td class='{pnl_class(unrealized_pnl)}'>{status}</td></tr>")
+    html_parts.append("</table>")
 
-    if not trades_df.empty:
-        full_cols = [c for c in [
-            "symbol","direction","indicator","htf","entry_time","entry_price","exit_time","exit_price","stake","pnl","reason"
-        ] if c in trades_df.columns]
+    # Closed Trades
+    html_parts.append(f"<h2>Closed Trades ({total_trades}, PnL: <span class=\"{pnl_class(total_pnl)}\">{fmt(total_pnl)}</span>)</h2>")
+    html_parts.append("<table><tr><th>Symbol</th><th>Direction</th><th>Indicator</th><th>HTF</th><th>Entry Time</th><th>Entry Price</th><th>Exit Time</th><th>Exit Price</th><th>Stake</th><th>Amount</th><th>PnL</th><th>%</th><th>Reason</th></tr>")
+    sorted_trades = sorted(trades, key=lambda t: t.get("entry_time", "") or "", reverse=True)
+    for t in sorted_trades:
+        symbol = t.get("symbol", "")
+        direction = t.get("direction", "")
+        indicator = t.get("indicator", "")
+        htf = t.get("htf", "")
+        entry_time = (t.get("entry_time", "") or "")[:16]
+        entry_price_val = float(t.get("entry_price", 0) or 0)
+        exit_time = (t.get("exit_time", "") or "")[:16]
+        exit_price_val = float(t.get("exit_price", 0) or 0)
+        stake_val = float(t.get("stake", 0) or 0)
+        amount = stake_val / entry_price_val if entry_price_val > 0 else 0
+        pnl = float(t.get("pnl", 0) or 0)
+        pnl_pct = (exit_price_val / entry_price_val - 1) * 100 if entry_price_val > 0 else 0
+        reason = t.get("exit_reason", "") or t.get("reason", "")
+        html_parts.append(f"<tr><td>{symbol}</td><td>{direction}</td><td>{indicator}</td><td>{htf}</td><td>{entry_time}</td><td>{fmt_price(entry_price_val)}</td><td>{exit_time}</td><td>{fmt_price(exit_price_val)}</td><td>{fmt(stake_val)}</td><td>{fmt(amount)}</td><td class='{pnl_class(pnl)}'>{fmt(pnl)}</td><td class='{pnl_class(pnl_pct)}'>{fmt_pct(pnl_pct)}</td><td>{reason}</td></tr>")
 
-        # Prepare display DataFrame - ensure numeric columns are actually numeric
-        trades_display = trades_df[full_cols].copy()
-
-        # Remove rows where essential columns are NaN (filter out empty rows)
-        if "symbol" in trades_display.columns:
-            trades_display = trades_display[trades_display["symbol"].notna()]
-
-        for col in ["entry_price", "exit_price", "stake", "pnl"]:
-            if col in trades_display.columns:
-                trades_display[col] = pd.to_numeric(trades_display[col], errors="coerce")
-
-        # Use formatters parameter to format specific columns during HTML generation
-        # Note: Must use default parameter to avoid closure bug with lambda in loop
-        def make_formatter(precision):
-            return lambda x: f"{x:.{precision}f}" if pd.notna(x) else ""
-
-        formatters = {}
-        for col in ["entry_price", "exit_price", "stake", "pnl"]:
-            if col in trades_display.columns:
-                formatters[col] = make_formatter(8)
-
-        # Separate Long and Short trades
-        if "direction" in trades_display.columns:
-            long_trades = trades_display[trades_display["direction"].str.lower() == "long"].copy()
-            short_trades = trades_display[trades_display["direction"].str.lower() == "short"].copy()
-
-            # Display Long Trades
-            if not long_trades.empty:
-                long_pnl = long_trades["pnl"].sum() if "pnl" in long_trades.columns else 0
-                html_parts.append(f"<h2>Long Trades ({len(long_trades)} trades, PnL: {long_pnl:.2f} USDT)</h2>")
-                html_parts.append(long_trades.to_html(index=False, escape=False, formatters=formatters))
-
-            # Display Short Trades
-            if not short_trades.empty:
-                short_pnl = short_trades["pnl"].sum() if "pnl" in short_trades.columns else 0
-                html_parts.append(f"<h2>Short Trades ({len(short_trades)} trades, PnL: {short_pnl:.2f} USDT)</h2>")
-                html_parts.append(short_trades.to_html(index=False, escape=False, formatters=formatters))
-        else:
-            # Fallback if no direction column
-            html_parts.append("<h2>Complete Closed Trades (with Entry and Exit)</h2>")
-            html_parts.append(trades_display.to_html(index=False, escape=False, formatters=formatters))
-
-    if not open_positions_df.empty:
-        # Prepare display DataFrame - ensure numeric columns are actually numeric
-        open_display = open_positions_df.copy()
-
-        # Remove rows where essential columns are NaN (filter out empty rows)
-        if "symbol" in open_display.columns:
-            open_display = open_display[open_display["symbol"].notna()]
-
-        # Convert all numeric columns to proper types
-        for col in ["entry_price", "stake", "last_price", "unrealized_pnl", "unrealized_pct"]:
-            if col in open_display.columns:
-                open_display[col] = pd.to_numeric(open_display[col], errors="coerce")
-
-        for col in ["param_a", "param_b", "atr_mult"]:
-            if col in open_display.columns:
-                open_display[col] = pd.to_numeric(open_display[col], errors="coerce")
-
-        for col in ["min_hold_bars", "bars_held"]:
-            if col in open_display.columns:
-                open_display[col] = pd.to_numeric(open_display[col], errors="coerce")
-
-        # Use formatters parameter to format specific columns during HTML generation
-        # Note: Must use factory function to avoid closure bug with lambda in loop
-        def make_float_formatter(precision):
-            return lambda x: f"{x:.{precision}f}" if pd.notna(x) else ""
-
-        def make_int_formatter():
-            return lambda x: f"{int(x)}" if pd.notna(x) else "0"
-
-        formatters = {}
-
-        # 8 decimal places for prices and amounts
-        for col in ["entry_price", "stake", "last_price", "unrealized_pnl", "unrealized_pct"]:
-            if col in open_display.columns:
-                formatters[col] = make_float_formatter(8)
-
-        # 2 decimal places for float params
-        for col in ["param_a", "param_b", "atr_mult"]:
-            if col in open_display.columns:
-                formatters[col] = make_float_formatter(2)
-
-        # Integers for counts
-        for col in ["min_hold_bars", "bars_held"]:
-            if col in open_display.columns:
-                formatters[col] = make_int_formatter()
-
-        # Separate Long and Short open positions
-        if "direction" in open_display.columns:
-            long_open = open_display[open_display["direction"].str.lower() == "long"].copy()
-            short_open = open_display[open_display["direction"].str.lower() == "short"].copy()
-
-            # Display Long Open Positions
-            if not long_open.empty:
-                long_equity = compute_net_open_equity(long_open)
-                html_parts.append(f"<h2>Long Open Positions ({len(long_open)} positions, Equity: {long_equity:.2f} USDT)</h2>")
-                html_parts.append(long_open.to_html(index=False, escape=False, formatters=formatters))
-
-            # Display Short Open Positions
-            if not short_open.empty:
-                short_equity = compute_net_open_equity(short_open)
-                html_parts.append(f"<h2>Short Open Positions ({len(short_open)} positions, Equity: {short_equity:.2f} USDT)</h2>")
-                html_parts.append(short_open.to_html(index=False, escape=False, formatters=formatters))
-        else:
-            # Fallback if no direction column
-            html_parts.append("<h2>Open positions</h2>")
-            html_parts.append(open_display.to_html(index=False, escape=False, formatters=formatters))
-
+    html_parts.append("</table>")
     html_parts.append("</body></html>")
 
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as fh:
-        fh.write("".join(html_parts))
-    print(f"[Simulation] Summary HTML saved to {path}")
-
-
-def write_summary_json(summary: Dict[str, Any], path: str) -> None:
-    with open(path, "w", encoding="utf-8") as fh:
-        json.dump(summary, fh, ensure_ascii=False, indent=2)
-    print(f"[Simulation] Summary JSON saved to {path}")
+        fh.write("\n".join(html_parts))
+    print(f"[Summary] HTML saved to {path}")
 
 
 def generate_trade_charts(trades_df: pd.DataFrame, open_positions_df: pd.DataFrame = None, output_dir: str = os.path.join("report_html", "charts")) -> None:
@@ -2166,7 +2392,7 @@ def generate_equity_curve(
         print("[Equity] Missing required columns (exit_time, pnl).")
         return
 
-    df["exit_time"] = pd.to_datetime(df["exit_time"], errors="coerce")
+    df["exit_time"] = pd.to_datetime(df["exit_time"], errors="coerce", utc=True)
     df = df.dropna(subset=["exit_time", "pnl"])
     df = df.sort_values("exit_time").reset_index(drop=True)
 
@@ -2478,9 +2704,8 @@ def write_live_reports(final_state: Dict, closed_trades: List[TradeResult]) -> N
     open_df = open_positions_to_dataframe(open_positions)
     start_ts, end_ts = _derive_summary_window(all_trades_df)
     summary = build_summary_payload(all_trades_df, open_df, final_state, start_ts, end_ts)
-    generate_summary_html(summary, all_trades_df, open_df, SIMULATION_SUMMARY_HTML)
     write_summary_json(summary, SIMULATION_SUMMARY_JSON)
-    
+
     # Generate charts with ALL historical trades + open positions
     if not all_trades_df.empty or not open_df.empty:
         chart_df = all_trades_df.copy() if not all_trades_df.empty else pd.DataFrame()
@@ -2491,11 +2716,23 @@ def write_live_reports(final_state: Dict, closed_trades: List[TradeResult]) -> N
                     subset=["symbol", "entry_time", "exit_time", "exit_price"], keep="last"
                 )
         generate_trade_charts(chart_df, open_df, output_dir=os.path.join(REPORT_DIR, "charts"))
-    
+
     if current_trades_df.empty:
         print(f"[Live] Snapshot updated with no new trades this cycle. Total history: {len(all_trades_df)} trades.")
     else:
         print(f"[Live] Snapshot includes {len(current_trades_df)} new trade(s). Total history: {len(all_trades_df)} trades.")
+
+    # Regenerate dashboards
+    try:
+        from TestnetDashboard import generate_dashboard
+        output_dir = Path(REPORT_DIR)
+        ds_start = get_dashboard_start_str()
+        generate_dashboard(start_date=ds_start, output_dir=output_dir, german=False)
+        generate_dashboard(start_date=ds_start, output_dir=output_dir, german=True)
+        print(f"[Dashboard] Updated (EN + DE) in {REPORT_DIR}")
+    except Exception as e:
+        print(f"[Dashboard] Failed to update: {e}")
+
     return float(summary.get("final_capital", final_state.get("total_capital", 0.0)))
 
 
@@ -2681,6 +2918,7 @@ def force_entry_position(
         param_b=context.param_b,
         atr_mult=context.atr_mult,
         min_hold_bars=context.min_hold_bars,
+        max_hold_bars=context.max_hold_bars,
         entry_price=entry_price,
         entry_time=entry_iso,
         entry_atr=entry_atr_val,
@@ -2815,12 +3053,11 @@ def run_simulation(
                         print(f"[Simulation] {symbol} {timeframe}: Cache starts {earliest.strftime('%Y-%m-%d')}, need {download_start.strftime('%Y-%m-%d')} - downloading...")
                         needs_download = True
 
-                    # Check if cache is outdated (older than 2 hours)
-                    elif latest < now - pd.Timedelta(hours=2):
-                        print(f"[Simulation] {symbol} {timeframe}: Cache outdated (last: {latest.strftime('%Y-%m-%d %H:%M')}), updating to now...")
-                        needs_download = True
+                    # Always update cache at start of each cycle
+                    # (incremental download - only fetches new bars since last cached bar)
                     else:
-                        print(f"[Simulation] {symbol} {timeframe}: {len(cached_df)} bars, {earliest.strftime('%Y-%m-%d')} to {latest.strftime('%Y-%m-%d %H:%M')} ✓")
+                        print(f"[Simulation] {symbol} {timeframe}: Refreshing cache (last: {latest.strftime('%Y-%m-%d %H:%M')})...")
+                        needs_download = True
 
                 if needs_download:
                     st.download_historical_ohlcv(symbol, timeframe, download_start, download_end)
@@ -2993,6 +3230,8 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     )
     parser.add_argument("--testnet", action="store_true", help="Use Binance testnet credentials and endpoints")
     parser.add_argument("--debug-signals", action="store_true", help="Verbose logging for entry filter decisions")
+    parser.add_argument("--sweep", action="store_true", help="Run full parameter sweep (old strategy, all indicators × HTFs × param combos)")
+    parser.add_argument("--phase-sweep", action="store_true", help="Run phase-based parameter sweep (new strategy, separate params per Up/Down/Flat)")
     parser.add_argument("--refresh-params", action="store_true", help="Re-run overall-best parameter export before trading")
     parser.add_argument("--reset-state", action="store_true", help="Delete the saved state before running")
     parser.add_argument(
@@ -3041,6 +3280,12 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         action="store_true",
         help="Use futures data for signal generation (entries/exits from futures, trades on spot prices)",
     )
+    parser.add_argument("--loop", action="store_true",
+        help="Run simulation continuously, refreshing every --signal-interval minutes")
+    parser.add_argument("--dashboard-start", type=str, default="2025-12-01",
+        help="Start date for dashboard filtering (default: 2025-12-01)")
+    parser.add_argument("--summary-start", type=str, default="2024-01-31",
+        help="Start date for summary HTML filtering (default: 2024-01-31)")
     return parser.parse_args(argv)
 
 
@@ -3115,7 +3360,12 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
         if not success:
             print("[Force] Manuelle Order konnte nicht erstellt werden.")
         return
-    if args.monitor:
+    # --simulate --monitor = --simulate --loop
+    if args.simulate and args.monitor:
+        args.loop = True
+        print("[Config] --simulate --monitor detected: running as --simulate --loop")
+
+    if args.monitor and not args.simulate:
         if args.refresh_params:
             st.run_overall_best_params()
         if args.clear_outputs:
@@ -3147,9 +3397,209 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
         order_executor = BinanceOrderExecutor(st.get_exchange())
         configure_exchange_flag = False
 
+    if args.phase_sweep:
+        import time as _time
+        print("=" * 70)
+        print("  PHASE-BASED PARAMETER SWEEP (neue Strategie)")
+        print("  Output: best_params_phase.csv, dashboard_ph1_jma_*.html, trading_summary_ph1_jma_*.html")
+        print("=" * 70)
+        print(f"  Start Equity: {st.START_EQUITY}")
+        print(f"  Phase Stake Divisor: {st.PHASE_STAKE_DIVISOR}")
+        print(f"  Max Hold Bars: {st.MAX_HOLD_BAR_VALUES}")
+        print(f"  Phases: Up / Down / Flat (per indicator per symbol)")
+        print("=" * 70)
+        sweep_start = _time.time()
+        old_sweep = st.RUN_PARAMETER_SWEEP
+        old_overall = st.RUN_OVERALL_BEST
+        old_blocked = dict(st.BLOCKED_SYMBOL_PHASES)
+        st.RUN_PARAMETER_SWEEP = True
+        st.RUN_OVERALL_BEST = False
+        st.SKIP_SYNTHETIC_BARS = True  # Sweep braucht keine Live-Daten
+        st.BLOCKED_SYMBOL_PHASES = {}  # Alle Phasen testen, Blocking wird danach neu bestimmt
+        indicator_candidates = st.get_indicator_candidates()
+        htf_candidates = st.get_highertimeframe_candidates()
+        htf_length_values = st.HTF_LENGTH_VALUES
+        htf_factor_values = st.HTF_FACTOR_VALUES
+        trend_phase_combos = len(htf_length_values) * len(htf_factor_values)
+        total_combos = len(indicator_candidates) * len(htf_candidates) * trend_phase_combos
+        print(f"  Indicators: {indicator_candidates}")
+        print(f"  HTFs: {htf_candidates}")
+        print(f"  Trend-Phase-Parameter: HTF_LENGTH={htf_length_values} x HTF_FACTOR={htf_factor_values} = {trend_phase_combos} Kombis/Paar")
+        print(f"  Total Sweep-Kombinationen: {total_combos}")
+        print("=" * 70)
+        if st.CLEAR_BASE_OUTPUT_ON_SWEEP:
+            st.clear_sweep_targets(indicator_candidates, htf_candidates)
+        combo_num = 0
+        for indicator_name in indicator_candidates:
+            st.apply_indicator_type(indicator_name)
+            for htf_value in htf_candidates:
+                st.apply_higher_timeframe(htf_value)
+                for htf_len in htf_length_values:
+                    for htf_fac in htf_factor_values:
+                        combo_num += 1
+                        st.HTF_LENGTH = htf_len
+                        st.HTF_FACTOR = htf_fac
+                        st.clear_data_cache()
+                        print(f"\n[Phase Sweep {combo_num}/{total_combos}] {st.INDICATOR_DISPLAY_NAME} HTF={htf_value} L={htf_len} F={htf_fac}")
+                        summary_rows = st.run_phase_based_sweep()
+                        st.record_global_phase_best(indicator_name, summary_rows)
+        st.write_overall_phase_result_tables(dashboard_start=args.dashboard_start)
+        st.RUN_PARAMETER_SWEEP = old_sweep
+        st.RUN_OVERALL_BEST = old_overall
+        st.BLOCKED_SYMBOL_PHASES = old_blocked
+        sweep_elapsed = _time.time() - sweep_start
+        print(f"\n[Phase Sweep] Complete in {sweep_elapsed:.0f}s ({sweep_elapsed/60:.1f} min)")
+        return
+
+    if args.sweep:
+        import time as _time
+        print("=" * 70)
+        print("  PARAMETER SWEEP (alte Strategie)")
+        print("  Output: best_params_overall_bck.csv, sweep_dashboard.html")
+        print("=" * 70)
+        print(f"  Start Equity: {START_TOTAL_CAPITAL}")
+        print(f"  Max Open Positions: {MAX_OPEN_POSITIONS}")
+        print("=" * 70)
+        sweep_start = _time.time()
+        old_sweep = st.RUN_PARAMETER_SWEEP
+        old_overall = st.RUN_OVERALL_BEST
+        st.RUN_PARAMETER_SWEEP = True
+        st.RUN_OVERALL_BEST = True
+        indicator_candidates = st.get_indicator_candidates()
+        htf_candidates = st.get_highertimeframe_candidates()
+        htf_length_values = st.HTF_LENGTH_VALUES
+        htf_factor_values = st.HTF_FACTOR_VALUES
+        trend_phase_combos = len(htf_length_values) * len(htf_factor_values)
+        total_combos = len(indicator_candidates) * len(htf_candidates) * trend_phase_combos
+        print(f"  Indicators: {indicator_candidates}")
+        print(f"  HTFs: {htf_candidates}")
+        print(f"  Trend-Phase-Parameter: HTF_LENGTH={htf_length_values} x HTF_FACTOR={htf_factor_values} = {trend_phase_combos} Kombis/Paar")
+        print(f"  Total Sweep-Kombinationen: {total_combos}")
+        print("=" * 70)
+        if st.CLEAR_BASE_OUTPUT_ON_SWEEP:
+            st.clear_sweep_targets(indicator_candidates, htf_candidates)
+        combo_num = 0
+        for indicator_name in indicator_candidates:
+            st.apply_indicator_type(indicator_name)
+            for htf_value in htf_candidates:
+                st.apply_higher_timeframe(htf_value)
+                for htf_len in htf_length_values:
+                    for htf_fac in htf_factor_values:
+                        combo_num += 1
+                        st.HTF_LENGTH = htf_len
+                        st.HTF_FACTOR = htf_fac
+                        st.clear_data_cache()
+                        print(f"\n[Sweep {combo_num}/{total_combos}] {st.INDICATOR_DISPLAY_NAME} HTF={htf_value} L={htf_len} F={htf_fac}")
+                        summary_rows = st.run_parameter_sweep()
+                        st.record_global_best(indicator_name, summary_rows)
+        st.write_overall_result_tables()
+        st.RUN_PARAMETER_SWEEP = old_sweep
+        st.RUN_OVERALL_BEST = old_overall
+        sweep_elapsed = _time.time() - sweep_start
+        print(f"\n[Sweep] Complete in {sweep_elapsed:.0f}s ({sweep_elapsed/60:.1f} min)")
+        # Now run portfolio simulation with best params
+        end_ts = resolve_timestamp(args.end, pd.Timestamp.now(tz=st.BERLIN_TZ))
+        default_start = end_ts - pd.Timedelta(days=365)
+        start_ts = resolve_timestamp(args.start, default_start)
+        print(f"\n[Simulation] Portfolio-Simulation: {start_ts.strftime('%Y-%m-%d')} bis {end_ts.strftime('%Y-%m-%d')}")
+        trades, final_state = run_simulation(
+            start_ts,
+            end_ts,
+            use_saved_state=False,
+            emit_entry_log=False,
+            allowed_symbols=allowed_symbols,
+            allowed_indicators=allowed_indicators,
+            fixed_stake=stake_value,
+            use_testnet=use_testnet,
+            refresh_params=False,
+            reset_state=True,
+            clear_outputs=True,
+        )
+        trades_df = trades_to_dataframe(trades)
+        open_positions = final_state.get("positions", [])
+        print(f"[Simulation] {len(trades)} Trades, Final Capital: {final_state['total_capital']:.2f} USDT")
+        log_path = args.sim_log or SIMULATION_LOG_FILE
+        log_json_path = args.sim_json or SIMULATION_LOG_JSON
+        write_closed_trades_report(trades_df, log_path, log_json_path)
+        open_path = args.open_log or SIMULATION_OPEN_POSITIONS_FILE
+        open_json_path = args.open_json or SIMULATION_OPEN_POSITIONS_JSON
+        write_open_positions_report(open_positions, open_path, open_json_path)
+        open_df = open_positions_to_dataframe(open_positions)
+        summary_data = build_summary_payload(trades_df, open_df, final_state, start_ts, end_ts)
+        summary_json_path = args.summary_json or SIMULATION_SUMMARY_JSON
+        write_summary_json(summary_data, summary_json_path, summary_start=args.summary_start)
+
+        # Regenerate dashboards
+        try:
+            from TestnetDashboard import generate_dashboard
+            output_dir = Path(REPORT_DIR)
+            ds_start = get_dashboard_start_str()
+            generate_dashboard(start_date=ds_start, output_dir=output_dir, german=False)
+            generate_dashboard(start_date=ds_start, output_dir=output_dir, german=True)
+            print(f"[Dashboard] Updated (EN + DE) in {REPORT_DIR}")
+        except Exception as e:
+            print(f"[Dashboard] Failed to update: {e}")
+
+        symbol_stats = summary_data.get("symbol_stats", [])
+        if symbol_stats:
+            print("\n" + "=" * 120)
+            print("STATISTICS BY SYMBOL")
+            print("=" * 120)
+            print(f"{'Symbol':<12} {'Trades':>7} {'Win':>5} {'Loss':>5} {'Win%':>6} {'Total PnL':>12} {'Avg PnL':>10} {'Best':>10} {'Worst':>10} {'Max DD':>10} {'PF':>6}")
+            print("-" * 120)
+            for ss in symbol_stats:
+                pf_str = f"{ss['profit_factor']}" if ss['profit_factor'] != "∞" else "inf"
+                print(f"{ss['symbol']:<12} {ss['trades']:>7} {ss['winners']:>5} {ss['losers']:>5} {ss['win_rate']:>5.1f}% {ss['total_pnl']:>12.2f} {ss['avg_pnl']:>10.2f} {ss['best_trade']:>10.2f} {ss['worst_trade']:>10.2f} {ss['max_drawdown']:>10.2f} {pf_str:>6}")
+            print("=" * 120 + "\n")
+        generate_trade_charts(trades_df, output_dir=os.path.join(REPORT_DIR, "charts"))
+        generate_equity_curve(trades_df, start_capital=START_TOTAL_CAPITAL, output_dir=os.path.join(REPORT_DIR, "charts"))
+        return
+
     if args.simulate:
+      existing_trades_df = None
+      last_end_ts = None
+      is_fresh_start = False
+      HISTORICAL_START = pd.Timestamp("2025-01-01", tz=st.BERLIN_TZ)
+
+      # Check existing JSON for append mode
+      summary_path = args.summary_json or SIMULATION_SUMMARY_JSON
+
+      if not os.path.exists(summary_path):
+          is_fresh_start = True
+          print(f"[Simulation] No {summary_path} found")
+          print(f"[Simulation] FRESH START: {HISTORICAL_START.strftime('%Y-%m-%d')} to now")
+      else:
+          try:
+              with open(summary_path, "r", encoding="utf-8") as f:
+                  existing_summary = json.load(f)
+              existing_trades = existing_summary.get("trades", [])
+              if existing_trades:
+                  existing_trades_df = pd.DataFrame(existing_trades)
+                  last_exit = max(t.get("exit_time", "") for t in existing_trades if t.get("exit_time"))
+                  if last_exit:
+                      last_end_ts = pd.to_datetime(last_exit)
+                      if last_end_ts.tzinfo is None:
+                          last_end_ts = last_end_ts.tz_localize(st.BERLIN_TZ)
+                  print(f"[Simulation] Found {len(existing_trades)} existing trades (PROTECTED)")
+                  print(f"[Simulation] APPEND MODE: from {last_end_ts} to now")
+              else:
+                  is_fresh_start = True
+                  print(f"[Simulation] File exists but no trades")
+                  print(f"[Simulation] FRESH START: {HISTORICAL_START.strftime('%Y-%m-%d')} to now")
+          except Exception as e:
+              is_fresh_start = True
+              print(f"[Simulation] Error loading: {e}")
+              print(f"[Simulation] FRESH START: {HISTORICAL_START.strftime('%Y-%m-%d')} to now")
+
+      while True:
+        if args.loop:
+            print(f"\n{'='*60}")
+            print(f"[Loop] Running at {pd.Timestamp.now(tz=st.BERLIN_TZ).strftime('%Y-%m-%d %H:%M:%S')}")
+            print(f"{'='*60}")
+
         trades: List[TradeResult] = []
         open_positions: List[Dict[str, Any]] = []
+
         if args.replay_trades_csv:
             if args.clear_outputs:
                 clear_output_artifacts(include_state=args.reset_state)
@@ -3160,23 +3610,16 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
                 print(f"[Replay] No trades loaded from {args.replay_trades_csv}")
                 return
             start_default = _infer_timestamp_from_df(
-                trades_df,
-                "entry_time",
-                _infer_timestamp_from_df(
-                    trades_df,
-                    "Zeit",
-                    pd.Timestamp.now(tz=st.BERLIN_TZ) - pd.Timedelta(days=2),
-                ),
+                trades_df, "entry_time",
+                _infer_timestamp_from_df(trades_df, "Zeit", pd.Timestamp.now(tz=st.BERLIN_TZ) - pd.Timedelta(days=2)),
             )
             end_default = _infer_timestamp_from_df(
-                trades_df,
-                "exit_time",
+                trades_df, "exit_time",
                 _infer_timestamp_from_df(trades_df, "ExitZeit", pd.Timestamp.now(tz=st.BERLIN_TZ)),
             )
             end_ts = resolve_timestamp(args.end, end_default)
             start_ts = resolve_timestamp(args.start, start_default)
             pnl_series = _to_numeric_series(trades_df.get("pnl", pd.Series(dtype=float))).fillna(0.0)
-            # For replay, anchor capital to START_TOTAL_CAPITAL and add closed PnL only (ignore embedded equity_after from source files)
             final_capital = float(START_TOTAL_CAPITAL + pnl_series.sum())
             final_state = {
                 "total_capital": final_capital,
@@ -3189,10 +3632,34 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
                 else {},
             }
         else:
-            end_ts = resolve_timestamp(args.end, pd.Timestamp.now(tz=st.BERLIN_TZ))
-            default_start = end_ts - pd.Timedelta(days=1)
-            start_ts = resolve_timestamp(args.start, default_start)
+            now_ts = pd.Timestamp.now(tz=st.BERLIN_TZ)
+            end_ts = resolve_timestamp(args.end, now_ts)
+
+            # Determine start time based on append mode
+            if last_end_ts is not None:
+                start_ts = last_end_ts
+                print(f"[Simulation] Appending from last trade: {start_ts.strftime('%Y-%m-%d %H:%M')}")
+            elif args.start:
+                start_ts = resolve_timestamp(args.start, None)
+                print(f"[Simulation] Using provided start: {start_ts.strftime('%Y-%m-%d %H:%M')}")
+            else:
+                start_ts = HISTORICAL_START
+                print(f"[Simulation] Fresh start from: {start_ts.strftime('%Y-%m-%d %H:%M')}")
+
             print(f"[Simulation] Period: {start_ts.strftime('%Y-%m-%d %H:%M')} to {end_ts.strftime('%Y-%m-%d %H:%M')}")
+
+            if start_ts >= end_ts:
+                print(f"[Simulation] No new data available (start >= end).")
+                if args.loop:
+                    print(f"\n[Loop] Next refresh in {args.signal_interval:.0f} minutes. Press Ctrl+C to stop.")
+                    try:
+                        time.sleep(args.signal_interval * 60)
+                        st.clear_data_cache()
+                        continue
+                    except KeyboardInterrupt:
+                        print("\n[Loop] Stopped by user.")
+                break
+
             trades, final_state = run_simulation(
                 start_ts,
                 end_ts,
@@ -3207,21 +3674,108 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
                 clear_outputs=args.clear_outputs,
             )
             trades_df = trades_to_dataframe(trades)
-            open_positions = final_state.get("positions", [])
-            print(f"[Simulation] Generated {len(trades)} trades during simulation")
+            new_open_positions = final_state.get("positions", [])
+
+            # MERGE open positions: keep existing ones that weren't closed in new sim
+            if existing_trades_df is not None:
+                # Load existing open positions from JSON
+                summary_path_check = args.summary_json or SIMULATION_SUMMARY_JSON
+                existing_open = []
+                if os.path.exists(summary_path_check):
+                    try:
+                        with open(summary_path_check, "r", encoding="utf-8") as f:
+                            prev_summary = json.load(f)
+                        existing_open = prev_summary.get("open_positions_data", [])
+                    except Exception:
+                        pass
+
+                if existing_open:
+                    # Find which existing open positions were closed in this sim
+                    new_closed_symbols = set()
+                    if not trades_df.empty and "symbol" in trades_df.columns:
+                        new_closed_symbols = set(trades_df["symbol"].unique())
+
+                    # Keep existing open positions that were NOT closed
+                    kept_open = []
+                    for pos in existing_open:
+                        sym = pos.get("symbol", "")
+                        entry_time = pos.get("entry_time", "")
+                        # Check if this position was closed in the new simulation
+                        was_closed = False
+                        if not trades_df.empty and "symbol" in trades_df.columns and "entry_time" in trades_df.columns:
+                            matches = trades_df[
+                                (trades_df["symbol"] == sym) &
+                                (trades_df["entry_time"].astype(str).str[:16] == str(entry_time)[:16])
+                            ]
+                            if not matches.empty:
+                                was_closed = True
+                        if not was_closed:
+                            kept_open.append(pos)
+                        else:
+                            print(f"[Simulation] Open position {sym} closed in new sim")
+
+                    # Merge: kept existing + new from this sim, deduplicate by symbol+entry_time
+                    seen_keys = set()
+                    open_positions = []
+                    for pos in kept_open + new_open_positions:
+                        key = (pos.get("symbol", ""), str(pos.get("entry_time", ""))[:16])
+                        if key not in seen_keys:
+                            open_positions.append(pos)
+                            seen_keys.add(key)
+                    print(f"[Simulation] Open positions: {len(kept_open)} existing + {len(new_open_positions)} new = {len(open_positions)} unique")
+                else:
+                    open_positions = new_open_positions
+            else:
+                open_positions = new_open_positions
+
+            # MERGE with existing trades (append mode) - NEVER overwrite closed trades
+            if existing_trades_df is not None and not existing_trades_df.empty:
+                if not trades_df.empty:
+                    print(f"[Simulation] Merging {len(trades_df)} new trades with {len(existing_trades_df)} existing")
+                    trades_df = pd.concat([existing_trades_df, trades_df], ignore_index=True)
+                    if "symbol" in trades_df.columns and "entry_time" in trades_df.columns:
+                        before_dedup = len(trades_df)
+                        trades_df = trades_df.drop_duplicates(subset=["symbol", "entry_time"], keep="last")
+                        if before_dedup != len(trades_df):
+                            print(f"[Simulation] Removed {before_dedup - len(trades_df)} duplicate trades")
+                else:
+                    trades_df = existing_trades_df
+                print(f"[Simulation] Total trades after merge: {len(trades_df)}")
+
+                # Recalculate final capital based on ALL merged trades
+                pnl_col = None
+                for col in ["pnl", "pnl_usd", "PnL"]:
+                    if col in trades_df.columns:
+                        pnl_col = col
+                        break
+                if pnl_col:
+                    total_pnl = trades_df[pnl_col].sum()
+                    final_state["total_capital"] = START_TOTAL_CAPITAL + total_pnl
+                    print(f"[Simulation] Recalculated capital: {START_TOTAL_CAPITAL:.2f} + {total_pnl:.2f} PnL = {final_state['total_capital']:.2f}")
+
+        all_trades_df = trades_df
         log_path = args.sim_log or SIMULATION_LOG_FILE
         log_json_path = args.sim_json or SIMULATION_LOG_JSON
-        write_closed_trades_report(trades_df, log_path, log_json_path)
+        write_closed_trades_report(all_trades_df, log_path, log_json_path)
         print(f"[Simulation] Final capital: {final_state['total_capital']:.2f} USDT")
         open_path = args.open_log or SIMULATION_OPEN_POSITIONS_FILE
         open_json_path = args.open_json or SIMULATION_OPEN_POSITIONS_JSON
         write_open_positions_report(open_positions, open_path, open_json_path)
         open_df = open_positions_to_dataframe(open_positions)
-        summary_data = build_summary_payload(trades_df, open_df, final_state, start_ts, end_ts)
-        summary_html_path = args.summary_html or SIMULATION_SUMMARY_HTML
-        generate_summary_html(summary_data, trades_df, open_df, summary_html_path)
+        summary_data = build_summary_payload(all_trades_df, open_df, final_state, start_ts, end_ts)
         summary_json_path = args.summary_json or SIMULATION_SUMMARY_JSON
-        write_summary_json(summary_data, summary_json_path)
+        write_summary_json(summary_data, summary_json_path, summary_start=args.summary_start)
+
+        # Regenerate dashboards
+        try:
+            from TestnetDashboard import generate_dashboard
+            output_dir = Path(REPORT_DIR)
+            ds_start = args.dashboard_start
+            generate_dashboard(start_date=ds_start, output_dir=output_dir, german=False)
+            generate_dashboard(start_date=ds_start, output_dir=output_dir, german=True)
+            print(f"[Dashboard] Updated (EN + DE) in {REPORT_DIR}")
+        except Exception as e:
+            print(f"[Dashboard] Failed to update: {e}")
 
         # Print per-symbol statistics to console
         symbol_stats = summary_data.get("symbol_stats", [])
@@ -3236,22 +3790,32 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
                 print(f"{ss['symbol']:<12} {ss['trades']:>7} {ss['winners']:>5} {ss['losers']:>5} {ss['win_rate']:>5.1f}% {ss['total_pnl']:>12.2f} {ss['avg_pnl']:>10.2f} {ss['best_trade']:>10.2f} {ss['worst_trade']:>10.2f} {ss['max_drawdown']:>10.2f} {pf_str:>6}")
             print("=" * 120 + "\n")
 
-        generate_trade_charts(trades_df, output_dir=os.path.join(REPORT_DIR, "charts"))
-        generate_equity_curve(trades_df, start_capital=START_TOTAL_CAPITAL, output_dir=os.path.join(REPORT_DIR, "charts"))
+        generate_trade_charts(all_trades_df, output_dir=os.path.join(REPORT_DIR, "charts"))
+        generate_equity_curve(all_trades_df, start_capital=START_TOTAL_CAPITAL, output_dir=os.path.join(REPORT_DIR, "charts"))
         if open_positions:
             print(f"[Simulation] Open positions remaining: {len(open_positions)}")
         else:
             print("[Simulation] No open positions remaining.")
-        if not trades_df.empty:
-            if args.replay_trades_csv:
-                last_row = trades_df.tail(1).iloc[0]
-                sym_val = last_row.get("symbol") or last_row.get("Symbol") or "?"
-                dir_val = last_row.get("direction") or last_row.get("Direction") or "?"
-                exit_val = last_row.get("exit_time") or last_row.get("ExitZeit") or "?"
-                print(f"[Replay] Last trade: {sym_val} {dir_val} exited {exit_val}")
-            else:
-                last_trade = trades[-1]
-                print(f"[Simulation] Last trade: {last_trade.symbol} {last_trade.direction} exited {last_trade.exit_time}")
+        if not all_trades_df.empty:
+            last_row = all_trades_df.tail(1).iloc[0]
+            sym_val = last_row.get("symbol") or last_row.get("Symbol") or "?"
+            dir_val = last_row.get("direction") or last_row.get("Direction") or "?"
+            exit_val = last_row.get("exit_time") or last_row.get("ExitZeit") or "?"
+            print(f"[Simulation] Last trade: {sym_val} {dir_val} exited {exit_val}")
+
+        # Loop mode: sleep and repeat
+        if args.loop:
+            last_end_ts = end_ts
+            existing_trades_df = all_trades_df.copy() if not all_trades_df.empty else None
+            is_fresh_start = False
+            print(f"\n[Loop] Next refresh in {args.signal_interval:.0f} minutes. Press Ctrl+C to stop.")
+            try:
+                time.sleep(args.signal_interval * 60)
+                st.clear_data_cache()
+                continue
+            except KeyboardInterrupt:
+                print("\n[Loop] Stopped by user.")
+        break
     else:
         main(
             allowed_symbols=allowed_symbols,
